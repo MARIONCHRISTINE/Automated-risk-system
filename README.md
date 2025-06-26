@@ -1,3 +1,12 @@
+Risk
+Register 
+Automation 
+System
+
+
+
+
+
 Introduction
 At Airtel Kenya, managing risk is important in keeping operations smooth and secure. At the moment the risk management process is done manually using excel spreadsheet where the risk is entered as assessed and tracked by hand, which works to a point but has its down sides. This existing method is time consuming prone o human error and hard to scale. It lacks features like real time recording of risk incidents and tracking of the risk events, the automated risk scoring and proper access control. As more risks are recorded, it gets harder to manage everything efficiently.
 Objectives 
@@ -67,7 +76,38 @@ MySQL Stores:
 E.	Deployment
 Standard hosting, local server preferred for now
 Future proof design to allow later integration via subdomain or portal
+
+
+
+
+
+
+
+
+
+	
+
+	
+
+
+
 			
+
+	
+
+	
+
+
+	
+
+
+
+
+	
+
+
+
+	
 Required Integrated Development Environment(IDE’s Required)
 1.	Visual studio code(Vs code)
 For developing HTML, CSS and Javascript components
@@ -79,4 +119,5 @@ To run a local server for PHP and MySQL
 For managing the My SQL database
 4.	Git and GitHub Desktop 
 For source code versioning and collaboration
+
 
