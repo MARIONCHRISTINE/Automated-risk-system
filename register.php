@@ -116,17 +116,12 @@ if ($_POST) {
         }
         
         .airtel-logo {
-            width: 60px;
-            height: 60px;
-            background: #E60012;
-            border-radius: 50%;
+            width: 80px;
+            height: 80px;
             margin: 0 auto 1rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 1.5rem;
-            font-weight: bold;
+            display: block;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(230, 0, 18, 0.2);
         }
         
         .logo h1 {
@@ -262,20 +257,21 @@ if ($_POST) {
         }
         
         .php-version-info {
-            background: #e3f2fd;
-            color: #1565c0;
+            background: #fff5f5;
+            color: #E60012;
             padding: 0.5rem;
             border-radius: 4px;
             font-size: 0.8rem;
             margin-bottom: 1rem;
             text-align: center;
+            border: 1px solid #ffcdd2;
         }
     </style>
 </head>
 <body>
     <div class="register-container">
         <div class="logo">
-            <div class="airtel-logo">A</div>
+            <img src="image.png" alt="Airtel Logo" class="airtel-logo">
             <h1>Join Airtel Risk Management</h1>
             <p>Create your account to get started</p>
         </div>

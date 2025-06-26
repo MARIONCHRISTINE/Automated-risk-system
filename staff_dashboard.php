@@ -72,15 +72,10 @@ $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
         
         .airtel-logo {
-            width: 40px;
-            height: 40px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 1.2rem;
+            width: 50px;
+            height: 50px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(255, 255, 255, 0.2);
         }
         
         .header h1 {
@@ -264,8 +259,8 @@ $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
         
         .status-open { background: #fff3cd; color: #856404; }
-        .status-inprogress { background: #cce5ff; color: #004085; }
-        .status-mitigated { background: #d1ecf1; color: #0c5460; }
+        .status-inprogress { background: #ffebee; color: #E60012; }
+        .status-mitigated { background: #fff5f5; color: #E60012; }
         .status-closed { background: #d4edda; color: #155724; }
         
         .chatbot {
@@ -308,7 +303,7 @@ $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 <body>
     <div class="header">
         <div class="header-left">
-            <div class="airtel-logo">A</div>
+            <img src="image.png" alt="Airtel Logo" class="airtel-logo">
             <h1>Staff Dashboard</h1>
         </div>
         <div class="user-info">
@@ -406,7 +401,7 @@ $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <td>
                                     <span style="color: <?php 
                                         echo $risk['risk_level'] === 'Critical' ? '#dc3545' : 
-                                            ($risk['risk_level'] === 'High' ? '#fd7e14' : 
+                                            ($risk['risk_level'] === 'High' ? '#E60012' : 
                                             ($risk['risk_level'] === 'Medium' ? '#ffc107' : '#28a745')); 
                                     ?>; font-weight: 600;">
                                         <?php echo $risk['risk_level']; ?>
