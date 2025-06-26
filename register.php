@@ -2,6 +2,20 @@
 session_start();
 include_once 'config/database.php';
 
+// Include compatibility functions if file exists
+if (file_exists('includes/php_compatibility.php')) {
+    include_once 'includes/php_compatibility.php';
+} else {
+    // Define essential functions inline if include fails
+    function endsWith($haystack, $needle) {
+        $length = strlen($needle);
+        if ($length == 0) {
+            return true;
+        }
+        return (substr($haystack, -$length) === $needle);
+    }
+}
+
 $message = '';
 $error = '';
 
@@ -13,8 +27,8 @@ if ($_POST) {
     $role = $_POST['role'];
     $department = $_POST['department'];
     
-    // Validate email domain
-    if (!str_ends_with($email, '@airtel.africa')) {
+    // Validate email domain - using compatible function
+    if (!endsWith($email, '@airtel.africa')) {
         $error = "Please use your Airtel email address ending with @airtel.africa";
     } elseif ($password !== $confirm_password) {
         $error = "Passwords do not match.";
@@ -246,6 +260,16 @@ if ($_POST) {
         .login-link a:hover {
             text-decoration: underline;
         }
+        
+        .php-version-info {
+            background: #e3f2fd;
+            color: #1565c0;
+            padding: 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -254,6 +278,10 @@ if ($_POST) {
             <div class="airtel-logo">A</div>
             <h1>Join Airtel Risk Management</h1>
             <p>Create your account to get started</p>
+        </div>
+        
+        <div class="php-version-info">
+            Running PHP <?php echo phpversion(); ?> - System Ready ✓
         </div>
         
         <?php if ($error): ?>
@@ -277,7 +305,20 @@ if ($_POST) {
             
             <div class="form-group">
                 <label for="department">Department</label>
-                <input type="text" id="department" name="department" required placeholder="e.g., Airtel Money, IT, Finance" value="<?php echo isset($_POST['department']) ? htmlspecialchars($_POST['department']) : ''; ?>">
+                <select id="department" name="department" required>
+                    <option value="">Select Department</option>
+                    <option value="Airtel Money" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Airtel Money') ? 'selected' : ''; ?>>Airtel Money</option>
+                    <option value="IT & Technology" <?php echo (isset($_POST['department']) && $_POST['department'] === 'IT & Technology') ? 'selected' : ''; ?>>IT & Technology</option>
+                    <option value="Finance" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Finance') ? 'selected' : ''; ?>>Finance</option>
+                    <option value="Operations" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Operations') ? 'selected' : ''; ?>>Operations</option>
+                    <option value="Risk & Compliance" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Risk & Compliance') ? 'selected' : ''; ?>>Risk & Compliance</option>
+                    <option value="Human Resources" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Human Resources') ? 'selected' : ''; ?>>Human Resources</option>
+                    <option value="Marketing" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Marketing') ? 'selected' : ''; ?>>Marketing</option>
+                    <option value="Customer Service" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Customer Service') ? 'selected' : ''; ?>>Customer Service</option>
+                    <option value="Network" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Network') ? 'selected' : ''; ?>>Network</option>
+                    <option value="Legal" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Legal') ? 'selected' : ''; ?>>Legal</option>
+                    <option value="Other" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Other') ? 'selected' : ''; ?>>Other</option>
+                </select>
             </div>
             
             <div class="form-group">

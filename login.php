@@ -2,6 +2,29 @@
 session_start();
 include_once 'config/database.php';
 
+// Include compatibility functions if file exists
+if (file_exists('includes/php_compatibility.php')) {
+    include_once 'includes/php_compatibility.php';
+} else {
+    // Define essential functions inline if include fails
+    function checkPHPVersion() {
+        $minVersion = '7.0';
+        $currentVersion = phpversion();
+        
+        if (version_compare($currentVersion, $minVersion, '<')) {
+            return [
+                'compatible' => false,
+                'message' => "Warning: PHP {$currentVersion} detected. Minimum required: {$minVersion}"
+            ];
+        }
+        
+        return [
+            'compatible' => true,
+            'message' => "PHP {$currentVersion} - Compatible ✓"
+        ];
+    }
+}
+
 $error = '';
 
 if ($_POST) {
@@ -50,6 +73,8 @@ if ($_POST) {
         $error = "Invalid email or password.";
     }
 }
+
+$phpCheck = checkPHPVersion();
 ?>
 
 <!DOCTYPE html>
@@ -168,6 +193,26 @@ if ($_POST) {
             border: 1px solid #ffcdd2;
         }
         
+        .php-info {
+            background: #e3f2fd;
+            color: #1565c0;
+            padding: 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+        
+        .php-warning {
+            background: #fff3e0;
+            color: #ef6c00;
+            padding: 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+        
         .register-link {
             text-align: center;
             margin-top: 1.5rem;
@@ -191,6 +236,12 @@ if ($_POST) {
             <h1>Airtel Risk Management</h1>
             <p>Secure Access Portal</p>
         </div>
+        
+        <?php if ($phpCheck['compatible']): ?>
+            <div class="php-info"><?php echo $phpCheck['message']; ?></div>
+        <?php else: ?>
+            <div class="php-warning"><?php echo $phpCheck['message']; ?></div>
+        <?php endif; ?>
         
         <?php if ($error): ?>
             <div class="error"><?php echo $error; ?></div>
