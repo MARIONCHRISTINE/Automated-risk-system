@@ -6,75 +6,65 @@ include_once 'config/database.php';
 if (file_exists('includes/php_compatibility.php')) {
     include_once 'includes/php_compatibility.php';
 } else {
-    // Define essential functions inline if include fails
-    function checkPHPVersion() {
-        $minVersion = '7.0';
-        $currentVersion = phpversion();
-        
-        if (version_compare($currentVersion, $minVersion, '<')) {
-            return [
-                'compatible' => false,
-                'message' => "Warning: PHP {$currentVersion} detected. Minimum required: {$minVersion}"
-            ];
+    function endsWith($haystack, $needle) {
+        $length = strlen($needle);
+        if ($length == 0) {
+            return true;
         }
-        
-        return [
-            'compatible' => true,
-            'message' => "PHP {$currentVersion} - Compatible ✓"
-        ];
+        return (substr($haystack, -$length) === $needle);
     }
 }
 
+$message = '';
 $error = '';
 
 if ($_POST) {
     $email = $_POST['email'];
-    $password = $_POST['password'];
     
-    $database = new Database();
-    $db = $database->getConnection();
-    
-    $query = "SELECT id, email, password, full_name, role, status FROM users WHERE email = :email";
-    $stmt = $db->prepare($query);
-    $stmt->bindParam(':email', $email);
-    $stmt->execute();
-    
-    if ($stmt->rowCount() > 0) {
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($user['status'] !== 'approved') {
-            $error = "Your account is pending approval. Please contact the administrator.";
-        } elseif (password_verify($password, $user['password'])) {
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['email'] = $user['email'];
-            $_SESSION['full_name'] = $user['full_name'];
-            $_SESSION['role'] = $user['role'];
-            
-            // Redirect based on role
-            switch ($user['role']) {
-                case 'staff':
-                    header("Location: staff_dashboard.php");
-                    break;
-                case 'risk_owner':
-                    header("Location: risk_owner_dashboard.php");
-                    break;
-                case 'compliance':
-                    header("Location: compliance_dashboard.php");
-                    break;
-                case 'admin':
-                    header("Location: admin_dashboard.php");
-                    break;
-            }
-            exit();
-        } else {
-            $error = "Invalid email or password.";
-        }
+    // Validate email domain
+    if (!endsWith($email, '@airtel.africa')) {
+        $error = "Please use your Airtel email address ending with @airtel.africa";
     } else {
-        $error = "Invalid email or password.";
+        $database = new Database();
+        $db = $database->getConnection();
+        
+        // Check if email exists
+        $query = "SELECT id, full_name FROM users WHERE email = :email AND status = 'approved'";
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':email', $email);
+        $stmt->execute();
+        
+        if ($stmt->rowCount() > 0) {
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            // Generate reset token
+            $reset_token = bin2hex(random_bytes(32));
+            $expires_at = date('Y-m-d H:i:s', strtotime('+1 hour'));
+            
+            // Store reset token in database
+            $token_query = "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (:user_id, :token, :expires_at)
+                           ON DUPLICATE KEY UPDATE token = :token, expires_at = :expires_at, created_at = NOW()";
+            $token_stmt = $db->prepare($token_query);
+            $token_stmt->bindParam(':user_id', $user['id']);
+            $token_stmt->bindParam(':token', $reset_token);
+            $token_stmt->bindParam(':expires_at', $expires_at);
+            
+            if ($token_stmt->execute()) {
+                // In a real application, you would send an email here
+                // For now, we'll just show the reset link
+                $reset_link = "http://" . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']) . "/reset_password_confirm.php?token=" . $reset_token;
+                $message = "Password reset link generated! In a production environment, this would be sent to your email.<br><br>
+                           <strong>Reset Link:</strong><br>
+                           <a href='" . $reset_link . "' style='color: #E60012; word-break: break-all;'>" . $reset_link . "</a>";
+            } else {
+                $error = "Failed to generate reset token. Please try again.";
+            }
+        } else {
+            // Don't reveal if email exists or not for security
+            $message = "If your email address exists in our system, you will receive a password reset link.";
+        }
     }
 }
-
-$phpCheck = checkPHPVersion();
 ?>
 
 <!DOCTYPE html>
@@ -82,7 +72,7 @@ $phpCheck = checkPHPVersion();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Airtel Risk Management - Login</title>
+    <title>Reset Password - Airtel Risk Management</title>
     <style>
         * {
             margin: 0;
@@ -99,7 +89,7 @@ $phpCheck = checkPHPVersion();
             justify-content: center;
         }
         
-        .login-container {
+        .reset-container {
             background: white;
             padding: 2rem;
             border-radius: 15px;
@@ -147,7 +137,7 @@ $phpCheck = checkPHPVersion();
             font-weight: 500;
         }
         
-        input[type="email"], input[type="password"] {
+        input[type="email"] {
             width: 100%;
             padding: 0.75rem;
             border: 2px solid #e1e5e9;
@@ -156,7 +146,7 @@ $phpCheck = checkPHPVersion();
             transition: border-color 0.3s;
         }
         
-        input[type="email"]:focus, input[type="password"]:focus {
+        input[type="email"]:focus {
             outline: none;
             border-color: #E60012;
             box-shadow: 0 0 0 3px rgba(230, 0, 18, 0.1);
@@ -189,73 +179,58 @@ $phpCheck = checkPHPVersion();
             border: 1px solid #ffcdd2;
         }
         
+        .success {
+            background: #e8f5e8;
+            color: #2e7d32;
+            padding: 0.75rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            border: 1px solid #c8e6c9;
+        }
         
-        
-        .register-link {
+        .back-link {
             text-align: center;
             margin-top: 1.5rem;
         }
         
-        .register-link a {
+        .back-link a {
             color: #E60012;
             text-decoration: none;
             font-weight: 500;
         }
         
-        .register-link a:hover {
-            text-decoration: underline;
-        }
-
-        .forgot-password-link {
-            text-align: center;
-            margin: 1rem 0;
-        }
-
-        .forgot-password-link a {
-            color: #E60012;
-            text-decoration: none;
-            font-size: 0.9rem;
-            font-weight: 500;
-        }
-
-        .forgot-password-link a:hover {
+        .back-link a:hover {
             text-decoration: underline;
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
+    <div class="reset-container">
         <div class="logo">
             <img src="image.png" alt="Airtel Logo" class="airtel-logo">
-            <h1>Airtel Risk Management</h1>
+            <h1>Reset Password</h1>
+            <p>Enter your email to reset your password</p>
         </div>
-        
-        
         
         <?php if ($error): ?>
             <div class="error"><?php echo $error; ?></div>
         <?php endif; ?>
         
+        <?php if ($message): ?>
+            <div class="success"><?php echo $message; ?></div>
+        <?php endif; ?>
+        
         <form method="POST">
             <div class="form-group">
-                <label for="email">Email Address</label>
+                <label for="email">Airtel Email Address</label>
                 <input type="email" id="email" name="email" required placeholder="your.name@airtel.africa">
             </div>
             
-            <div class="form-group">
-                <label for="password">Password</label>
-                <input type="password" id="password" name="password" required>
-            </div>
-            
-            <button type="submit" class="btn">Sign In</button>
+            <button type="submit" class="btn">Send Reset Link</button>
         </form>
-
-        <div class="forgot-password-link">
-            <a href="reset_password.php">Forgot your password?</a>
-        </div>
-
-        <div class="register-link">
-            <p>Don't have an account? <a href="register.php">Register here</a></p>
+        
+        <div class="back-link">
+            <p><a href="login.php">← Back to Login</a></p>
         </div>
     </div>
 </body>

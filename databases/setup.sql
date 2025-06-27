@@ -90,3 +90,15 @@ INSERT INTO risk_categories (category_name, description) VALUES
 ('Compliance Risk', 'Risks related to regulatory compliance'),
 ('Technology Risk', 'Risks related to IT systems and technology'),
 ('Strategic Risk', 'Risks related to business strategy and planning');
+
+-- Add password reset tokens table
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    token VARCHAR(64) NOT NULL UNIQUE,
+    expires_at DATETIME NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_token (token),
+    INDEX idx_expires (expires_at)
+);

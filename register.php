@@ -122,6 +122,7 @@ if ($_POST) {
             display: block;
             border-radius: 10px;
             box-shadow: 0 4px 15px rgba(230, 0, 18, 0.2);
+            object-fit: cover; /* This ensures the image maintains aspect ratio and fills the square */
         }
         
         .logo h1 {
@@ -188,21 +189,11 @@ if ($_POST) {
             display: none;
         }
         
-        .role-icon {
-            font-size: 2rem;
-            margin-bottom: 0.5rem;
-            display: block;
-        }
-        
         .role-title {
             font-weight: 600;
             color: #333;
-            margin-bottom: 0.25rem;
-        }
-        
-        .role-desc {
-            font-size: 0.8rem;
-            color: #666;
+            text-align: center;
+            padding: 1rem;
         }
         
         .btn {
@@ -256,29 +247,17 @@ if ($_POST) {
             text-decoration: underline;
         }
         
-        .php-version-info {
-            background: #fff5f5;
-            color: #E60012;
-            padding: 0.5rem;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            margin-bottom: 1rem;
-            text-align: center;
-            border: 1px solid #ffcdd2;
-        }
     </style>
 </head>
 <body>
     <div class="register-container">
         <div class="logo">
             <img src="image.png" alt="Airtel Logo" class="airtel-logo">
-            <h1>Join Airtel Risk Management</h1>
+            <h1>Airtel Risk Management</h1>
             <p>Create your account to get started</p>
         </div>
         
-        <div class="php-version-info">
-            Running PHP <?php echo phpversion(); ?> - System Ready ✓
-        </div>
+        
         
         <?php if ($error): ?>
             <div class="error"><?php echo $error; ?></div>
@@ -322,30 +301,22 @@ if ($_POST) {
                 <div class="role-selection">
                     <label class="role-card" for="role_staff">
                         <input type="radio" id="role_staff" name="role" value="staff" <?php echo (isset($_POST['role']) && $_POST['role'] === 'staff') ? 'checked' : ''; ?>>
-                        <span class="role-icon">👤</span>
                         <div class="role-title">Staff</div>
-                        <div class="role-desc">Report risks and view status</div>
                     </label>
-                    
+
                     <label class="role-card" for="role_risk_owner">
                         <input type="radio" id="role_risk_owner" name="role" value="risk_owner" <?php echo (isset($_POST['role']) && $_POST['role'] === 'risk_owner') ? 'checked' : ''; ?>>
-                        <span class="role-icon">🎯</span>
                         <div class="role-title">Risk Owner</div>
-                        <div class="role-desc">Manage department risks</div>
                     </label>
-                    
+
                     <label class="role-card" for="role_compliance">
                         <input type="radio" id="role_compliance" name="role" value="compliance" <?php echo (isset($_POST['role']) && $_POST['role'] === 'compliance') ? 'checked' : ''; ?>>
-                        <span class="role-icon">📊</span>
                         <div class="role-title">Compliance</div>
-                        <div class="role-desc">Generate reports & analytics</div>
                     </label>
-                    
+
                     <label class="role-card" for="role_admin">
                         <input type="radio" id="role_admin" name="role" value="admin" <?php echo (isset($_POST['role']) && $_POST['role'] === 'admin') ? 'checked' : ''; ?>>
-                        <span class="role-icon">⚙️</span>
                         <div class="role-title">Administrator</div>
-                        <div class="role-desc">System management</div>
                     </label>
                 </div>
             </div>

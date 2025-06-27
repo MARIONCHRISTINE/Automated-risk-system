@@ -13,18 +13,40 @@ if ($_POST && isset($_POST['submit_risk'])) {
     $cause_of_risk = $_POST['cause_of_risk'];
     $department = $_POST['department'];
     
-    $query = "INSERT INTO risk_incidents (risk_name, risk_description, cause_of_risk, department, reported_by) VALUES (:risk_name, :risk_description, :cause_of_risk, :department, :reported_by)";
-    $stmt = $db->prepare($query);
-    $stmt->bindParam(':risk_name', $risk_name);
-    $stmt->bindParam(':risk_description', $risk_description);
-    $stmt->bindParam(':cause_of_risk', $cause_of_risk);
-    $stmt->bindParam(':department', $department);
-    $stmt->bindParam(':reported_by', $_SESSION['user_id']);
+    // Debug: Check if user session is valid
+    if (!isset($_SESSION['user_id']) || empty($_SESSION['user_id'])) {
+        $error_message = "Session expired. Please log in again.";
+        header("Location: login.php");
+        exit();
+    }
     
-    if ($stmt->execute()) {
-        $success_message = "Risk reported successfully!";
+    // Verify the user exists in the database
+    $user_check_query = "SELECT id FROM users WHERE id = :user_id";
+    $user_check_stmt = $db->prepare($user_check_query);
+    $user_check_stmt->bindParam(':user_id', $_SESSION['user_id']);
+    $user_check_stmt->execute();
+    
+    if ($user_check_stmt->rowCount() == 0) {
+        $error_message = "User account not found. Please contact administrator.";
     } else {
-        $error_message = "Failed to report risk. Please try again.";
+        try {
+            $query = "INSERT INTO risk_incidents (risk_name, risk_description, cause_of_risk, department, reported_by) VALUES (:risk_name, :risk_description, :cause_of_risk, :department, :reported_by)";
+            $stmt = $db->prepare($query);
+            $stmt->bindParam(':risk_name', $risk_name);
+            $stmt->bindParam(':risk_description', $risk_description);
+            $stmt->bindParam(':cause_of_risk', $cause_of_risk);
+            $stmt->bindParam(':department', $department);
+            $stmt->bindParam(':reported_by', $_SESSION['user_id']);
+            
+            if ($stmt->execute()) {
+                $success_message = "Risk reported successfully!";
+            } else {
+                $error_message = "Failed to report risk. Please try again.";
+            }
+        } catch (PDOException $e) {
+            $error_message = "Database error: " . $e->getMessage();
+            error_log("Risk submission error: " . $e->getMessage());
+        }
     }
 }
 
@@ -34,6 +56,9 @@ $stmt = $db->prepare($query);
 $stmt->bindParam(':user_id', $_SESSION['user_id']);
 $stmt->execute();
 $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get current user info
+$user = getCurrentUser();
 ?>
 
 <!DOCTYPE html>
@@ -50,19 +75,37 @@ $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
         
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f8f9fa;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
             line-height: 1.6;
+            min-height: 100vh;
+            padding-top: 100px; /* Add padding for fixed header */
         }
         
+        .dashboard {
+            min-height: 100vh;
+        }
+        
+        /* Header */
         .header {
-            background: linear-gradient(135deg, #E60012 0%, #B8000E 100%);
+            background: #E60012;
+            padding: 1.5rem 2rem;
             color: white;
-            padding: 1rem 2rem;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(230, 0, 18, 0.2);
+        }
+        
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            box-shadow: 0 2px 10px rgba(230, 0, 18, 0.2);
         }
         
         .header-left {
@@ -71,89 +114,444 @@ $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
             gap: 1rem;
         }
         
-        .airtel-logo {
-            width: 50px;
-            height: 50px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(255, 255, 255, 0.2);
+        .logo-circle {
+            width: 55px;
+            height: 55px;
+            background: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            padding: 5px;
         }
         
-        .header h1 {
+        .logo-circle img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border-radius: 50%;
+        }
+        
+        .header-titles {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .main-title {
             font-size: 1.5rem;
-            font-weight: 600;
+            font-weight: 700;
+            color: white;
+            margin: 0;
+            line-height: 1.2;
         }
         
-        .user-info {
+        .sub-title {
+            font-size: 1rem;
+            font-weight: 400;
+            color: rgba(255, 255, 255, 0.9);
+            margin: 0;
+            line-height: 1.2;
+        }
+        
+        .header-right {
             display: flex;
             align-items: center;
             gap: 1rem;
         }
         
-        .logout-btn {
-            background: rgba(255,255,255,0.2);
-            color: white;
-            border: none;
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            cursor: pointer;
-            text-decoration: none;
+        .user-avatar {
+            width: 45px;
+            height: 45px;
+            background: white;
+            color: #E60012;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.2rem;
+        }
+        
+        .user-details {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        
+        .user-email {
+            font-size: 1rem;
             font-weight: 500;
-            transition: background 0.3s;
+            color: white;
+            margin: 0;
+            line-height: 1.2;
+        }
+        
+        .user-role {
+            font-size: 0.9rem;
+            font-weight: 400;
+            color: rgba(255, 255, 255, 0.9);
+            margin: 0;
+            line-height: 1.2;
+        }
+        
+        .logout-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 0.7rem 1.3rem;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: all 0.3s;
+            margin-left: 1rem;
         }
         
         .logout-btn:hover {
-            background: rgba(255,255,255,0.3);
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.5);
         }
         
-        .container {
+        /* Main Content */
+        .main-content {
             max-width: 1200px;
-            margin: 2rem auto;
-            padding: 0 2rem;
+            margin: 0 auto;
+            padding: 2rem;
         }
         
-        .dashboard-grid {
+        /* Main Cards Layout */
+        .main-cards-layout {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 2rem;
             margin-bottom: 2rem;
         }
         
-        .card {
+        /* Hero Section */
+        .hero {
+            text-align: center;
+            padding: 5rem 3rem;
             background: white;
-            padding: 2rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-            border-top: 4px solid #E60012;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 300px;
         }
         
-        .card h2 {
-            color: #333;
+        .cta-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: #E60012;
+            color: white;
+            padding: 1.5rem 2.5rem;
+            border-radius: 5px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1.1rem;
+            transition: background 0.3s;
+            border: none;
+            cursor: pointer;
+        }
+        
+        .cta-button:hover {
+            background: #B8000E;
+        }
+        
+        /* Stats Card */
+        .stat-card {
+            background: white;
+            border-radius: 15px;
+            padding: 3rem 2rem;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 300px;
+            position: relative;
+            border-left: 6px solid #E60012;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .stat-number {
+            font-size: 4.5rem;
+            font-weight: 800;
+            color: #E60012;
+            margin-bottom: 1rem;
+        }
+
+        .stat-label {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #666;
             margin-bottom: 1.5rem;
+        }
+
+        .stat-hint {
+            color: #E60012;
+            font-size: 1rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+        
+        /* Reports Section */
+        .reports-section {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            display: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .reports-section.show {
+            display: block;
+        }
+        
+        .reports-header {
+            background: #E60012;
+            padding: 1.5rem;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .reports-title {
             font-size: 1.3rem;
+            font-weight: 600;
             display: flex;
             align-items: center;
             gap: 0.5rem;
         }
         
-        .card-icon {
-            color: #E60012;
-            font-size: 1.5rem;
+        .hide-reports-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 0.5rem 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .hide-reports-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .reports-content {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .risk-item {
+            padding: 1.5rem;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .risk-item:hover {
+            background: #f8f9fa;
+        }
+        
+        .risk-item:last-child {
+            border-bottom: none;
+        }
+        
+        .risk-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .risk-name {
+            font-weight: 600;
+            color: #333;
+            flex: 1;
+        }
+        
+        .view-btn {
+            padding: 0.3rem 0.8rem;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            background: #E60012;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .view-btn:hover {
+            background: #B8000E;
+        }
+        
+        .risk-meta {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .empty-state {
+            padding: 3rem 2rem;
+            text-align: center;
+        }
+        
+        .empty-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+        
+        .empty-state h3 {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #333;
+        }
+        
+        .empty-state p {
+            color: #666;
+            margin-bottom: 1.5rem;
+        }
+        
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 1.2rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            border-left: 4px solid #28a745;
+            font-weight: 500;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 1.2rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            border-left: 4px solid #dc3545;
+            font-weight: 500;
+        }
+        
+        .chatbot {
+            position: fixed;
+            bottom: 25px;
+            right: 25px;
+            width: 65px;
+            height: 65px;
+            background: linear-gradient(135deg, #E60012 0%, #B8000E 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 8px 25px rgba(230, 0, 18, 0.3);
+            color: white;
+            font-size: 1.6rem;
+            transition: transform 0.3s;
+            z-index: 1000;
+        }
+        
+        .chatbot:hover {
+            transform: scale(1.1);
+        }
+        
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .modal-header {
+            background: #E60012;
+            color: white;
+            padding: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .modal-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin: 0;
+        }
+        
+        .close {
+            color: white;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            background: none;
+            border: none;
+        }
+        
+        .close:hover {
+            opacity: 0.7;
+        }
+        
+        .modal-body {
+            padding: 2rem;
         }
         
         .form-group {
-            margin-bottom: 1.5rem;
+            margin-bottom: 1.8rem;
         }
         
         label {
             display: block;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.6rem;
             color: #333;
             font-weight: 500;
+            font-size: 1rem;
         }
         
         input, textarea, select {
             width: 100%;
-            padding: 0.75rem;
+            padding: 0.9rem;
             border: 2px solid #e1e5e9;
             border-radius: 8px;
             font-size: 1rem;
@@ -167,163 +565,220 @@ $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
         
         textarea {
-            height: 100px;
+            height: 120px;
             resize: vertical;
         }
         
         .btn {
-            background: linear-gradient(135deg, #E60012 0%, #B8000E 100%);
+            background: #E60012;
             color: white;
             border: none;
-            padding: 0.75rem 1.5rem;
+            padding: 0.9rem 2rem;
             border-radius: 8px;
             cursor: pointer;
             font-size: 1rem;
             font-weight: 600;
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: background 0.3s;
         }
         
         .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(230, 0, 18, 0.3);
+            background: #B8000E;
         }
         
-        .success {
-            background: #e8f5e8;
-            color: #2e7d32;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1rem;
-            border-left: 4px solid #4caf50;
-        }
-        
-        .error {
-            background: #ffebee;
-            color: #c62828;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1rem;
-            border-left: 4px solid #f44336;
-        }
-        
-        .stats-container {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
-            margin-top: 1rem;
-        }
-        
-        .stat-box {
-            text-align: center;
-            padding: 1.5rem;
-            background: #f8f9fa;
-            border-radius: 8px;
-            border: 2px solid #e9ecef;
-        }
-        
-        .stat-number {
-            font-size: 2.5rem;
-            font-weight: bold;
-            color: #E60012;
-            margin-bottom: 0.5rem;
-        }
-        
-        .stat-label {
-            color: #666;
-            font-size: 0.9rem;
-        }
-        
-        .risk-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 1rem;
-        }
-        
-        .risk-table th, .risk-table td {
-            padding: 0.75rem;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
-        }
-        
-        .risk-table th {
-            background: #f8f9fa;
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .status-badge {
-            padding: 0.25rem 0.75rem;
-            border-radius: 15px;
-            font-size: 0.8rem;
-            font-weight: 500;
-        }
-        
-        .status-open { background: #fff3cd; color: #856404; }
-        .status-inprogress { background: #ffebee; color: #E60012; }
-        .status-mitigated { background: #fff5f5; color: #E60012; }
-        .status-closed { background: #d4edda; color: #155724; }
-        
-        .chatbot {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 60px;
-            height: 60px;
-            background: linear-gradient(135deg, #E60012 0%, #B8000E 100%);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            box-shadow: 0 6px 20px rgba(230, 0, 18, 0.3);
-            color: white;
-            font-size: 1.5rem;
-            transition: transform 0.3s;
-        }
-        
-        .chatbot:hover {
-            transform: scale(1.1);
-        }
-        
+        /* Responsive */
         @media (max-width: 768px) {
-            .dashboard-grid {
-                grid-template-columns: 1fr;
+            body {
+                padding-top: 120px; /* Increased padding for mobile header */
             }
             
-            .container {
-                padding: 0 1rem;
+            .header {
+                padding: 1.2rem 1.5rem;
             }
             
-            .stats-container {
+            .header-content {
+                flex-direction: column;
+                gap: 1rem;
+                align-items: flex-start;
+            }
+            
+            .header-right {
+                align-self: flex-end;
+            }
+            
+            .main-title {
+                font-size: 1.3rem;
+            }
+            
+            .sub-title {
+                font-size: 0.9rem;
+            }
+            
+            .main-cards-layout {
                 grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+            
+            .hero {
+                padding: 3rem 2rem;
+                min-height: 250px;
+            }
+            
+            .stat-card {
+                padding: 2.5rem 1.5rem;
+                min-height: 250px;
+            }
+            
+            .stat-number {
+                font-size: 3.5rem;
+            }
+            
+            .stat-label {
+                font-size: 1.2rem;
+            }
+            
+            .stat-hint {
+                font-size: 0.9rem;
+            }
+            
+            .reports-header {
+                flex-direction: column;
+                gap: 1rem;
+                align-items: flex-start;
+            }
+            
+            .main-content {
+                padding: 1rem;
+            }
+            
+            .risk-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5rem;
+            }
+            
+            .logout-btn {
+                margin-left: 0;
+                margin-top: 0.5rem;
+            }
+            
+            .modal-content {
+                width: 95%;
+                margin: 1rem;
+            }
+            
+            .modal-body {
+                padding: 1.5rem;
             }
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <div class="header-left">
-            <img src="image.png" alt="Airtel Logo" class="airtel-logo">
-            <h1>Staff Dashboard</h1>
-        </div>
-        <div class="user-info">
-            <span>Welcome, <?php echo $_SESSION['full_name']; ?></span>
-            <a href="logout.php" class="logout-btn">Logout</a>
-        </div>
+    <div class="dashboard">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="header-left">
+                    <div class="logo-circle">
+                        <img src="image.png" alt="Airtel Logo" />
+                    </div>
+                    <div class="header-titles">
+                        <h1 class="main-title">Airtel Risk Register System</h1>
+                        <p class="sub-title">Risk Management System</p>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <div class="user-avatar">S</div>
+                    <div class="user-details">
+                        <div class="user-email"><?php echo $_SESSION['email']; ?></div>
+                        <div class="user-role">Staff • <?php echo $user['department'] ?? 'General'; ?></div>
+                    </div>
+                    <a href="logout.php" class="logout-btn">Logout</a>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <?php if (isset($success_message)): ?>
+                <div class="success">✅ <?php echo $success_message; ?></div>
+            <?php endif; ?>
+            
+            <?php if (isset($error_message)): ?>
+                <div class="error">❌ <?php echo $error_message; ?></div>
+            <?php endif; ?>
+            
+            <!-- Main Cards Layout -->
+            <div class="main-cards-layout">
+                <!-- Hero Section -->
+                <section class="hero">
+                    <button class="cta-button" onclick="openReportModal()">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                        </svg>
+                        Report New Risk
+                    </button>
+                </section>
+
+                <!-- Stats Card -->
+                <div class="stat-card" id="statsCard" onclick="scrollToReports()">
+                    <div class="stat-number"><?php echo count($user_risks); ?></div>
+                    <div class="stat-label">Risks Reported</div>
+                    <div class="stat-hint">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+                        </svg>
+                        Click to view details
+                    </div>
+                </div>
+            </div>
+
+            <!-- Reports Section -->
+            <section class="reports-section show" id="reportsSection">
+                <div class="reports-header">
+                    <h2 class="reports-title">
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        Your Recent Reports
+                    </h2>
+                    <button class="hide-reports-btn" onclick="closeReports()">Click to Hide</button>
+                </div>
+                
+                <div class="reports-content">
+                    <?php if (count($user_risks) > 0): ?>
+                        <?php foreach (array_slice($user_risks, 0, 10) as $risk): ?>
+                            <div class="risk-item">
+                                <div class="risk-header">
+                                    <div class="risk-name"><?php echo htmlspecialchars($risk['risk_name']); ?></div>
+                                    <button class="view-btn" onclick="viewRisk(<?php echo $risk['id']; ?>, '<?php echo htmlspecialchars($risk['risk_name']); ?>', '<?php echo htmlspecialchars($risk['risk_description']); ?>', '<?php echo htmlspecialchars($risk['cause_of_risk']); ?>', '<?php echo $risk['created_at']; ?>')">
+                                        View
+                                    </button>
+                                </div>
+                                <div class="risk-meta">
+                                    <span><?php echo date('M d, Y', strtotime($risk['created_at'])); ?></span>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <div class="empty-state">
+                            <div class="empty-icon">📋</div>
+                            <h3>No risks reported yet</h3>
+                            <p>Start by reporting your first risk using the button above.</p>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </section>
+        </main>
     </div>
     
-    <div class="container">
-        <?php if (isset($success_message)): ?>
-            <div class="success">✅ <?php echo $success_message; ?></div>
-        <?php endif; ?>
-        
-        <?php if (isset($error_message)): ?>
-            <div class="error">❌ <?php echo $error_message; ?></div>
-        <?php endif; ?>
-        
-        <div class="dashboard-grid">
-            <div class="card">
-                <h2><span class="card-icon">📝</span>Report New Risk</h2>
+    <!-- Risk Report Modal -->
+    <div id="reportModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Report New Risk</h3>
+                <button class="close" onclick="closeReportModal()">&times;</button>
+            </div>
+            <div class="modal-body">
                 <form method="POST">
                     <div class="form-group">
                         <label for="risk_name">Risk Name</label>
@@ -342,93 +797,115 @@ $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     
                     <div class="form-group">
                         <label for="department">Department</label>
-                        <input type="text" id="department" name="department" required placeholder="Your department">
+                        <input type="text" id="department" name="department" required placeholder="Your department" value="<?php echo $user['department'] ?? ''; ?>">
                     </div>
                     
                     <button type="submit" name="submit_risk" class="btn">Submit Risk Report</button>
                 </form>
             </div>
-            
-            <div class="card">
-                <h2><span class="card-icon">📊</span>Your Risk Statistics</h2>
-                <div class="stats-container">
-                    <div class="stat-box">
-                        <div class="stat-number"><?php echo count($user_risks); ?></div>
-                        <div class="stat-label">Total Risks Reported</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-number">
-                            <?php echo count(array_filter($user_risks, function($risk) { return $risk['status'] === 'Closed'; })); ?>
-                        </div>
-                        <div class="stat-label">Resolved Risks</div>
-                    </div>
+        </div>
+    </div>
+    
+    <!-- Risk Details Modal -->
+    <div id="riskModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Risk Details</h3>
+                <button class="close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Risk Name:</label>
+                    <div style="background: #f8f9fa; padding: 1rem; border-radius: 4px; border-left: 3px solid #E60012;" id="modalRiskName"></div>
                 </div>
-                
-                <div style="margin-top: 2rem; padding: 1rem; background: #fff5f5; border-radius: 8px; border-left: 4px solid #E60012;">
-                    <h4 style="color: #E60012; margin-bottom: 0.5rem;">💡 Quick Tips</h4>
-                    <ul style="margin-left: 1rem; color: #666;">
-                        <li>Be specific when describing risks</li>
-                        <li>Include potential impact details</li>
-                        <li>Check back regularly for updates</li>
-                    </ul>
+                <div class="form-group">
+                    <label>Risk Description:</label>
+                    <div style="background: #f8f9fa; padding: 1rem; border-radius: 4px; border-left: 3px solid #E60012;" id="modalRiskDescription"></div>
+                </div>
+                <div class="form-group">
+                    <label>Cause of Risk:</label>
+                    <div style="background: #f8f9fa; padding: 1rem; border-radius: 4px; border-left: 3px solid #E60012;" id="modalCauseOfRisk"></div>
+                </div>
+                <div class="form-group">
+                    <label>Date Submitted:</label>
+                    <div style="background: #f8f9fa; padding: 1rem; border-radius: 4px; border-left: 3px solid #E60012;" id="modalDateSubmitted"></div>
                 </div>
             </div>
-        </div>
-        
-        <div class="card">
-            <h2><span class="card-icon">📋</span>My Reported Risks</h2>
-            <?php if (count($user_risks) > 0): ?>
-                <table class="risk-table">
-                    <thead>
-                        <tr>
-                            <th>Risk Name</th>
-                            <th>Department</th>
-                            <th>Status</th>
-                            <th>Risk Level</th>
-                            <th>Date Reported</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($user_risks as $risk): ?>
-                            <tr>
-                                <td><?php echo htmlspecialchars($risk['risk_name']); ?></td>
-                                <td><?php echo htmlspecialchars($risk['department']); ?></td>
-                                <td>
-                                    <span class="status-badge status-<?php echo strtolower(str_replace(' ', '', $risk['status'])); ?>">
-                                        <?php echo $risk['status']; ?>
-                                    </span>
-                                </td>
-                                <td>
-                                    <span style="color: <?php 
-                                        echo $risk['risk_level'] === 'Critical' ? '#dc3545' : 
-                                            ($risk['risk_level'] === 'High' ? '#E60012' : 
-                                            ($risk['risk_level'] === 'Medium' ? '#ffc107' : '#28a745')); 
-                                    ?>; font-weight: 600;">
-                                        <?php echo $risk['risk_level']; ?>
-                                    </span>
-                                </td>
-                                <td><?php echo date('M d, Y', strtotime($risk['created_at'])); ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            <?php else: ?>
-                <div style="text-align: center; padding: 3rem; color: #666;">
-                    <div style="font-size: 3rem; margin-bottom: 1rem;">📝</div>
-                    <h3>No risks reported yet</h3>
-                    <p>Start by reporting your first risk using the form above.</p>
-                </div>
-            <?php endif; ?>
         </div>
     </div>
     
     <div class="chatbot" onclick="openChatbot()" title="Need help? Click to chat">💬</div>
     
     <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const statsCard = document.getElementById('statsCard');
+            const reportsSection = document.getElementById('reportsSection');
+            
+            // Show reports section by default
+            if (reportsSection && <?php echo count($user_risks); ?> > 0) {
+                reportsSection.style.display = 'block';
+                reportsSection.classList.add('show');
+            }
+            
+            if (statsCard && <?php echo count($user_risks); ?> > 0) {
+                statsCard.addEventListener('click', function() {
+                    toggleReports();
+                });
+            }
+        });
+
+        function toggleReports() {
+            const reportsSection = document.getElementById('reportsSection');
+            if (reportsSection.classList.contains('show')) {
+                closeReports();
+            } else {
+                showReports();
+            }
+        }
+
+        function showReports() {
+            const reportsSection = document.getElementById('reportsSection');
+            reportsSection.style.display = 'block';
+            setTimeout(() => reportsSection.classList.add('show'), 10);
+        }
+
+        function closeReports() {
+            const reportsSection = document.getElementById('reportsSection');
+            reportsSection.classList.remove('show');
+            setTimeout(() => reportsSection.style.display = 'none', 300);
+        }
+        
+        function openReportModal() {
+            document.getElementById('reportModal').classList.add('show');
+        }
+        
+        function closeReportModal() {
+            document.getElementById('reportModal').classList.remove('show');
+        }
+        
+        function viewRisk(id, name, description, cause, date) {
+            document.getElementById('modalRiskName').textContent = name;
+            document.getElementById('modalRiskDescription').textContent = description;
+            document.getElementById('modalCauseOfRisk').textContent = cause;
+            
+            const dateObj = new Date(date);
+            document.getElementById('modalDateSubmitted').textContent = dateObj.toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+            
+            document.getElementById('riskModal').classList.add('show');
+        }
+        
+        function closeModal() {
+            document.getElementById('riskModal').classList.remove('show');
+        }
+        
         function openChatbot() {
             const responses = [
                 "Hello! I'm here to help with risk reporting. What would you like to know?",
-                "You can report risks using the form on this page. Make sure to be detailed in your descriptions.",
+                "You can report risks using the 'Report New Risk' button. Make sure to be detailed in your descriptions.",
                 "If you need help with risk categories, contact your risk owner or compliance team.",
                 "For technical issues, please contact IT support at support@airtel.africa"
             ];
@@ -438,6 +915,34 @@ $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
             if (message) {
                 const randomResponse = responses[Math.floor(Math.random() * responses.length)];
                 alert("Thank you for your question: '" + message + "'\n\n" + randomResponse + "\n\nFor more detailed assistance, please contact the compliance team.");
+            }
+        }
+        
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modals = document.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                if (event.target === modal) {
+                    modal.classList.remove('show');
+                }
+            });
+        }
+
+        function scrollToReports() {
+            const reportsSection = document.getElementById('reportsSection');
+            if (reportsSection) {
+                // Show reports if hidden
+                if (!reportsSection.classList.contains('show')) {
+                    showReports();
+                }
+                
+                // Smooth scroll to reports section
+                setTimeout(() => {
+                    reportsSection.scrollIntoView({ 
+                        behavior: 'smooth', 
+                        block: 'start' 
+                    });
+                }, 100);
             }
         }
     </script>
