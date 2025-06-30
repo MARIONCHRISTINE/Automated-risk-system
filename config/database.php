@@ -1,7 +1,7 @@
 <?php
 class Database {
     private $host = "localhost";
-    private $db_name = "risk_management_system";
+    private $db_name = "airtel_risk_system"; // Changed from risk_management_system
     private $username = "root";
     private $password = "";
     public $conn;

@@ -1,41 +1,59 @@
 <?php
 session_start();
 
-function isLoggedIn() {
-    return isset($_SESSION['user_id']);
-}
-
 function requireLogin() {
-    if (!isLoggedIn()) {
-        header("Location: login.php");
+    if (!isset($_SESSION['user_id'])) {
+        header('Location: login.php');
         exit();
     }
+}
+
+function requireRole($role) {
+    requireLogin();
+    if ($_SESSION['role'] !== $role) {
+        header('Location: dashboard.php');
+        exit();
+    }
+}
+
+function getCurrentUser() {
+    return [
+        'id' => $_SESSION['user_id'] ?? null,
+        'email' => $_SESSION['email'] ?? null,
+        'full_name' => $_SESSION['full_name'] ?? null,
+        'role' => $_SESSION['role'] ?? null,
+        'department' => $_SESSION['department'] ?? null
+    ];
+}
+
+function isLoggedIn() {
+    return isset($_SESSION['user_id']);
 }
 
 function hasRole($role) {
     return isset($_SESSION['role']) && $_SESSION['role'] === $role;
 }
 
-function requireRole($role) {
-    requireLogin();
-    if (!hasRole($role)) {
-        header("Location: unauthorized.php");
-        exit();
+// Auth class wrapper for compatibility with IDE dashboard
+class Auth {
+    public function requireLogin() {
+        requireLogin();
     }
-}
-
-function getCurrentUser() {
-    if (!isLoggedIn()) return null;
     
-    include_once 'config/database.php';
-    $database = new Database();
-    $db = $database->getConnection();
+    public function requireRole($role) {
+        requireRole($role);
+    }
     
-    $query = "SELECT * FROM users WHERE id = :id";
-    $stmt = $db->prepare($query);
-    $stmt->bindParam(':id', $_SESSION['user_id']);
-    $stmt->execute();
+    public function getCurrentUser() {
+        return getCurrentUser();
+    }
     
-    return $stmt->fetch(PDO::FETCH_ASSOC);
+    public function isLoggedIn() {
+        return isLoggedIn();
+    }
+    
+    public function hasRole($role) {
+        return hasRole($role);
+    }
 }
 ?>

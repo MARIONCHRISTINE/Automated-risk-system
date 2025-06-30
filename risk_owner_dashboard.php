@@ -3,95 +3,284 @@ include_once 'includes/auth.php';
 requireRole('risk_owner');
 include_once 'config/database.php';
 
+// Verify session data exists
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['email'])) {
+    header("Location: login.php");
+    exit();
+}
+
 $database = new Database();
 $db = $database->getConnection();
 
-// Handle document upload
-if ($_POST && isset($_POST['upload_document'])) {
-    $risk_id = $_POST['risk_id'];
-    
-    if (isset($_FILES['document']) && $_FILES['document']['error'] === UPLOAD_ERR_OK) {
-        $upload_dir = 'uploads/documents/';
-        if (!file_exists($upload_dir)) {
-            mkdir($upload_dir, 0777, true);
-        }
-        
-        $file_name = $_FILES['document']['name'];
-        $file_tmp = $_FILES['document']['tmp_name'];
-        $file_ext = pathinfo($file_name, PATHINFO_EXTENSION);
-        $new_file_name = uniqid() . '.' . $file_ext;
-        $file_path = $upload_dir . $new_file_name;
-        
-        if (move_uploaded_file($file_tmp, $file_path)) {
-            $query = "INSERT INTO risk_documents (risk_id, file_name, file_path, uploaded_by) VALUES (:risk_id, :file_name, :file_path, :uploaded_by)";
+// Handle success message from risk edit
+if (isset($_GET['updated']) && isset($_GET['risk_id'])) {
+    $updated_risk_id = (int)$_GET['risk_id'];
+    $treatments_count = isset($_GET['treatments']) ? (int)$_GET['treatments'] : 0;
+    $success_message = "✅ Risk updated successfully!";
+}
+
+// Handle risk assignment/unassignment
+if ($_POST && isset($_POST['action'])) {
+    try {
+        if ($_POST['action'] === 'assign_to_me') {
+            $risk_id = (int)$_POST['risk_id'];
+            $query = "UPDATE risk_incidents SET risk_owner_id = :owner_id, updated_at = NOW() WHERE id = :risk_id";
             $stmt = $db->prepare($query);
+            $stmt->bindParam(':owner_id', $_SESSION['user_id']);
             $stmt->bindParam(':risk_id', $risk_id);
-            $stmt->bindParam(':file_name', $file_name);
-            $stmt->bindParam(':file_path', $file_path);
-            $stmt->bindParam(':uploaded_by', $_SESSION['user_id']);
-            
-            if ($stmt->execute()) {
-                $success_message = "Document uploaded successfully!";
-            }
+            $stmt->execute();
+            $success_message = "Risk successfully assigned to you!";
+        } elseif ($_POST['action'] === 'unassign_from_me') {
+            $risk_id = (int)$_POST['risk_id'];
+            $query = "UPDATE risk_incidents SET risk_owner_id = NULL, updated_at = NOW() WHERE id = :risk_id AND risk_owner_id = :owner_id";
+            $stmt = $db->prepare($query);
+            $stmt->bindParam(':owner_id', $_SESSION['user_id']);
+            $stmt->bindParam(':risk_id', $risk_id);
+            $stmt->execute();
+            $success_message = "Risk successfully unassigned from you!";
         }
+    } catch (Exception $e) {
+        $error_message = "Error: " . $e->getMessage();
     }
 }
 
-// Handle risk scoring
-if ($_POST && isset($_POST['update_risk_score'])) {
+// Handle risk reporting (Risk Owners can also report risks)
+if ($_POST && isset($_POST['submit_risk'])) {
+    $risk_name = $_POST['risk_name'];
+    $risk_description = $_POST['risk_description'];
+    $cause_of_risk = $_POST['cause_of_risk'];
+    $department = $_POST['department'];
+    $existing_or_new = $_POST['existing_or_new'];
+    $to_be_reported_to_board = $_POST['to_be_reported_to_board'];
+    
+    try {
+        $query = "INSERT INTO risk_incidents (risk_name, risk_description, cause_of_risk, department, reported_by, risk_owner_id, existing_or_new, to_be_reported_to_board, risk_status) 
+                  VALUES (:risk_name, :risk_description, :cause_of_risk, :department, :reported_by, :risk_owner_id, :existing_or_new, :to_be_reported_to_board, 'pending')";
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':risk_name', $risk_name);
+        $stmt->bindParam(':risk_description', $risk_description);
+        $stmt->bindParam(':cause_of_risk', $cause_of_risk);
+        $stmt->bindParam(':department', $department);
+        $stmt->bindParam(':reported_by', $_SESSION['user_id']);
+        $stmt->bindParam(':risk_owner_id', $_SESSION['user_id']); // Auto-assign to self
+        $stmt->bindParam(':existing_or_new', $existing_or_new);
+        $stmt->bindParam(':to_be_reported_to_board', $to_be_reported_to_board);
+        
+        if ($stmt->execute()) {
+            $success_message = "Risk reported successfully and assigned to you!";
+        }
+    } catch (PDOException $e) {
+        $error_message = "Failed to report risk: " . $e->getMessage();
+    }
+}
+
+// Handle accepting assignment
+if ($_POST && isset($_POST['accept_assignment'])) {
+    $risk_id = $_POST['risk_id'];
+    
+    // Update assignment status
+    $query = "UPDATE risk_assignments SET status = 'Accepted' WHERE risk_id = :risk_id AND assigned_to = :user_id";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':risk_id', $risk_id);
+    $stmt->bindParam(':user_id', $_SESSION['user_id']);
+    
+    if ($stmt->execute()) {
+        $success_message = "Risk assignment accepted successfully!";
+    }
+}
+
+// Handle updating existing_or_new status (Risk Owner decision)
+if ($_POST && isset($_POST['update_risk_type'])) {
+    $risk_id = $_POST['risk_id'];
+    $existing_or_new = $_POST['existing_or_new'];
+    $to_be_reported_to_board = $_POST['to_be_reported_to_board'];
+    
+    $query = "UPDATE risk_incidents SET existing_or_new = :existing_or_new, to_be_reported_to_board = :to_be_reported_to_board WHERE id = :risk_id";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':existing_or_new', $existing_or_new);
+    $stmt->bindParam(':to_be_reported_to_board', $to_be_reported_to_board);
+    $stmt->bindParam(':risk_id', $risk_id);
+    
+    if ($stmt->execute()) {
+        $success_message = "Risk classification updated successfully!";
+    }
+}
+
+// Handle risk assessment update
+if ($_POST && isset($_POST['update_assessment'])) {
     $risk_id = $_POST['risk_id'];
     $probability = $_POST['probability'];
     $impact = $_POST['impact'];
     
-    // Call Python microservice for risk scoring
-    $risk_data = array(
-        'probability' => floatval($probability),
-        'impact' => floatval($impact)
-    );
+    // Calculate risk score
+    $risk_rating = $probability * $impact;
     
-    $ch = curl_init('http://localhost:5000/calculate_risk');
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($risk_data));
-    curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
+    // Determine risk level based on rating
+    $risk_level = 'Low';
+    if ($risk_rating > 20) $risk_level = 'Critical';
+    elseif ($risk_rating > 12) $risk_level = 'High';
+    elseif ($risk_rating > 6) $risk_level = 'Medium';
     
-    $response = curl_exec($ch);
-    curl_close($ch);
+    $query = "UPDATE risk_incidents SET 
+              probability = :probability,
+              impact = :impact,
+              risk_level = :risk_level
+              WHERE id = :risk_id";
     
-    if ($response) {
-        $result = json_decode($response, true);
-        if ($result['success']) {
-            $risk_score = $result['data']['score'];
-            $risk_level = $result['data']['level'];
-            
-            $query = "UPDATE risk_incidents SET probability = :probability, impact = :impact, risk_score = :risk_score, risk_level = :risk_level WHERE id = :risk_id";
-            $stmt = $db->prepare($query);
-            $stmt->bindParam(':probability', $probability);
-            $stmt->bindParam(':impact', $impact);
-            $stmt->bindParam(':risk_score', $risk_score);
-            $stmt->bindParam(':risk_level', $risk_level);
-            $stmt->bindParam(':risk_id', $risk_id);
-            
-            if ($stmt->execute()) {
-                $success_message = "Risk score updated successfully!";
-            }
-        }
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':probability', $probability);
+    $stmt->bindParam(':impact', $impact);
+    $stmt->bindParam(':risk_level', $risk_level);
+    $stmt->bindParam(':risk_id', $risk_id);
+    
+    if ($stmt->execute()) {
+        $success_message = "Risk assessment updated successfully!";
     }
 }
 
 // Get current user info
 $user = getCurrentUser();
 
-// Get risks for this risk owner's department
-$query = "SELECT r.*, u.full_name as reporter_name FROM risk_incidents r 
-          LEFT JOIN users u ON r.reported_by = u.id 
-          WHERE r.department = :department OR r.risk_owner_id = :user_id 
-          ORDER BY r.created_at DESC";
+// Get comprehensive statistics
+$stats = [];
+
+// Total risks in system
+$query = "SELECT COUNT(*) as total FROM risk_incidents";
 $stmt = $db->prepare($query);
-$stmt->bindParam(':department', $user['department']);
+$stmt->execute();
+$stats['total_risks'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// Risks assigned to this risk owner
+$query = "SELECT COUNT(*) as total FROM risk_incidents WHERE risk_owner_id = :user_id";
+$stmt = $db->prepare($query);
 $stmt->bindParam(':user_id', $_SESSION['user_id']);
 $stmt->execute();
-$department_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$stats['my_assigned_risks'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// Unassigned risks (available for assignment)
+$query = "SELECT COUNT(*) as total FROM risk_incidents WHERE risk_owner_id IS NULL";
+$stmt = $db->prepare($query);
+$stmt->execute();
+$stats['unassigned_risks'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// High/Critical risks assigned to me (using probability * impact calculation with NULL checks)
+$query = "SELECT COUNT(*) as total FROM risk_incidents 
+          WHERE risk_owner_id = :user_id 
+          AND probability IS NOT NULL 
+          AND impact IS NOT NULL 
+          AND (probability * impact) >= 9";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':user_id', $_SESSION['user_id']);
+$stmt->execute();
+$stats['my_high_risks'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// Get assigned risks (risks assigned to this user)
+$query = "SELECT r.*, u.full_name as reporter_name
+          FROM risk_incidents r 
+          LEFT JOIN users u ON r.reported_by = u.id 
+          WHERE r.risk_owner_id = :user_id
+          ORDER BY r.created_at DESC";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':user_id', $_SESSION['user_id']);
+$stmt->execute();
+$assigned_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get unassigned risks (available for assignment) - order by risk level if available
+$query = "SELECT ri.*, u.full_name as reporter_name
+          FROM risk_incidents ri 
+          LEFT JOIN users u ON ri.reported_by = u.id
+          WHERE ri.risk_owner_id IS NULL
+          ORDER BY 
+            CASE 
+              WHEN ri.probability IS NOT NULL AND ri.impact IS NOT NULL 
+              THEN (ri.probability * ri.impact) 
+              ELSE 0 
+            END DESC, 
+            ri.created_at DESC";
+$stmt = $db->prepare($query);
+$stmt->execute();
+$unassigned_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get pending assignments (if you have a separate assignments table)
+$pending_assignments = []; // Initialize as empty array since we're not sure if this table exists
+
+// Try to get pending assignments, but handle if table doesn't exist
+try {
+    $pending_query = "SELECT r.*, u.full_name as reporter_name, ra.assignment_date
+                      FROM risk_assignments ra
+                      JOIN risk_incidents r ON ra.risk_id = r.id
+                      JOIN users u ON r.reported_by = u.id
+                      WHERE ra.assigned_to = :user_id AND ra.status = 'Pending'
+                      ORDER BY ra.assignment_date DESC";
+    $pending_stmt = $db->prepare($pending_query);
+    $pending_stmt->bindParam(':user_id', $_SESSION['user_id']);
+    $pending_stmt->execute();
+    $pending_assignments = $pending_stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    // Table might not exist, keep empty array
+    $pending_assignments = [];
+}
+
+// Risk level distribution (based on probability * impact with NULL checks)
+$query = "SELECT 
+    SUM(CASE 
+        WHEN probability IS NULL OR impact IS NULL THEN 1
+        WHEN (probability * impact) <= 3 THEN 1 
+        ELSE 0 
+    END) as low_risks,
+    SUM(CASE 
+        WHEN probability IS NOT NULL AND impact IS NOT NULL AND (probability * impact) BETWEEN 4 AND 8 
+        THEN 1 ELSE 0 
+    END) as medium_risks,
+    SUM(CASE 
+        WHEN probability IS NOT NULL AND impact IS NOT NULL AND (probability * impact) BETWEEN 9 AND 14 
+        THEN 1 ELSE 0 
+    END) as high_risks,
+    SUM(CASE 
+        WHEN probability IS NOT NULL AND impact IS NOT NULL AND (probability * impact) >= 15 
+        THEN 1 ELSE 0 
+    END) as critical_risks
+    FROM risk_incidents";
+$stmt = $db->prepare($query);
+$stmt->execute();
+$risk_levels = $stmt->fetch(PDO::FETCH_ASSOC);
+
+// Risk by department for charts
+$query = "SELECT department, COUNT(*) as count 
+          FROM risk_incidents 
+          WHERE department IS NOT NULL AND department != ''
+          GROUP BY department
+          ORDER BY count DESC";
+$stmt = $db->prepare($query);
+$stmt->execute();
+$risk_by_department = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+function getRiskLevel($probability, $impact) {
+    if (!$probability || !$impact) return 'not-assessed';
+    $rating = (int)$probability * (int)$impact;
+    if ($rating >= 15) return 'critical';
+    if ($rating >= 9) return 'high';
+    if ($rating >= 4) return 'medium';
+    return 'low';
+}
+
+function getRiskLevelText($probability, $impact) {
+    if (!$probability || !$impact) return 'Not Assessed';
+    $rating = (int)$probability * (int)$impact;
+    if ($rating >= 15) return 'Critical';
+    if ($rating >= 9) return 'High';
+    if ($rating >= 4) return 'Medium';
+    return 'Low';
+}
+
+function getStatusBadgeClass($status) {
+    switch ($status) {
+        case 'completed': return 'badge-success';
+        case 'in_progress': return 'badge-warning';
+        case 'cancelled': return 'badge-danger';
+        default: return 'badge-secondary';
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -99,7 +288,9 @@ $department_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Risk Owner Dashboard</title>
+    <title>Risk Owner Dashboard - Airtel Risk Management</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         * {
             margin: 0;
@@ -108,44 +299,159 @@ $department_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
         
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #f5f5f5;
+            color: #333;
             line-height: 1.6;
+            min-height: 100vh;
+            padding-top: 100px;
         }
         
+        .dashboard {
+            min-height: 100vh;
+        }
+        
+        /* Header - Exact copy from staff dashboard */
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #E60012;
+            padding: 1.5rem 2rem;
             color: white;
-            padding: 1rem 2rem;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(230, 0, 18, 0.2);
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        
-        .nav-tabs {
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo-circle {
+            width: 55px;
+            height: 55px;
             background: white;
-            padding: 0 2rem;
-            border-bottom: 1px solid #ddd;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            padding: 5px;
         }
-        
-        .nav-tabs button {
-            background: none;
-            border: none;
-            padding: 1rem 2rem;
-            cursor: pointer;
-            border-bottom: 3px solid transparent;
+
+        .logo-circle img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border-radius: 50%;
+        }
+
+        .header-titles {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .main-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: white;
+            margin: 0;
+            line-height: 1.2;
+        }
+
+        .sub-title {
             font-size: 1rem;
+            font-weight: 400;
+            color: rgba(255, 255, 255, 0.9);
+            margin: 0;
+            line-height: 1.2;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .user-avatar {
+            width: 45px;
+            height: 45px;
+            background: white;
+            color: #E60012;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.2rem;
+        }
+
+        .user-details {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .user-email {
+            font-size: 1rem;
+            font-weight: 500;
+            color: white;
+            margin: 0;
+            line-height: 1.2;
+        }
+
+        .user-role {
+            font-size: 0.9rem;
+            font-weight: 400;
+            color: rgba(255, 255, 255, 0.9);
+            margin: 0;
+            line-height: 1.2;
+        }
+
+        .logout-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 0.7rem 1.3rem;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: all 0.3s;
+            margin-left: 1rem;
+        }
+
+        .logout-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.5);
         }
         
-        .nav-tabs button.active {
-            border-bottom-color: #667eea;
-            color: #667eea;
+        /* Updated Navigation Tabs */
+        
+        /* Main Content */
+        .main-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
         }
         
-        .container {
-            max-width: 1400px;
-            margin: 2rem auto;
-            padding: 0 2rem;
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
         }
         
         .card {
@@ -154,6 +460,60 @@ $department_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
             border-radius: 10px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             margin-bottom: 2rem;
+            border-top: 4px solid #E60012;
+        }
+        
+        .card h2 {
+            color: #333;
+            margin-bottom: 1.5rem;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+        .card-title {
+            color: #333;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin: 0;
+        }
+        
+        .stats-grid, .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+            border-top: 4px solid #E60012;
+        }
+        
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+            color: #E60012;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        .stat-description {
+            color: #999;
+            font-size: 0.8rem;
+            margin-top: 0.25rem;
         }
         
         .risk-grid {
@@ -167,39 +527,137 @@ $department_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
             border-radius: 8px;
             padding: 1.5rem;
             background: white;
+            border-top: 3px solid #E60012;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .risk-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
         }
         
         .risk-header {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: center;
             margin-bottom: 1rem;
         }
         
-        .risk-level {
+        .risk-header h3 {
+            color: #333;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        
+        .risk-level, .risk-badge {
             padding: 0.25rem 0.75rem;
             border-radius: 15px;
             font-size: 0.8rem;
             font-weight: bold;
         }
         
-        .level-low { background: #d4edda; color: #155724; }
-        .level-medium { background: #fff3cd; color: #856404; }
-        .level-high { background: #f8d7da; color: #721c24; }
-        .level-critical { background: #f5c6cb; color: #721c24; }
+        .level-low, .risk-low { background: #d4edda; color: #155724; }
+        .level-medium, .risk-medium { background: #fff3cd; color: #856404; }
+        .level-high, .risk-high { background: #ffebee; color: #E60012; }
+        .level-critical, .risk-critical { background: #ffcdd2; color: #E60012; }
+        .level-not-assessed, .risk-not-assessed { background: #e2e3e5; color: #383d41; }
+        
+        .risk-card p {
+            margin-bottom: 0.8rem;
+            color: #666;
+            line-height: 1.5;
+        }
+        
+        .risk-card strong {
+            color: #333;
+        }
         
         .btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #E60012;
             color: white;
             border: none;
-            padding: 0.5rem 1rem;
+            padding: 0.6rem 1.2rem;
             border-radius: 5px;
             cursor: pointer;
             margin: 0.25rem;
+            transition: all 0.3s;
+            font-size: 0.9rem;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn:hover {
+            background: #B8000E;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(230, 0, 18, 0.3);
         }
         
         .btn-secondary {
             background: #6c757d;
+        }
+        
+        .btn-secondary:hover {
+            background: #545b62;
+            box-shadow: 0 4px 12px rgba(108, 117, 125, 0.3);
+        }
+        
+        .btn-success {
+            background: #28a745;
+        }
+        
+        .btn-success:hover {
+            background: #218838;
+        }
+        
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
+        }
+        
+        .btn-warning:hover {
+            background: #e0a800;
+        }
+        .btn-outline {
+            background: transparent;
+            color: #E60012;
+            border: 1px solid #E60012;
+        }
+        .btn-outline:hover {
+            background: #E60012;
+            color: white;
+        }
+        .btn-sm {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.8rem;
+        }
+        .btn-primary {
+            background: #007bff;
+        }
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        
+        .cta-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: #E60012;
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 5px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: background 0.3s;
+            border: none;
+            cursor: pointer;
+            margin-bottom: 2rem;
+        }
+        
+        .cta-button:hover {
+            background: #B8000E;
         }
         
         .modal {
@@ -213,214 +671,856 @@ $department_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
             background-color: rgba(0,0,0,0.5);
         }
         
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
         .modal-content {
             background-color: white;
             margin: 5% auto;
-            padding: 2rem;
+            padding: 0;
             border-radius: 10px;
-            width: 80%;
-            max-width: 600px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+            border-top: 4px solid #E60012;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .modal-header {
+            background: #E60012;
+            color: white;
+            padding: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 10px 10px 0 0;
+        }
+        
+        .modal-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin: 0;
         }
         
         .close {
-            color: #aaa;
-            float: right;
+            color: white;
             font-size: 28px;
             font-weight: bold;
             cursor: pointer;
+            background: none;
+            border: none;
+        }
+        
+        .close:hover {
+            opacity: 0.7;
+        }
+        
+        .modal-body {
+            padding: 2rem;
         }
         
         .form-group {
-            margin-bottom: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
         }
         
         label {
             display: block;
             margin-bottom: 0.5rem;
             font-weight: 500;
+            color: #333;
         }
         
         input, select, textarea {
             width: 100%;
             padding: 0.75rem;
-            border: 1px solid #ddd;
+            border: 2px solid #e1e5e9;
             border-radius: 5px;
+            transition: border-color 0.3s;
+            font-size: 1rem;
         }
         
-        .success {
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #E60012;
+            box-shadow: 0 0 0 3px rgba(230, 0, 18, 0.1);
+        }
+        
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        
+        .success, .alert-success {
             background: #d4edda;
             color: #155724;
             padding: 1rem;
             border-radius: 5px;
             margin-bottom: 1rem;
+            border-left: 4px solid #28a745;
+            font-weight: 500;
+        }
+        
+        .error, .alert-danger {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+            border-left: 4px solid #dc3545;
+            font-weight: 500;
+        }
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+            border-left: 4px solid #17a2b8;
+        }
+        
+        .pending-badge {
+            background: #fff3cd;
+            color: #856404;
+            padding: 0.25rem 0.75rem;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        
+        .classification-section {
+            background: #fff5f5;
+            padding: 1.5rem;
+            border-radius: 8px;
+            border-left: 4px solid #E60012;
+            margin-bottom: 1rem;
+        }
+        
+        .classification-section h4 {
+            color: #E60012;
+            margin-bottom: 1rem;
+        }
+        /* Table Styles */
+        .table-responsive {
+            overflow-x: auto;
+        }
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1rem;
+        }
+        .table th,
+        .table td {
+            padding: 0.75rem;
+            vertical-align: top;
+            border-top: 1px solid #dee2e6;
+            text-align: left;
+        }
+        .table thead th {
+            vertical-align: bottom;
+            border-bottom: 2px solid #dee2e6;
+            background-color: #f8f9fa;
+            font-weight: 600;
+            color: #495057;
+        }
+        .table tbody + tbody {
+            border-top: 2px solid #dee2e6;
+        }
+        .risk-row {
+            position: relative;
+            border-left: 4px solid transparent;
+        }
+        
+        .risk-row.critical { border-left-color: #dc3545; }
+        .risk-row.high { border-left-color: #fd7e14; }
+        .risk-row.medium { border-left-color: #ffc107; }
+        .risk-row.low { border-left-color: #28a745; }
+        .risk-row.not-assessed { border-left-color: #6c757d; }
+        .assignment-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .owner-badge {
+            background: #e3f2fd;
+            color: #1565c0;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        .unassigned-badge {
+            background: #fff3e0;
+            color: #ef6c00;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        .quick-assign-form {
+            display: inline-block;
+            margin: 0;
+        }
+        .status-badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        .status-pending { background: #fff3cd; color: #856404; }
+        .status-in-progress { background: #cce5ff; color: #004085; }
+        .status-completed { background: #d4edda; color: #155724; }
+        .status-cancelled { background: #f8d7da; color: #721c24; }
+        .badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        .badge-success { background: #d4edda; color: #155724; }
+        .badge-warning { background: #fff3cd; color: #856404; }
+        .badge-danger { background: #f8d7da; color: #721c24; }
+        .badge-secondary { background: #e2e3e5; color: #383d41; }
+        .badge-info { background: #d1ecf1; color: #0c5460; }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+        .text-muted {
+            color: #6c757d;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            body {
+                padding-top: 120px; /* Increased padding for mobile header */
+            }
+            
+            .header {
+                padding: 1.2rem 1.5rem;
+            }
+            
+            .header-content {
+                flex-direction: column;
+                gap: 1rem;
+                align-items: flex-start;
+            }
+            
+            .header-right {
+                align-self: flex-end;
+            }
+            
+            .main-title {
+                font-size: 1.3rem;
+            }
+            
+            .sub-title {
+                font-size: 0.9rem;
+            }
+            
+            .logout-btn {
+                margin-left: 0;
+                margin-top: 0.5rem;
+            }
+            
+            .modal-content {
+                width: 95%;
+                margin: 1rem;
+            }
+            
+            .modal-body {
+                padding: 1.5rem;
+            }
+            
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            .assignment-actions {
+                flex-direction: column;
+                align-items: flex-start;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>Risk Owner Dashboard</h1>
-        <div class="user-info">
-            <span>Welcome, <?php echo $_SESSION['full_name']; ?> (<?php echo $user['department']; ?>)</span>
-            <a href="logout.php" class="logout-btn" style="background: rgba(255,255,255,0.2); color: white; padding: 0.5rem 1rem; border-radius: 5px; text-decoration: none; margin-left: 1rem;">Logout</a>
-        </div>
-    </div>
-    
-    <div class="nav-tabs">
-        <button class="active" onclick="showTab('risks')">Manage Risks</button>
-        <button onclick="showTab('reports')">Reports</button>
-        <button onclick="showTab('procedures')">Procedures</button>
-    </div>
-    
-    <div class="container">
-        <?php if (isset($success_message)): ?>
-            <div class="success"><?php echo $success_message; ?></div>
-        <?php endif; ?>
+    <div class="dashboard">
+        <!-- Header - Exact copy from staff dashboard -->
+        <header class="header">
+            <div class="header-content">
+                <div class="header-left">
+                    <div class="logo-circle">
+                        <img src="image.png" alt="Airtel Logo" />
+                    </div>
+                    <div class="header-titles">
+                        <h1 class="main-title">Airtel Risk Register System</h1>
+                        <p class="sub-title">Risk Management System</p>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <div class="user-avatar"><?php echo isset($_SESSION['full_name']) ? strtoupper(substr($_SESSION['full_name'], 0, 1)) : 'R'; ?></div>
+                    <div class="user-details">
+                        <div class="user-email"><?php echo isset($_SESSION['email']) ? $_SESSION['email'] : 'No Email'; ?></div>
+                        <div class="user-role">Risk_owner • <?php echo $user['department'] ?? 'General'; ?></div>
+                    </div>
+                    <a href="logout.php" class="logout-btn">Logout</a>
+                </div>
+            </div>
+        </header>
         
-        <div id="risks-tab" class="tab-content">
-            <div class="card">
-                <h2>Department Risks (<?php echo $user['department']; ?>)</h2>
-                <div class="risk-grid">
-                    <?php foreach ($department_risks as $risk): ?>
-                        <div class="risk-card">
-                            <div class="risk-header">
-                                <h3><?php echo htmlspecialchars($risk['risk_name']); ?></h3>
-                                <span class="risk-level level-<?php echo strtolower($risk['risk_level']); ?>">
-                                    <?php echo $risk['risk_level']; ?>
-                                </span>
-                            </div>
-                            <p><strong>Description:</strong> <?php echo htmlspecialchars($risk['risk_description']); ?></p>
-                            <p><strong>Cause:</strong> <?php echo htmlspecialchars($risk['cause_of_risk']); ?></p>
-                            <p><strong>Reported by:</strong> <?php echo htmlspecialchars($risk['reporter_name']); ?></p>
-                            <p><strong>Status:</strong> <?php echo $risk['status']; ?></p>
-                            <p><strong>Risk Score:</strong> <?php echo $risk['risk_score']; ?></p>
-                            
-                            <div style="margin-top: 1rem;">
-                                <button class="btn" onclick="openScoreModal(<?php echo $risk['id']; ?>, <?php echo $risk['probability']; ?>, <?php echo $risk['impact']; ?>)">Update Score</button>
-                                <button class="btn btn-secondary" onclick="openDocumentModal(<?php echo $risk['id']; ?>)">Upload Document</button>
+        
+        <!-- Main Content -->
+        <main class="main-content">
+            <?php if (isset($success_message)): ?>
+                <div class="success">✅ <?php echo $success_message; ?></div>
+            <?php endif; ?>
+            
+            <?php if (isset($error_message)): ?>
+                <div class="error">❌ <?php echo $error_message; ?></div>
+            <?php endif; ?>
+            
+            <!-- Dashboard Tab -->
+            <div id="dashboard-tab" class="tab-content active">
+                
+                <!-- Risk Owner Statistics Cards -->
+                <div class="dashboard-grid">
+                    <div class="stat-card">
+                        <span class="stat-number"><?php echo $stats['total_risks']; ?></span>
+                        <div class="stat-label">Total System Risks</div>
+                        <div class="stat-description">All risks in the system</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-number"><?php echo $stats['my_assigned_risks']; ?></span>
+                        <div class="stat-label">My Assigned Risks</div>
+                        <div class="stat-description">Risks assigned to you</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-number"><?php echo $stats['unassigned_risks']; ?></span>
+                        <div class="stat-label">Available Risks</div>
+                        <div class="stat-description">Unassigned risks you can claim</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-number"><?php echo $stats['my_high_risks']; ?></span>
+                        <div class="stat-label">My High/Critical</div>
+                        <div class="stat-description">High priority risks assigned to you</div>
+                    </div>
+                </div>
+
+                <!-- Charts Section -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+                    <!-- Risk by Department Chart -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Risks by Department</h3>
+                        </div>
+                        <div style="padding: 1rem;">
+                            <div class="chart-container">
+                                <canvas id="departmentChart"></canvas>
                             </div>
                         </div>
-                    <?php endforeach; ?>
-                </div>
-            </div>
-        </div>
-        
-        <div id="reports-tab" class="tab-content" style="display: none;">
-            <div class="card">
-                <h2>Risk Reports</h2>
-                <button class="btn" onclick="generateReport()">Generate Department Report</button>
-                <button class="btn btn-secondary" onclick="exportToCSV()">Export to CSV</button>
-            </div>
-        </div>
-        
-        <div id="procedures-tab" class="tab-content" style="display: none;">
-            <div class="card">
-                <h2>Risk Management Procedures</h2>
-                <div style="padding: 1rem; background: #f8f9fa; border-radius: 5px;">
-                    <h3>Risk Assessment Guidelines</h3>
-                    <ul style="margin-left: 2rem; margin-top: 1rem;">
-                        <li>Probability Scale: 1 (Very Low) to 5 (Very High)</li>
-                        <li>Impact Scale: 1 (Minimal) to 5 (Catastrophic)</li>
-                        <li>Risk Score = Probability × Impact</li>
-                        <li>Low Risk: 1-6, Medium Risk: 7-12, High Risk: 13-20, Critical Risk: 21-25</li>
-                    </ul>
+                    </div>
                     
-                    <h3 style="margin-top: 2rem;">Document Requirements</h3>
-                    <ul style="margin-left: 2rem; margin-top: 1rem;">
-                        <li>Risk assessment forms</li>
-                        <li>Mitigation plans</li>
-                        <li>Evidence of risk occurrence</li>
-                        <li>Approved file formats: PDF, DOC, DOCX, XLS, XLSX</li>
-                    </ul>
+                    <!-- Risk Level Distribution -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Risk Level Distribution</h3>
+                        </div>
+                        <div style="padding: 1rem;">
+                            <div class="chart-container">
+                                <canvas id="levelChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
                 </div>
+
+                <!-- Risk Owner Guidelines -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">🎯 Risk Owner Responsibilities</h3>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+                        <div>
+                            <h4 style="color: #E60012; margin-bottom: 1rem;">✅ Your Capabilities:</h4>
+                            <ul style="list-style-type: none; padding: 0;">
+                                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
+                                    <strong>👀 View All Risks</strong><br>
+                                    <small>Access to all risks reported by staff across the organization</small>
+                                </li>
+                                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
+                                    <strong>🎯 Self-Assign Risks</strong><br>
+                                    <small>Assign yourself to risks you can manage and resolve</small>
+                                </li>
+                                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
+                                    <strong>📝 Report New Risks</strong><br>
+                                    <small>Identify and report risks you discover in your area</small>
+                                </li>
+                                <li style="padding: 0.5rem 0;">
+                                    <strong>📊 Full Risk Management</strong><br>
+                                    <small>Complete access to risk assessment and treatment planning</small>
+                                </li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 style="color: #28a745; margin-bottom: 1rem;">💡 Best Practices:</h4>
+                            <ul style="list-style-type: none; padding: 0;">
+                                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
+                                    <strong>🚨 Prioritize High Risks</strong><br>
+                                    <small>Focus on critical and high-rated risks first</small>
+                                </li>
+                                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
+                                    <strong>⚡ Respond Quickly</strong><br>
+                                    <small>Assign yourself to risks within your expertise promptly</small>
+                                </li>
+                                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
+                                    <strong>🤝 Collaborate</strong><br>
+                                    <small>Work with other risk owners to ensure comprehensive coverage</small>
+                                </li>
+                                <li style="padding: 0.5rem 0;">
+                                    <strong>📈 Monitor Progress</strong><br>
+                                    <small>Regularly update status of your assigned risks</small>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <div style="background: #e3f2fd; border-left: 4px solid #2196f3; padding: 1rem; margin-top: 2rem; border-radius: 0 0.25rem 0.25rem 0;">
+                        <strong>📞 Need Help?</strong> Contact the Compliance Team at compliance@airtel.africa or your direct supervisor for assistance with risk management.
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">🚀 Quick Actions</h3>
+                    </div>
+                    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                        <a href="javascript:void(0)" onclick="openReportModal()" class="btn btn-primary" style="flex: 1; min-width: 200px; padding: 1rem; text-align: center;">
+                            📝 Report New Risk<br>
+                            <small>Report a risk you've identified</small>
+                        </a>
+                        <a href="javascript:void(0)" class="btn btn-secondary" style="flex: 1; min-width: 200px; padding: 1rem; text-align: center;" onclick="showTab('available')">
+                            🎯 View Available Risks<br>
+                            <small>See unassigned risks you can claim</small>
+                        </a>
+                        <a href="view_risks.php" class="btn btn-outline" style="flex: 1; min-width: 200px; padding: 1rem; text-align: center;">
+                            👀 View All Risks<br>
+                            <small>Browse all risks in the system</small>
+                        </a>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- My Assigned Risks Tab -->
+            <div id="risks-tab" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">My Assigned Risks (<?php echo $user['department']; ?>)</h2>
+                        <span class="badge badge-info"><?php echo count($assigned_risks); ?> risks assigned to you</span>
+                    </div>
+                    <?php if (empty($assigned_risks)): ?>
+                        <div class="alert-info">
+                            <p><strong>No risks assigned to you yet.</strong></p>
+                            <p>Browse the "Available Risks" section to assign yourself to risks you can manage.</p>
+                            <button class="btn btn-primary" onclick="showTab('available')">View Available Risks</button>
+                        </div>
+                    <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Risk Name</th>
+                                    <th>Risk Level</th>
+                                    <th>Status</th>
+                                    <th>Reported By</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($assigned_risks as $risk): ?>
+                                <tr class="risk-row <?php echo getRiskLevel($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>" data-risk-id="<?php echo $risk['id']; ?>">
+                                    <td>
+                                        <strong><?php echo htmlspecialchars($risk['risk_name']); ?></strong>
+                                        <?php if ($risk['risk_description']): ?>
+                                            <br><small class="text-muted"><?php echo htmlspecialchars(substr($risk['risk_description'], 0, 100)) . (strlen($risk['risk_description']) > 100 ? '...' : ''); ?></small>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <span class="risk-badge risk-<?php echo getRiskLevel($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>">
+                                            <?php echo getRiskLevelText($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="status-badge status-<?php echo str_replace('_', '-', $risk['risk_status'] ?? 'pending'); ?>">
+                                            <?php echo ucfirst(str_replace('_', ' ', $risk['risk_status'] ?? 'Not Started')); ?>
+                                        </span>
+                                    </td>
+                                    <td><?php echo htmlspecialchars($risk['reporter_name']); ?></td>
+                                    <td>
+                                        <div class="assignment-actions">
+                                            <a href="view_risk.php?id=<?php echo $risk['id']; ?>" class="btn btn-sm btn-primary">View Details</a>
+                                            <form method="POST" class="quick-assign-form" onsubmit="return confirm('Are you sure you want to unassign this risk from yourself?')">
+                                                <input type="hidden" name="action" value="unassign_from_me">
+                                                <input type="hidden" name="risk_id" value="<?php echo $risk['id']; ?>">
+                                                <button type="submit" class="btn btn-sm btn-outline">Unassign</button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <!-- Available Risks Tab -->
+            <div id="available-tab" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Available Risks for Assignment</h2>
+                        <span class="badge badge-warning"><?php echo count($unassigned_risks); ?> unassigned risks</span>
+                    </div>
+                    <?php if (empty($unassigned_risks)): ?>
+                        <div class="alert-success">
+                            <p><strong>Great! All risks have been assigned.</strong></p>
+                            <p>There are currently no unassigned risks in the system.</p>
+                        </div>
+                    <?php else: ?>
+                    <div class="alert-info" style="margin-bottom: 1.5rem;">
+                        <strong>💡 Tip:</strong> Prioritize high and critical risks first. Click "Assign to Me" to take ownership of risks within your expertise.
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Risk Name</th>
+                                    <th>Risk Level</th>
+                                    <th>Status</th>
+                                    <th>Reported By</th>
+                                    <th>Reported Date</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($unassigned_risks as $risk): ?>
+                                <tr class="risk-row <?php echo getRiskLevel($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>">
+                                    <td>
+                                        <strong><?php echo htmlspecialchars($risk['risk_name']); ?></strong>
+                                        <?php if ($risk['risk_description']): ?>
+                                            <br><small class="text-muted"><?php echo htmlspecialchars(substr($risk['risk_description'], 0, 100)) . (strlen($risk['risk_description']) > 100 ? '...' : ''); ?></small>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <span class="risk-badge risk-<?php echo getRiskLevel($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>">
+                                            <?php echo getRiskLevelText($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="status-badge status-<?php echo str_replace('_', '-', $risk['risk_status'] ?? 'pending'); ?>">
+                                            <?php echo ucfirst(str_replace('_', ' ', $risk['risk_status'] ?? 'Not Started')); ?>
+                                        </span>
+                                    </td>
+                                    <td><?php echo htmlspecialchars($risk['reporter_name']); ?></td>
+                                    <td><?php echo date('M j, Y', strtotime($risk['created_at'])); ?></td>
+                                    <td>
+                                        <div class="assignment-actions">
+                                            <a href="view_risk.php?id=<?php echo $risk['id']; ?>" class="btn btn-sm btn-secondary">View</a>
+                                            <form method="POST" class="quick-assign-form">
+                                                <input type="hidden" name="action" value="assign_to_me">
+                                                <input type="hidden" name="risk_id" value="<?php echo $risk['id']; ?>">
+                                                <button type="submit" class="btn btn-sm btn-primary">Assign to Me</button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <!-- Assignments Tab (Notifications) -->
+            <div id="assignments-tab" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Notifications</h2>
+                        <span class="badge badge-secondary">Coming Soon</span>
+                    </div>
+                    <div class="alert-info">
+                        <p><strong>Notifications feature is under development.</strong></p>
+                        <p>This section will show system notifications, assignment alerts, and important updates.</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Risk Report Modal -->
+    <div id="reportModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Report New Risk</h3>
+                <button class="close" onclick="closeModal('reportModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form method="POST">
+                    <div class="classification-section">
+                        <h4>Risk Classification</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="existing_or_new">Risk Type</label>
+                                <select id="existing_or_new" name="existing_or_new" required>
+                                    <option value="New">New Risk</option>
+                                    <option value="Existing">Existing Risk</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="to_be_reported_to_board">Report to Board</label>
+                                <select id="to_be_reported_to_board" name="to_be_reported_to_board" required>
+                                    <option value="No">No</option>
+                                    <option value="Yes">Yes</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="risk_name">Risk Name</label>
+                        <input type="text" id="risk_name" name="risk_name" required placeholder="Enter a clear risk title">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="risk_description">Risk Description</label>
+                        <textarea id="risk_description" name="risk_description" required placeholder="Describe the risk in detail"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="cause_of_risk">Cause of Risk</label>
+                        <textarea id="cause_of_risk" name="cause_of_risk" required placeholder="What causes this risk?"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="department">Department</label>
+                        <input type="text" id="department" name="department" required value="<?php echo $user['department'] ?? ''; ?>">
+                    </div>
+                    
+                    <button type="submit" name="submit_risk" class="btn">Submit Risk Report</button>
+                </form>
             </div>
         </div>
     </div>
     
-    <!-- Risk Scoring Modal -->
-    <div id="scoreModal" class="modal">
+    <!-- Risk Classification Modal -->
+    <div id="classificationModal" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="closeModal('scoreModal')">&times;</span>
-            <h2>Update Risk Score</h2>
-            <form method="POST">
-                <input type="hidden" id="score_risk_id" name="risk_id">
-                <div class="form-group">
-                    <label for="probability">Probability (1-5)</label>
-                    <select id="probability" name="probability" required>
-                        <option value="1">1 - Very Low</option>
-                        <option value="2">2 - Low</option>
-                        <option value="3">3 - Medium</option>
-                        <option value="4">4 - High</option>
-                        <option value="5">5 - Very High</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="impact">Impact (1-5)</label>
-                    <select id="impact" name="impact" required>
-                        <option value="1">1 - Minimal</option>
-                        <option value="2">2 - Minor</option>
-                        <option value="3">3 - Moderate</option>
-                        <option value="4">4 - Major</option>
-                        <option value="5">5 - Catastrophic</option>
-                    </select>
-                </div>
-                <button type="submit" name="update_risk_score" class="btn">Update Score</button>
-            </form>
+            <div class="modal-header">
+                <h3 class="modal-title">Risk Classification</h3>
+                <button class="close" onclick="closeModal('classificationModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form method="POST">
+                    <input type="hidden" id="classification_risk_id" name="risk_id">
+                    
+                    <div class="classification-section">
+                        <h4>Risk Owner Decision</h4>
+                        <p style="margin-bottom: 1rem; color: #666;">As the Risk Owner, you need to classify this risk and decide if it should be reported to the board.</p>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="class_existing_or_new">Risk Type</label>
+                                <select id="class_existing_or_new" name="existing_or_new" required>
+                                    <option value="New">New Risk</option>
+                                    <option value="Existing">Existing Risk</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="class_to_be_reported_to_board">Report to Board</label>
+                                <select id="class_to_be_reported_to_board" name="to_be_reported_to_board" required>
+                                    <option value="No">No</option>
+                                    <option value="Yes">Yes</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" name="update_risk_type" class="btn">Update Classification</button>
+                </form>
+            </div>
         </div>
     </div>
-    
-    <!-- Document Upload Modal -->
-    <div id="documentModal" class="modal">
+
+    <!-- Risk Assessment Modal -->
+    <div id="assessmentModal" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="closeModal('documentModal')">&times;</span>
-            <h2>Upload Document</h2>
-            <form method="POST" enctype="multipart/form-data">
-                <input type="hidden" id="doc_risk_id" name="risk_id">
-                <div class="form-group">
-                    <label for="document">Select Document</label>
-                    <input type="file" id="document" name="document" accept=".pdf,.doc,.docx,.xls,.xlsx" required>
-                </div>
-                <button type="submit" name="upload_document" class="btn">Upload Document</button>
-            </form>
+            <div class="modal-header">
+                <h3 class="modal-title">Risk Assessment</h3>
+                <button class="close" onclick="closeModal('assessmentModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form method="POST">
+                    <input type="hidden" id="assessment_risk_id" name="risk_id">
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="probability">Probability (1-5)</label>
+                            <select id="probability" name="probability" required>
+                                <option value="1">1 - Very Low</option>
+                                <option value="2">2 - Low</option>
+                                <option value="3">3 - Medium</option>
+                                <option value="4">4 - High</option>
+                                <option value="5">5 - Very High</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="impact">Impact (1-5)</label>
+                            <select id="impact" name="impact" required>
+                                <option value="1">1 - Minimal</option>
+                                <option value="2">2 - Minor</option>
+                                <option value="3">3 - Moderate</option>
+                                <option value="4">4 - Major</option>
+                                <option value="5">5 - Catastrophic</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" name="update_assessment" class="btn">Update Assessment</button>
+                </form>
+            </div>
         </div>
     </div>
     
     <script>
+        // Department Chart
+        const departmentData = <?php echo json_encode($risk_by_department); ?>;
+        const departmentCtx = document.getElementById('departmentChart').getContext('2d');
+        
+        if (departmentData.length > 0) {
+            new Chart(departmentCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: departmentData.map(item => item.department),
+                    datasets: [{
+                        data: departmentData.map(item => item.count),
+                        backgroundColor: [
+                            '#E60012',
+                            '#28a745',
+                            '#ffc107',
+                            '#17a2b8',
+                            '#6c757d',
+                            '#fd7e14',
+                            '#6f42c1',
+                            '#e83e8c'
+                        ],
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        } else {
+            departmentCtx.canvas.parentNode.innerHTML = '<p style="text-align: center; color: #666;">No data available</p>';
+        }
+        
+        // Risk Level Chart
+        const riskLevels = <?php echo json_encode($risk_levels); ?>;
+        const levelCtx = document.getElementById('levelChart').getContext('2d');
+        
+        new Chart(levelCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Low (1-3)', 'Medium (4-8)', 'High (9-14)', 'Critical (15+)'],
+                datasets: [{
+                    label: 'Number of Risks',
+                    data: [
+                        parseInt(riskLevels.low_risks) || 0,
+                        parseInt(riskLevels.medium_risks) || 0,
+                        parseInt(riskLevels.high_risks) || 0,
+                        parseInt(riskLevels.critical_risks) || 0
+                    ],
+                    backgroundColor: [
+                        '#28a745',
+                        '#ffc107',
+                        '#fd7e14',
+                        '#dc3545'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+        
         function showTab(tabName) {
             // Hide all tabs
-            const tabs = document.querySelectorAll('.tab-content');
-            tabs.forEach(tab => tab.style.display = 'none');
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
             
             // Remove active class from all buttons
-            const buttons = document.querySelectorAll('.nav-tabs button');
-            buttons.forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.nav-tabs button').forEach(btn => {
+                btn.classList.remove('active');
+            });
             
             // Show selected tab
-            document.getElementById(tabName + '-tab').style.display = 'block';
+            document.getElementById(tabName + '-tab').classList.add('active');
             event.target.classList.add('active');
         }
         
-        function openScoreModal(riskId, probability, impact) {
-            document.getElementById('score_risk_id').value = riskId;
-            document.getElementById('probability').value = probability || 1;
-            document.getElementById('impact').value = impact || 1;
-            document.getElementById('scoreModal').style.display = 'block';
+        function openReportModal() {
+            document.getElementById('reportModal').classList.add('show');
         }
         
-        function openDocumentModal(riskId) {
-            document.getElementById('doc_risk_id').value = riskId;
-            document.getElementById('documentModal').style.display = 'block';
+        function openClassificationModal(riskId) {
+            document.getElementById('classification_risk_id').value = riskId;
+            document.getElementById('classificationModal').classList.add('show');
+        }
+        
+        function openAssessmentModal(riskId) {
+            document.getElementById('assessment_risk_id').value = riskId;
+            document.getElementById('assessmentModal').classList.add('show');
         }
         
         function closeModal(modalId) {
-            document.getElementById(modalId).style.display = 'none';
-        }
-        
-        function generateReport() {
-            window.open('generate_report.php?type=department', '_blank');
-        }
-        
-        function exportToCSV() {
-            window.open('export_csv.php?type=department', '_blank');
+            document.getElementById(modalId).classList.remove('show');
         }
         
         // Close modal when clicking outside
@@ -428,10 +1528,45 @@ $department_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
             const modals = document.querySelectorAll('.modal');
             modals.forEach(modal => {
                 if (event.target === modal) {
-                    modal.style.display = 'none';
+                    modal.classList.remove('show');
                 }
             });
         }
+
+        // Handle highlighting updated risk row
+        <?php if (isset($_GET['updated']) && isset($_GET['risk_id'])): ?>
+        document.addEventListener('DOMContentLoaded', function() {
+            const updatedRiskId = <?php echo (int)$_GET['risk_id']; ?>;
+            
+            // Clean the URL to remove the parameters
+            if (window.history.replaceState) {
+                window.history.replaceState(null, null, 'risk_owner_dashboard.php');
+            }
+            
+            // Highlight the updated risk row
+            setTimeout(function() {
+                const riskRow = document.querySelector(`tr[data-risk-id="${updatedRiskId}"]`);
+                if (riskRow) {
+                    riskRow.style.backgroundColor = '#d4edda';
+                    riskRow.style.border = '2px solid #28a745';
+                    
+                    // Scroll to the row
+                    riskRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    
+                    // Remove highlight after 8 seconds
+                    setTimeout(() => {
+                        riskRow.style.backgroundColor = '';
+                        riskRow.style.border = '';
+                    }, 8000);
+                }
+            }, 500);
+        });
+        <?php endif; ?>
+        
+        // Auto-refresh page every 5 minutes to show updated assignments
+        setTimeout(function() {
+            location.reload();
+        }, 300000); // 5 minutes
     </script>
 </body>
 </html>
