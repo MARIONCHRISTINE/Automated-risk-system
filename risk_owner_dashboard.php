@@ -144,11 +144,12 @@ $user = getCurrentUser();
 // Get comprehensive statistics
 $stats = [];
 
-// Total risks in system
-$query = "SELECT COUNT(*) as total FROM risk_incidents";
+// Risks in my department only
+$query = "SELECT COUNT(*) as total FROM risk_incidents WHERE department = :department";
 $stmt = $db->prepare($query);
+$stmt->bindParam(':department', $user['department']);
 $stmt->execute();
-$stats['total_risks'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$stats['department_risks'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
 // Risks assigned to this risk owner
 $query = "SELECT COUNT(*) as total FROM risk_incidents WHERE risk_owner_id = :user_id";
@@ -157,18 +158,18 @@ $stmt->bindParam(':user_id', $_SESSION['user_id']);
 $stmt->execute();
 $stats['my_assigned_risks'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
-// Unassigned risks (available for assignment)
-$query = "SELECT COUNT(*) as total FROM risk_incidents WHERE risk_owner_id IS NULL";
+// Risks reported by this risk owner
+$query = "SELECT COUNT(*) as total FROM risk_incidents WHERE reported_by = :user_id";
 $stmt = $db->prepare($query);
+$stmt->bindParam(':user_id', $_SESSION['user_id']);
 $stmt->execute();
-$stats['unassigned_risks'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$stats['my_reported_risks'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
-// High/Critical risks assigned to me (using probability * impact calculation with NULL checks)
+// High/Critical risks assigned to me
 $query = "SELECT COUNT(*) as total FROM risk_incidents 
           WHERE risk_owner_id = :user_id 
-          AND probability IS NOT NULL 
-          AND impact IS NOT NULL 
-          AND (probability * impact) >= 9";
+          AND ((inherent_likelihood IS NOT NULL AND inherent_consequence IS NOT NULL AND (inherent_likelihood * inherent_consequence) >= 9)
+          OR (residual_likelihood IS NOT NULL AND residual_consequence IS NOT NULL AND (residual_likelihood * residual_consequence) >= 9))";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':user_id', $_SESSION['user_id']);
 $stmt->execute();
@@ -185,21 +186,25 @@ $stmt->bindParam(':user_id', $_SESSION['user_id']);
 $stmt->execute();
 $assigned_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get unassigned risks (available for assignment) - order by risk level if available
-$query = "SELECT ri.*, u.full_name as reporter_name
+// Get department risks
+$query = "SELECT ri.*, u.full_name as reporter_name, ro.full_name as risk_owner_name
           FROM risk_incidents ri 
           LEFT JOIN users u ON ri.reported_by = u.id
-          WHERE ri.risk_owner_id IS NULL
+          LEFT JOIN users ro ON ri.risk_owner_id = ro.id
+          WHERE ri.department = :department
           ORDER BY 
             CASE 
-              WHEN ri.probability IS NOT NULL AND ri.impact IS NOT NULL 
-              THEN (ri.probability * ri.impact) 
+              WHEN ri.inherent_likelihood IS NOT NULL AND ri.inherent_consequence IS NOT NULL 
+              THEN (ri.inherent_likelihood * ri.inherent_consequence) 
+              WHEN ri.residual_likelihood IS NOT NULL AND ri.residual_consequence IS NOT NULL 
+              THEN (ri.residual_likelihood * ri.residual_consequence)
               ELSE 0 
             END DESC, 
             ri.created_at DESC";
 $stmt = $db->prepare($query);
+$stmt->bindParam(':department', $user['department']);
 $stmt->execute();
-$unassigned_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$department_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Get pending assignments (if you have a separate assignments table)
 $pending_assignments = []; // Initialize as empty array since we're not sure if this table exists
@@ -221,7 +226,7 @@ try {
     $pending_assignments = [];
 }
 
-// Risk level distribution (based on probability * impact with NULL checks)
+// Risk level distribution for department only
 $query = "SELECT 
     SUM(CASE 
         WHEN probability IS NULL OR impact IS NULL THEN 1
@@ -240,20 +245,25 @@ $query = "SELECT
         WHEN probability IS NOT NULL AND impact IS NOT NULL AND (probability * impact) >= 15 
         THEN 1 ELSE 0 
     END) as critical_risks
-    FROM risk_incidents";
+    FROM risk_incidents 
+    WHERE department = :department";
 $stmt = $db->prepare($query);
+$stmt->bindParam(':department', $user['department']);
 $stmt->execute();
 $risk_levels = $stmt->fetch(PDO::FETCH_ASSOC);
 
-// Risk by department for charts
-$query = "SELECT department, COUNT(*) as count 
-          FROM risk_incidents 
-          WHERE department IS NOT NULL AND department != ''
-          GROUP BY department
-          ORDER BY count DESC";
+// Risk status distribution for department
+$query = "SELECT 
+    risk_status,
+    COUNT(*) as count
+    FROM risk_incidents 
+    WHERE department = :department
+    GROUP BY risk_status
+    ORDER BY count DESC";
 $stmt = $db->prepare($query);
+$stmt->bindParam(':department', $user['department']);
 $stmt->execute();
-$risk_by_department = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$risk_by_status = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 function getRiskLevel($probability, $impact) {
     if (!$probability || !$impact) return 'not-assessed';
@@ -514,6 +524,15 @@ function getStatusBadgeClass($status) {
             color: #999;
             font-size: 0.8rem;
             margin-top: 0.25rem;
+        }
+        
+        .action-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(230, 0, 18, 0.2);
+        }
+
+        .action-card .stat-number {
+            font-size: 3rem;
         }
         
         .risk-grid {
@@ -996,131 +1015,139 @@ function getStatusBadgeClass($status) {
             <div id="dashboard-tab" class="tab-content active">
                 
                 <!-- Risk Owner Statistics Cards -->
-                <div class="dashboard-grid">
-                    <div class="stat-card">
-                        <span class="stat-number"><?php echo $stats['total_risks']; ?></span>
-                        <div class="stat-label">Total System Risks</div>
-                        <div class="stat-description">All risks in the system</div>
-                    </div>
-                    <div class="stat-card">
-                        <span class="stat-number"><?php echo $stats['my_assigned_risks']; ?></span>
-                        <div class="stat-label">My Assigned Risks</div>
-                        <div class="stat-description">Risks assigned to you</div>
-                    </div>
-                    <div class="stat-card">
-                        <span class="stat-number"><?php echo $stats['unassigned_risks']; ?></span>
-                        <div class="stat-label">Available Risks</div>
-                        <div class="stat-description">Unassigned risks you can claim</div>
-                    </div>
-                    <div class="stat-card">
-                        <span class="stat-number"><?php echo $stats['my_high_risks']; ?></span>
-                        <div class="stat-label">My High/Critical</div>
-                        <div class="stat-description">High priority risks assigned to you</div>
-                    </div>
-                </div>
+                
+<div class="dashboard-grid">
+    <div class="stat-card">
+        <span class="stat-number"><?php echo $stats['department_risks']; ?></span>
+        <div class="stat-label">Department Risks</div>
+        <div class="stat-description">All risks in <?php echo $user['department']; ?></div>
+    </div>
+    <div class="stat-card">
+        <span class="stat-number"><?php echo $stats['my_assigned_risks']; ?></span>
+        <div class="stat-label">My Assigned Risks</div>
+        <div class="stat-description">Risks assigned to you</div>
+    </div>
+    <div class="stat-card action-card" onclick="openReportModal()" style="cursor: pointer; transition: transform 0.3s;">
+        <span class="stat-number">📝</span>
+        <div class="stat-label">Report New Risk</div>
+        <div class="stat-description">Click to report a new risk</div>
+    </div>
+    <div class="stat-card">
+        <span class="stat-number"><?php echo $stats['my_reported_risks']; ?></span>
+        <div class="stat-label">Reported Risks</div>
+        <div class="stat-description">Risks you have reported</div>
+    </div>
+</div>
 
                 <!-- Charts Section -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
-                    <!-- Risk by Department Chart -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h3 class="card-title">Risks by Department</h3>
-                        </div>
-                        <div style="padding: 1rem;">
-                            <div class="chart-container">
-                                <canvas id="departmentChart"></canvas>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Risk Level Distribution -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h3 class="card-title">Risk Level Distribution</h3>
-                        </div>
-                        <div style="padding: 1rem;">
-                            <div class="chart-container">
-                                <canvas id="levelChart"></canvas>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+    <!-- Risk Status in Department -->
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Risk Status (<?php echo $user['department']; ?>)</h3>
+        </div>
+        <div style="padding: 1rem;">
+            <div class="chart-container">
+                <canvas id="statusChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Risk Level Distribution -->
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Risk Level Distribution (<?php echo $user['department']; ?>)</h3>
+        </div>
+        <div style="padding: 1rem;">
+            <div class="chart-container">
+                <canvas id="levelChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
 
                 <!-- Risk Owner Guidelines -->
-                <div class="card">
-                    <div class="card-header">
-                        <h3 class="card-title">🎯 Risk Owner Responsibilities</h3>
-                    </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
-                        <div>
-                            <h4 style="color: #E60012; margin-bottom: 1rem;">✅ Your Capabilities:</h4>
-                            <ul style="list-style-type: none; padding: 0;">
-                                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
-                                    <strong>👀 View All Risks</strong><br>
-                                    <small>Access to all risks reported by staff across the organization</small>
-                                </li>
-                                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
-                                    <strong>🎯 Self-Assign Risks</strong><br>
-                                    <small>Assign yourself to risks you can manage and resolve</small>
-                                </li>
-                                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
-                                    <strong>📝 Report New Risks</strong><br>
-                                    <small>Identify and report risks you discover in your area</small>
-                                </li>
-                                <li style="padding: 0.5rem 0;">
-                                    <strong>📊 Full Risk Management</strong><br>
-                                    <small>Complete access to risk assessment and treatment planning</small>
-                                </li>
-                            </ul>
-                        </div>
-                        <div>
-                            <h4 style="color: #28a745; margin-bottom: 1rem;">💡 Best Practices:</h4>
-                            <ul style="list-style-type: none; padding: 0;">
-                                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
-                                    <strong>🚨 Prioritize High Risks</strong><br>
-                                    <small>Focus on critical and high-rated risks first</small>
-                                </li>
-                                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
-                                    <strong>⚡ Respond Quickly</strong><br>
-                                    <small>Assign yourself to risks within your expertise promptly</small>
-                                </li>
-                                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
-                                    <strong>🤝 Collaborate</strong><br>
-                                    <small>Work with other risk owners to ensure comprehensive coverage</small>
-                                </li>
-                                <li style="padding: 0.5rem 0;">
-                                    <strong>📈 Monitor Progress</strong><br>
-                                    <small>Regularly update status of your assigned risks</small>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                    
-                    <div style="background: #e3f2fd; border-left: 4px solid #2196f3; padding: 1rem; margin-top: 2rem; border-radius: 0 0.25rem 0.25rem 0;">
-                        <strong>📞 Need Help?</strong> Contact the Compliance Team at compliance@airtel.africa or your direct supervisor for assistance with risk management.
-                    </div>
-                </div>
+                
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">🎯 Risk Owner Responsibilities (<?php echo $user['department']; ?>)</h3>
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+        <div>
+            <h4 style="color: #E60012; margin-bottom: 1rem;">✅ Your Department Access:</h4>
+            <ul style="list-style-type: none; padding: 0;">
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
+                    <strong>🏢 Department Risks</strong><br>
+                    <small>View and manage all risks within <?php echo $user['department']; ?></small>
+                </li>
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
+                    <strong>🔄 Auto-Assigned Risks</strong><br>
+                    <small>All risks are automatically assigned to risk owners</small>
+                </li>
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
+                    <strong>📝 Risk Reporting</strong><br>
+                    <small>Report new risks discovered in your department</small>
+                </li>
+                <li style="padding: 0.5rem 0;">
+                    <strong>📊 Risk Assessment</strong><br>
+                    <small>Complete risk assessments and treatment plans</small>
+                </li>
+            </ul>
+        </div>
+        <div>
+            <h4 style="color: #28a745; margin-bottom: 1rem;">💡 Department Best Practices:</h4>
+            <ul style="list-style-type: none; padding: 0;">
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
+                    <strong>🚨 Monitor Department Risks</strong><br>
+                    <small>Keep track of all risks affecting your department</small>
+                </li>
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
+                    <strong>⚡ Quick Response</strong><br>
+                    <small>Address high-priority risks in your area promptly</small>
+                </li>
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
+                    <strong>🤝 Team Collaboration</strong><br>
+                    <small>Work with department colleagues on risk management</small>
+                </li>
+                <li style="padding: 0.5rem 0;">
+                    <strong>📈 Progress Tracking</strong><br>
+                    <small>Regularly update status of your assigned risks</small>
+                </li>
+            </ul>
+        </div>
+    </div>
+    
+    <div style="background: #e8f5e8; border-left: 4px solid #28a745; padding: 1rem; margin-top: 2rem; border-radius: 0 0.25rem 0.25rem 0;">
+        <strong>🤖 Auto-Assignment System:</strong> All risks are automatically assigned to risk owners in your department using a round-robin system. You don't need to claim risks - they'll be assigned to you automatically when reported.
+    </div>
+    
+    <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 1rem; margin-top: 2rem; border-radius: 0 0.25rem 0.25rem 0;">
+        <strong>🔒 Access Scope:</strong> Your access is limited to <?php echo $user['department']; ?> department risks only. For system-wide risk reports, contact the Compliance Team at compliance@airtel.africa.
+    </div>
+</div>
 
                 <!-- Quick Actions -->
-                <div class="card">
-                    <div class="card-header">
-                        <h3 class="card-title">🚀 Quick Actions</h3>
-                    </div>
-                    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-                        <a href="javascript:void(0)" onclick="openReportModal()" class="btn btn-primary" style="flex: 1; min-width: 200px; padding: 1rem; text-align: center;">
-                            📝 Report New Risk<br>
-                            <small>Report a risk you've identified</small>
-                        </a>
-                        <a href="javascript:void(0)" class="btn btn-secondary" style="flex: 1; min-width: 200px; padding: 1rem; text-align: center;" onclick="showTab('available')">
-                            🎯 View Available Risks<br>
-                            <small>See unassigned risks you can claim</small>
-                        </a>
-                        <a href="view_risks.php" class="btn btn-outline" style="flex: 1; min-width: 200px; padding: 1rem; text-align: center;">
-                            👀 View All Risks<br>
-                            <small>Browse all risks in the system</small>
-                        </a>
-                    </div>
-                </div>
+                
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">🚀 Quick Actions</h3>
+    </div>
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+        <a href="javascript:void(0)" onclick="openReportModal()" class="btn btn-primary" style="flex: 1; min-width: 200px; padding: 1rem; text-align: center;">
+            📝 Report New Risk<br>
+            <small>Report a risk you've identified</small>
+        </a>
+        <a href="javascript:void(0)" class="btn btn-secondary" style="flex: 1; min-width: 200px; padding: 1rem; text-align: center;" onclick="showTab('department')">
+            🏢 View Department Risks<br>
+            <small>See all risks in your department</small>
+        </a>
+        <a href="javascript:void(0)" class="btn btn-outline" style="flex: 1; min-width: 200px; padding: 1rem; text-align: center;" onclick="showTab('risks')">
+            📋 My Assigned Risks<br>
+            <small>View risks assigned to you</small>
+        </a>
+    </div>
+</div>
             </div>
             
             <!-- My Assigned Risks Tab -->
@@ -1133,8 +1160,8 @@ function getStatusBadgeClass($status) {
                     <?php if (empty($assigned_risks)): ?>
                         <div class="alert-info">
                             <p><strong>No risks assigned to you yet.</strong></p>
-                            <p>Browse the "Available Risks" section to assign yourself to risks you can manage.</p>
-                            <button class="btn btn-primary" onclick="showTab('available')">View Available Risks</button>
+                            <p>All risks are automatically assigned by the system. New risks will appear here when assigned to you.</p>
+                            <button class="btn btn-primary" onclick="showTab('department')">View Department Risks</button>
                         </div>
                     <?php else: ?>
                     <div class="table-responsive">
@@ -1187,73 +1214,80 @@ function getStatusBadgeClass($status) {
                 </div>
             </div>
 
-            <!-- Available Risks Tab -->
-            <div id="available-tab" class="tab-content">
-                <div class="card">
-                    <div class="card-header">
-                        <h2 class="card-title">Available Risks for Assignment</h2>
-                        <span class="badge badge-warning"><?php echo count($unassigned_risks); ?> unassigned risks</span>
-                    </div>
-                    <?php if (empty($unassigned_risks)): ?>
-                        <div class="alert-success">
-                            <p><strong>Great! All risks have been assigned.</strong></p>
-                            <p>There are currently no unassigned risks in the system.</p>
-                        </div>
-                    <?php else: ?>
-                    <div class="alert-info" style="margin-bottom: 1.5rem;">
-                        <strong>💡 Tip:</strong> Prioritize high and critical risks first. Click "Assign to Me" to take ownership of risks within your expertise.
-                    </div>
-                    <div class="table-responsive">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>Risk Name</th>
-                                    <th>Risk Level</th>
-                                    <th>Status</th>
-                                    <th>Reported By</th>
-                                    <th>Reported Date</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($unassigned_risks as $risk): ?>
-                                <tr class="risk-row <?php echo getRiskLevel($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>">
-                                    <td>
-                                        <strong><?php echo htmlspecialchars($risk['risk_name']); ?></strong>
-                                        <?php if ($risk['risk_description']): ?>
-                                            <br><small class="text-muted"><?php echo htmlspecialchars(substr($risk['risk_description'], 0, 100)) . (strlen($risk['risk_description']) > 100 ? '...' : ''); ?></small>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <span class="risk-badge risk-<?php echo getRiskLevel($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>">
-                                            <?php echo getRiskLevelText($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <span class="status-badge status-<?php echo str_replace('_', '-', $risk['risk_status'] ?? 'pending'); ?>">
-                                            <?php echo ucfirst(str_replace('_', ' ', $risk['risk_status'] ?? 'Not Started')); ?>
-                                        </span>
-                                    </td>
-                                    <td><?php echo htmlspecialchars($risk['reporter_name']); ?></td>
-                                    <td><?php echo date('M j, Y', strtotime($risk['created_at'])); ?></td>
-                                    <td>
-                                        <div class="assignment-actions">
-                                            <a href="view_risk.php?id=<?php echo $risk['id']; ?>" class="btn btn-sm btn-secondary">View</a>
-                                            <form method="POST" class="quick-assign-form">
-                                                <input type="hidden" name="action" value="assign_to_me">
-                                                <input type="hidden" name="risk_id" value="<?php echo $risk['id']; ?>">
-                                                <button type="submit" class="btn btn-sm btn-primary">Assign to Me</button>
-                                            </form>
-                                        </div>
-                                    </td>
-                                </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                    <?php endif; ?>
-                </div>
+            <!-- Department Risks Tab -->
+<div id="department-tab" class="tab-content">
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">Department Risks (<?php echo $user['department']; ?>)</h2>
+            <span class="badge badge-info"><?php echo count($department_risks); ?> risks in your department</span>
+        </div>
+        <?php if (empty($department_risks)): ?>
+            <div class="alert-info">
+                <p><strong>No risks in your department yet.</strong></p>
+                <p>Your department hasn't reported any risks yet.</p>
             </div>
+        <?php else: ?>
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Risk Name</th>
+                        <th>Risk Level</th>
+                        <th>Status</th>
+                        <th>Risk Owner</th>
+                        <th>Reported By</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($department_risks as $risk): ?>
+                    <tr class="risk-row <?php echo getRiskLevel($risk['inherent_likelihood'] ?? $risk['residual_likelihood'] ?? 0, $risk['inherent_consequence'] ?? $risk['residual_consequence'] ?? 0); ?>" data-risk-id="<?php echo $risk['id']; ?>">
+                        <td>
+                            <strong><?php echo htmlspecialchars($risk['risk_name']); ?></strong>
+                            <?php if ($risk['risk_description']): ?>
+                                <br><small class="text-muted"><?php echo htmlspecialchars(substr($risk['risk_description'], 0, 100)) . (strlen($risk['risk_description']) > 100 ? '...' : ''); ?></small>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <span class="risk-badge risk-<?php echo getRiskLevel($risk['inherent_likelihood'] ?? $risk['residual_likelihood'] ?? 0, $risk['inherent_consequence'] ?? $risk['residual_consequence'] ?? 0); ?>">
+                                <?php echo getRiskLevelText($risk['inherent_likelihood'] ?? $risk['residual_likelihood'] ?? 0, $risk['inherent_consequence'] ?? $risk['residual_consequence'] ?? 0); ?>
+                            </span>
+                        </td>
+                        <td>
+                            <span class="status-badge status-<?php echo str_replace('_', '-', $risk['risk_status'] ?? 'pending'); ?>">
+                                <?php echo ucfirst(str_replace('_', ' ', $risk['risk_status'] ?? 'Not Started')); ?>
+                            </span>
+                        </td>
+                        <td>
+                            <?php if ($risk['risk_owner_name']): ?>
+                                <span class="owner-badge"><?php echo htmlspecialchars($risk['risk_owner_name']); ?></span>
+                            <?php else: ?>
+                                <span class="unassigned-badge">Auto-Assigning...</span>
+                            <?php endif; ?>
+                        </td>
+                        <td><?php echo htmlspecialchars($risk['reporter_name']); ?></td>
+                        <td>
+                            <div class="assignment-actions">
+                                <a href="view_risk.php?id=<?php echo $risk['id']; ?>" class="btn btn-sm btn-primary">View Details</a>
+                                <?php if ($risk['risk_owner_id'] != $_SESSION['user_id'] && $risk['risk_owner_id']): ?>
+                                    <form method="POST" class="quick-assign-form" onsubmit="return confirm('Are you sure you want to take over this risk?')">
+                                        <input type="hidden" name="action" value="assign_to_me">
+                                        <input type="hidden" name="risk_id" value="<?php echo $risk['id']; ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline">Take Over</button>
+                                    </form>
+                                <?php elseif ($risk['risk_owner_id'] == $_SESSION['user_id']): ?>
+                                    <span class="badge badge-success">Mine</span>
+                                <?php endif; ?>
+                            </div>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php endif; ?>
+    </div>
+</div>
 
             <!-- Assignments Tab (Notifications) -->
             <div id="assignments-tab" class="tab-content">
@@ -1271,60 +1305,246 @@ function getStatusBadgeClass($status) {
         </main>
     </div>
     
-    <!-- Risk Report Modal -->
-    <div id="reportModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">Report New Risk</h3>
-                <button class="close" onclick="closeModal('reportModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <form method="POST">
-                    <div class="classification-section">
-                        <h4>Risk Classification</h4>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="existing_or_new">Risk Type</label>
-                                <select id="existing_or_new" name="existing_or_new" required>
-                                    <option value="New">New Risk</option>
-                                    <option value="Existing">Existing Risk</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="to_be_reported_to_board">Report to Board</label>
-                                <select id="to_be_reported_to_board" name="to_be_reported_to_board" required>
-                                    <option value="No">No</option>
-                                    <option value="Yes">Yes</option>
-                                </select>
-                            </div>
+    <!-- Comprehensive Risk Report Modal for Risk Owners -->
+<div id="reportModal" class="modal">
+    <div class="modal-content" style="max-width: 1200px;">
+        <div class="modal-header">
+            <h3 class="modal-title">Report New Risk - Comprehensive Form</h3>
+            <button class="close" onclick="closeModal('reportModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form method="POST">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 2rem;">
+                    
+                    <!-- RISK IDENTIFICATION Section -->
+                    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #E60012;">
+                        <h4 style="color: #E60012; margin-bottom: 1rem;">📋 RISK IDENTIFICATION</h4>
+                        
+                        <div class="form-group">
+                            <label for="existing_or_new">Risk Type</label>
+                            <select id="existing_or_new" name="existing_or_new" required>
+                                <option value="New">New Risk</option>
+                                <option value="Existing">Existing Risk</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="to_be_reported_to_board">Report to Board</label>
+                            <select id="to_be_reported_to_board" name="to_be_reported_to_board" required>
+                                <option value="No">No</option>
+                                <option value="Yes">Yes</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="risk_name">Risk Name</label>
+                            <input type="text" id="risk_name" name="risk_name" required placeholder="Enter a clear risk title">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="risk_description">Risk Description</label>
+                            <textarea id="risk_description" name="risk_description" required placeholder="Describe the risk in detail"></textarea>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="cause_of_risk">Cause of Risk</label>
+                            <textarea id="cause_of_risk" name="cause_of_risk" required placeholder="What causes this risk?"></textarea>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="risk_category">Risk Category</label>
+                            <select id="risk_category" name="risk_category" required>
+                                <option value="">Select Category</option>
+                                <option value="Strategic Risk">Strategic Risk</option>
+                                <option value="Operational Risk">Operational Risk</option>
+                                <option value="Financial Risk">Financial Risk</option>
+                                <option value="Compliance Risk">Compliance Risk</option>
+                                <option value="Technology Risk">Technology Risk</option>
+                                <option value="Reputational Risk">Reputational Risk</option>
+                                <option value="Market Risk">Market Risk</option>
+                                <option value="Credit Risk">Credit Risk</option>
+                                <option value="Liquidity Risk">Liquidity Risk</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="department">Department</label>
+                            <input type="text" id="department" name="department" required value="<?php echo $user['department'] ?? ''; ?>" readonly style="background: #e9ecef;">
                         </div>
                     </div>
                     
-                    <div class="form-group">
-                        <label for="risk_name">Risk Name</label>
-                        <input type="text" id="risk_name" name="risk_name" required placeholder="Enter a clear risk title">
+                    <!-- RISK ASSESSMENT Section -->
+                    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #E60012;">
+                        <h4 style="color: #E60012; margin-bottom: 1rem;">📊 RISK ASSESSMENT</h4>
+                        
+                        <h5 style="color: #E60012; margin-bottom: 1rem;">Inherent Risk (Gross Risk)</h5>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                            <div class="form-group">
+                                <label for="inherent_likelihood">Likelihood (1-5)</label>
+                                <select id="inherent_likelihood" name="inherent_likelihood" onchange="calculateInherentRating()" required>
+                                    <option value="">Select</option>
+                                    <option value="1">1 - Very Low</option>
+                                    <option value="2">2 - Low</option>
+                                    <option value="3">3 - Medium</option>
+                                    <option value="4">4 - High</option>
+                                    <option value="5">5 - Very High</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="inherent_consequence">Consequence (1-5)</label>
+                                <select id="inherent_consequence" name="inherent_consequence" onchange="calculateInherentRating()" required>
+                                    <option value="">Select</option>
+                                    <option value="1">1 - Minimal</option>
+                                    <option value="2">2 - Minor</option>
+                                    <option value="3">3 - Moderate</option>
+                                    <option value="4">4 - Major</option>
+                                    <option value="5">5 - Catastrophic</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Inherent Rating</label>
+                            <div style="display: flex; align-items: center; gap: 1rem;">
+                                <input type="hidden" id="inherent_rating" name="inherent_rating">
+                                <div id="inherent_rating_display" style="background: #E60012; color: white; padding: 0.5rem 1rem; border-radius: 4px; font-weight: bold; min-width: 60px; text-align: center;">-</div>
+                            </div>
+                        </div>
+                        
+                        <h5 style="color: #E60012; margin: 1.5rem 0 1rem;">Residual Risk (Net Risk)</h5>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                            <div class="form-group">
+                                <label for="residual_likelihood">Likelihood (1-5)</label>
+                                <select id="residual_likelihood" name="residual_likelihood" onchange="calculateResidualRating()" required>
+                                    <option value="">Select</option>
+                                    <option value="1">1 - Very Low</option>
+                                    <option value="2">2 - Low</option>
+                                    <option value="3">3 - Medium</option>
+                                    <option value="4">4 - High</option>
+                                    <option value="5">5 - Very High</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="residual_consequence">Consequence (1-5)</label>
+                                <select id="residual_consequence" name="residual_consequence" onchange="calculateResidualRating()" required>
+                                    <option value="">Select</option>
+                                    <option value="1">1 - Minimal</option>
+                                    <option value="2">2 - Minor</option>
+                                    <option value="3">3 - Moderate</option>
+                                    <option value="4">4 - Major</option>
+                                    <option value="5">5 - Catastrophic</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Residual Rating</label>
+                            <div style="display: flex; align-items: center; gap: 1rem;">
+                                <input type="hidden" id="residual_rating" name="residual_rating">
+                                <div id="residual_rating_display" style="background: #E60012; color: white; padding: 0.5rem 1rem; border-radius: 4px; font-weight: bold; min-width: 60px; text-align: center;">-</div>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="treatment_action">Treatment Action</label>
+                            <textarea id="treatment_action" name="treatment_action" placeholder="Describe the treatment action required"></textarea>
+                        </div>
                     </div>
                     
-                    <div class="form-group">
-                        <label for="risk_description">Risk Description</label>
-                        <textarea id="risk_description" name="risk_description" required placeholder="Describe the risk in detail"></textarea>
+                    <!-- RISK TREATMENT Section -->
+                    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #E60012;">
+                        <h4 style="color: #E60012; margin-bottom: 1rem;">🛡️ RISK TREATMENT</h4>
+                        
+                        <div class="form-group">
+                            <label for="controls_action_plans">Controls/Action Plans</label>
+                            <textarea id="controls_action_plans" name="controls_action_plans" placeholder="Detail the controls and action plans"></textarea>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="target_completion_date">Target Completion Date</label>
+                            <input type="date" id="target_completion_date" name="target_completion_date">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Risk Owner</label>
+                            <input type="text" value="<?php echo $_SESSION['full_name'] ?? $_SESSION['email']; ?> (You)" readonly style="background: #e9ecef;">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="progress_update">Initial Progress Update</label>
+                            <textarea id="progress_update" name="progress_update" placeholder="Provide initial progress notes"></textarea>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="treatment_status">Treatment Status</label>
+                            <select id="treatment_status" name="treatment_status">
+                                <option value="Not Started">Not Started</option>
+                                <option value="In Progress">In Progress</option>
+                                <option value="On Hold">On Hold</option>
+                                <option value="Completed">Completed</option>
+                                <option value="Cancelled">Cancelled</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="risk_status">Overall Risk Status</label>
+                            <select id="risk_status" name="risk_status">
+                                <option value="pending">Pending</option>
+                                <option value="in_progress">In Progress</option>
+                                <option value="completed">Completed</option>
+                                <option value="on_hold">On Hold</option>
+                            </select>
+                        </div>
                     </div>
-                    
-                    <div class="form-group">
-                        <label for="cause_of_risk">Cause of Risk</label>
-                        <textarea id="cause_of_risk" name="cause_of_risk" required placeholder="What causes this risk?"></textarea>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="department">Department</label>
-                        <input type="text" id="department" name="department" required value="<?php echo $user['department'] ?? ''; ?>">
-                    </div>
-                    
-                    <button type="submit" name="submit_risk" class="btn">Submit Risk Report</button>
-                </form>
-            </div>
+                </div>
+                
+                <div style="background: #f8f9fa; padding: 1.5rem; margin-top: 2rem; border-top: 1px solid #dee2e6; display: flex; gap: 1rem; justify-content: flex-end;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('reportModal')">Cancel</button>
+                    <button type="submit" name="submit_comprehensive_risk" class="btn">Submit Complete Risk Report</button>
+                </div>
+            </form>
         </div>
     </div>
+</div>
+
+<script>
+function calculateInherentRating() {
+    const likelihood = document.getElementById('inherent_likelihood').value;
+    const consequence = document.getElementById('inherent_consequence').value;
+    
+    if (likelihood && consequence) {
+        const rating = parseInt(likelihood) * parseInt(consequence);
+        document.getElementById('inherent_rating').value = rating;
+        document.getElementById('inherent_rating_display').textContent = rating;
+        
+        // Update color based on rating
+        const display = document.getElementById('inherent_rating_display');
+        display.style.background = '#E60012';
+        if (rating >= 15) display.style.background = '#dc3545';
+        else if (rating >= 9) display.style.background = '#fd7e14';
+        else if (rating >= 4) display.style.background = '#ffc107';
+        else display.style.background = '#28a745';
+    }
+}
+
+function calculateResidualRating() {
+    const likelihood = document.getElementById('residual_likelihood').value;
+    const consequence = document.getElementById('residual_consequence').value;
+    
+    if (likelihood && consequence) {
+        const rating = parseInt(likelihood) * parseInt(consequence);
+        document.getElementById('residual_rating').value = rating;
+        document.getElementById('residual_rating_display').textContent = rating;
+        
+        // Update color based on rating
+        const display = document.getElementById('residual_rating_display');
+        display.style.background = '#E60012';
+        if (rating >= 15) display.style.background = '#dc3545';
+        else if (rating >= 9) display.style.background = '#fd7e14';
+        else if (rating >= 4) display.style.background = '#ffc107';
+        else display.style.background = '#28a745';
+    }
+}
+</script>
     
     <!-- Risk Classification Modal -->
     <div id="classificationModal" class="modal">
@@ -1406,26 +1626,23 @@ function getStatusBadgeClass($status) {
     </div>
     
     <script>
-        // Department Chart
-        const departmentData = <?php echo json_encode($risk_by_department); ?>;
-        const departmentCtx = document.getElementById('departmentChart').getContext('2d');
-        
-        if (departmentData.length > 0) {
-            new Chart(departmentCtx, {
+        // Risk Status Chart (replace department chart)
+        const statusData = <?php echo json_encode($risk_by_status); ?>;
+        const statusCtx = document.getElementById('statusChart').getContext('2d');
+
+        if (statusData.length > 0) {
+            new Chart(statusCtx, {
                 type: 'doughnut',
                 data: {
-                    labels: departmentData.map(item => item.department),
+                    labels: statusData.map(item => item.risk_status ? item.risk_status.replace('_', ' ').toUpperCase() : 'PENDING'),
                     datasets: [{
-                        data: departmentData.map(item => item.count),
+                        data: statusData.map(item => item.count),
                         backgroundColor: [
-                            '#E60012',
-                            '#28a745',
-                            '#ffc107',
-                            '#17a2b8',
-                            '#6c757d',
-                            '#fd7e14',
-                            '#6f42c1',
-                            '#e83e8c'
+                            '#28a745', // completed
+                            '#ffc107', // in_progress  
+                            '#6c757d', // pending
+                            '#dc3545', // cancelled
+                            '#17a2b8'  // on_hold
                         ],
                         borderWidth: 2,
                         borderColor: '#fff'
@@ -1442,7 +1659,7 @@ function getStatusBadgeClass($status) {
                 }
             });
         } else {
-            departmentCtx.canvas.parentNode.innerHTML = '<p style="text-align: center; color: #666;">No data available</p>';
+            statusCtx.canvas.parentNode.innerHTML = '<p style="text-align: center; color: #666;">No data available</p>';
         }
         
         // Risk Level Chart
@@ -1570,3 +1787,63 @@ function getStatusBadgeClass($status) {
     </script>
 </body>
 </html>
+<?php
+// Handle comprehensive risk reporting (Risk Owners can report complete risks)
+if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
+    try {
+        $db->beginTransaction();
+        
+        $query = "INSERT INTO risk_incidents (
+            risk_name, risk_description, cause_of_risk, department, reported_by, risk_owner_id,
+            existing_or_new, to_be_reported_to_board, risk_category,
+            inherent_likelihood, inherent_consequence, inherent_rating,
+            residual_likelihood, residual_consequence, residual_rating,
+            treatment_action, controls_action_plans, target_completion_date,
+            progress_update, treatment_status, risk_status,
+            created_at, updated_at
+        ) VALUES (
+            :risk_name, :risk_description, :cause_of_risk, :department, :reported_by, :risk_owner_id,
+            :existing_or_new, :to_be_reported_to_board, :risk_category,
+            :inherent_likelihood, :inherent_consequence, :inherent_rating,
+            :residual_likelihood, :residual_consequence, :residual_rating,
+            :treatment_action, :controls_action_plans, :target_completion_date,
+            :progress_update, :treatment_status, :risk_status,
+            NOW(), NOW()
+        )";
+        
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':risk_name', $_POST['risk_name']);
+        $stmt->bindParam(':risk_description', $_POST['risk_description']);
+        $stmt->bindParam(':cause_of_risk', $_POST['cause_of_risk']);
+        $stmt->bindParam(':department', $_POST['department']);
+        $stmt->bindParam(':reported_by', $_SESSION['user_id']);
+        $stmt->bindParam(':risk_owner_id', $_SESSION['user_id']); // Auto-assign to self
+        $stmt->bindParam(':existing_or_new', $_POST['existing_or_new']);
+        $stmt->bindParam(':to_be_reported_to_board', $_POST['to_be_reported_to_board']);
+        $stmt->bindParam(':risk_category', $_POST['risk_category']);
+        $stmt->bindParam(':inherent_likelihood', $_POST['inherent_likelihood']);
+        $stmt->bindParam(':inherent_consequence', $_POST['inherent_consequence']);
+        $stmt->bindParam(':inherent_rating', $_POST['inherent_rating']);
+        $stmt->bindParam(':residual_likelihood', $_POST['residual_likelihood']);
+        $stmt->bindParam(':residual_consequence', $_POST['residual_consequence']);
+        $stmt->bindParam(':residual_rating', $_POST['residual_rating']);
+        $stmt->bindParam(':treatment_action', $_POST['treatment_action']);
+        $stmt->bindParam(':controls_action_plans', $_POST['controls_action_plans']);
+        $stmt->bindParam(':target_completion_date', $_POST['target_completion_date']);
+        $stmt->bindParam(':progress_update', $_POST['progress_update']);
+        $stmt->bindParam(':treatment_status', $_POST['treatment_status']);
+        $stmt->bindParam(':risk_status', $_POST['risk_status']);
+        
+        if ($stmt->execute()) {
+            $db->commit();
+            $success_message = "Comprehensive risk reported successfully and assigned to you!";
+        } else {
+            $db->rollback();
+            $error_message = "Failed to report comprehensive risk.";
+        }
+    } catch (PDOException $e) {
+        $db->rollback();
+        $error_message = "Failed to report comprehensive risk: " . $e->getMessage();
+    }
+}
+?>

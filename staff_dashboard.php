@@ -2,6 +2,7 @@
 include_once 'includes/auth.php';
 requireRole('staff');
 include_once 'config/database.php';
+include_once 'includes/auto_assignment.php';
 
 $database = new Database();
 $db = $database->getConnection();
@@ -30,6 +31,9 @@ if ($_POST && isset($_POST['submit_risk'])) {
         $error_message = "User account not found. Please contact administrator.";
     } else {
         try {
+            // Start transaction for risk submission and auto-assignment
+            $db->beginTransaction();
+            
             $query = "INSERT INTO risk_incidents (risk_name, risk_description, cause_of_risk, department, reported_by) VALUES (:risk_name, :risk_description, :cause_of_risk, :department, :reported_by)";
             $stmt = $db->prepare($query);
             $stmt->bindParam(':risk_name', $risk_name);
@@ -39,11 +43,21 @@ if ($_POST && isset($_POST['submit_risk'])) {
             $stmt->bindParam(':reported_by', $_SESSION['user_id']);
             
             if ($stmt->execute()) {
+                $risk_id = $db->lastInsertId();
+                
+                // Silently attempt auto-assignment
+                assignRiskAutomatically($risk_id, $department, $db);
+                
+                // Commit transaction
+                $db->commit();
+                
                 $success_message = "Risk reported successfully!";
             } else {
+                $db->rollback();
                 $error_message = "Failed to report risk. Please try again.";
             }
         } catch (PDOException $e) {
+            $db->rollback();
             $error_message = "Database error: " . $e->getMessage();
             error_log("Risk submission error: " . $e->getMessage());
         }
@@ -780,6 +794,8 @@ $user = getCurrentUser();
             </div>
             <div class="modal-body">
                 <form method="POST">
+                    <input type="hidden" name="department" value="<?php echo $user['department'] ?? ''; ?>">
+    
                     <div class="form-group">
                         <label for="risk_name">Risk Name</label>
                         <input type="text" id="risk_name" name="risk_name" required placeholder="Enter a clear risk title">
@@ -793,11 +809,6 @@ $user = getCurrentUser();
                     <div class="form-group">
                         <label for="cause_of_risk">Cause of Risk</label>
                         <textarea id="cause_of_risk" name="cause_of_risk" required placeholder="What causes this risk?"></textarea>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="department">Department</label>
-                        <input type="text" id="department" name="department" required placeholder="Your department" value="<?php echo $user['department'] ?? ''; ?>">
                     </div>
                     
                     <button type="submit" name="submit_risk" class="btn">Submit Risk Report</button>
