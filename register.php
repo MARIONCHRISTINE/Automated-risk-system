@@ -1,5 +1,6 @@
 <?php
 session_start();
+
 include_once 'config/database.php';
 
 // Include compatibility functions if file exists
@@ -27,6 +28,9 @@ if ($_POST) {
     $role = $_POST['role'];
     $department = $_POST['department'];
     
+    // Generate username from email (part before @)
+    $username = explode('@', $email)[0];
+    
     // Validate email domain - using compatible function
     if (!endsWith($email, '@airtel.africa')) {
         $error = "Please use your Airtel email address ending with @airtel.africa";
@@ -41,21 +45,23 @@ if ($_POST) {
         $db = $database->getConnection();
         
         // Check if email already exists
-        $check_query = "SELECT id FROM users WHERE email = :email";
+        $check_query = "SELECT id FROM users WHERE email = :email OR username = :username";
         $check_stmt = $db->prepare($check_query);
         $check_stmt->bindParam(':email', $email);
+        $check_stmt->bindParam(':username', $username);
         $check_stmt->execute();
         
         if ($check_stmt->rowCount() > 0) {
-            $error = "Email address already registered.";
+            $error = "Email address or username already registered.";
         } else {
             $hashed_password = password_hash($password, PASSWORD_DEFAULT);
             
             // Admin accounts are auto-approved, others need approval
             $status = ($role === 'admin') ? 'approved' : 'pending';
             
-            $query = "INSERT INTO users (email, password, full_name, role, department, status) VALUES (:email, :password, :full_name, :role, :department, :status)";
+            $query = "INSERT INTO users (username, email, password, full_name, role, department, status) VALUES (:username, :email, :password, :full_name, :role, :department, :status)";
             $stmt = $db->prepare($query);
+            $stmt->bindParam(':username', $username);
             $stmt->bindParam(':email', $email);
             $stmt->bindParam(':password', $hashed_password);
             $stmt->bindParam(':full_name', $full_name);
@@ -122,7 +128,7 @@ if ($_POST) {
             display: block;
             border-radius: 10px;
             box-shadow: 0 4px 15px rgba(230, 0, 18, 0.2);
-            object-fit: cover; /* This ensures the image maintains aspect ratio and fills the square */
+            object-fit: cover;
         }
         
         .logo h1 {
@@ -257,8 +263,6 @@ if ($_POST) {
             <p>Create your account to get started</p>
         </div>
         
-        
-        
         <?php if ($error): ?>
             <div class="error"><?php echo $error; ?></div>
         <?php endif; ?>
@@ -276,6 +280,7 @@ if ($_POST) {
             <div class="form-group">
                 <label for="email">Airtel Email Address</label>
                 <input type="email" id="email" name="email" required placeholder="your.name@airtel.africa" value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>">
+                <small style="color: #666; font-size: 0.9rem;">Username will be automatically generated from your email</small>
             </div>
             
             <div class="form-group">
@@ -303,17 +308,14 @@ if ($_POST) {
                         <input type="radio" id="role_staff" name="role" value="staff" <?php echo (isset($_POST['role']) && $_POST['role'] === 'staff') ? 'checked' : ''; ?>>
                         <div class="role-title">Staff</div>
                     </label>
-
                     <label class="role-card" for="role_risk_owner">
                         <input type="radio" id="role_risk_owner" name="role" value="risk_owner" <?php echo (isset($_POST['role']) && $_POST['role'] === 'risk_owner') ? 'checked' : ''; ?>>
                         <div class="role-title">Risk Owner</div>
                     </label>
-
                     <label class="role-card" for="role_compliance">
                         <input type="radio" id="role_compliance" name="role" value="compliance" <?php echo (isset($_POST['role']) && $_POST['role'] === 'compliance') ? 'checked' : ''; ?>>
                         <div class="role-title">Compliance</div>
                     </label>
-
                     <label class="role-card" for="role_admin">
                         <input type="radio" id="role_admin" name="role" value="admin" <?php echo (isset($_POST['role']) && $_POST['role'] === 'admin') ? 'checked' : ''; ?>>
                         <div class="role-title">Administrator</div>

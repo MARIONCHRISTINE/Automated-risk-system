@@ -2,7 +2,6 @@
 include_once 'includes/auth.php';
 requireRole('staff');
 include_once 'config/database.php';
-include_once 'includes/auto_assignment.php';
 
 $database = new Database();
 $db = $database->getConnection();
@@ -31,10 +30,9 @@ if ($_POST && isset($_POST['submit_risk'])) {
         $error_message = "User account not found. Please contact administrator.";
     } else {
         try {
-            // Start transaction for risk submission and auto-assignment
-            $db->beginTransaction();
-            
-            $query = "INSERT INTO risk_incidents (risk_name, risk_description, cause_of_risk, department, reported_by) VALUES (:risk_name, :risk_description, :cause_of_risk, :department, :reported_by)";
+            // First, insert the risk
+            $query = "INSERT INTO risk_incidents (risk_name, risk_description, cause_of_risk, department, reported_by, created_at, updated_at) 
+              VALUES (:risk_name, :risk_description, :cause_of_risk, :department, :reported_by, NOW(), NOW())";
             $stmt = $db->prepare($query);
             $stmt->bindParam(':risk_name', $risk_name);
             $stmt->bindParam(':risk_description', $risk_description);
@@ -45,19 +43,32 @@ if ($_POST && isset($_POST['submit_risk'])) {
             if ($stmt->execute()) {
                 $risk_id = $db->lastInsertId();
                 
-                // Silently attempt auto-assignment
-                assignRiskAutomatically($risk_id, $department, $db);
+                // Immediate auto-assignment to a risk owner in the same department
+                $owner_query = "SELECT id FROM users WHERE role = 'risk_owner' AND department = :department ORDER BY RAND() LIMIT 1";
+                $owner_stmt = $db->prepare($owner_query);
+                $owner_stmt->bindParam(':department', $department);
+                $owner_stmt->execute();
+                $risk_owner = $owner_stmt->fetch(PDO::FETCH_ASSOC);
                 
-                // Commit transaction
-                $db->commit();
-                
-                $success_message = "Risk reported successfully!";
+                if ($risk_owner) {
+                    // Immediately assign the risk to the selected risk owner
+                    $assign_query = "UPDATE risk_incidents SET risk_owner_id = :owner_id, updated_at = NOW() WHERE id = :risk_id";
+                    $assign_stmt = $db->prepare($assign_query);
+                    $assign_stmt->bindParam(':owner_id', $risk_owner['id']);
+                    $assign_stmt->bindParam(':risk_id', $risk_id);
+                    
+                    if ($assign_stmt->execute()) {
+                        $success_message = "Risk reported and immediately assigned to a risk owner in your department!";
+                    } else {
+                        $success_message = "Risk reported successfully! Assignment in progress.";
+                    }
+                } else {
+                    $success_message = "Risk reported successfully! No risk owners available in your department at the moment.";
+                }
             } else {
-                $db->rollback();
                 $error_message = "Failed to report risk. Please try again.";
             }
         } catch (PDOException $e) {
-            $db->rollback();
             $error_message = "Database error: " . $e->getMessage();
             error_log("Risk submission error: " . $e->getMessage());
         }
@@ -71,8 +82,24 @@ $stmt->bindParam(':user_id', $_SESSION['user_id']);
 $stmt->execute();
 $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get current user info
+// Get current user info with department from database
 $user = getCurrentUser();
+
+// If department is not in session, fetch from database
+if (empty($user['department']) || $user['department'] === null) {
+    $dept_query = "SELECT department FROM users WHERE id = :user_id";
+    $dept_stmt = $db->prepare($dept_query);
+    $dept_stmt->bindParam(':user_id', $_SESSION['user_id']);
+    $dept_stmt->execute();
+    $dept_result = $dept_stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($dept_result && !empty($dept_result['department'])) {
+        $user['department'] = $dept_result['department'];
+        // Store in session for future use
+        $_SESSION['department'] = $dept_result['department'];
+    }
+}
+
 ?>
 
 <!DOCTYPE html>
@@ -701,7 +728,7 @@ $user = getCurrentUser();
                     </div>
                 </div>
                 <div class="header-right">
-                    <div class="user-avatar">S</div>
+                    <div class="user-avatar"><?php echo isset($_SESSION['full_name']) ? strtoupper(substr($_SESSION['full_name'], 0, 1)) : 'S'; ?></div>
                     <div class="user-details">
                         <div class="user-email"><?php echo $_SESSION['email']; ?></div>
                         <div class="user-role">Staff • <?php echo $user['department'] ?? 'General'; ?></div>
@@ -714,8 +741,10 @@ $user = getCurrentUser();
         <!-- Main Content -->
         <main class="main-content">
             <?php if (isset($success_message)): ?>
-                <div class="success">✅ <?php echo $success_message; ?></div>
-            <?php endif; ?>
+<div class="success">
+    ✅ <?php echo $success_message; ?>
+</div>
+<?php endif; ?>
             
             <?php if (isset($error_message)): ?>
                 <div class="error">❌ <?php echo $error_message; ?></div>
@@ -725,13 +754,15 @@ $user = getCurrentUser();
             <div class="main-cards-layout">
                 <!-- Hero Section -->
                 <section class="hero">
-                    <button class="cta-button" onclick="openReportModal()">
-                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
-                        </svg>
-                        Report New Risk
-                    </button>
-                </section>
+    <div style="text-align: center;">
+        <button class="cta-button" onclick="openReportModal()">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+            </svg>
+            Report New Risk
+        </button>
+    </div>
+</section>
 
                 <!-- Stats Card -->
                 <div class="stat-card" id="statsCard" onclick="scrollToReports()">
@@ -745,6 +776,10 @@ $user = getCurrentUser();
                     </div>
                 </div>
             </div>
+
+            <!-- Workflow Explanation Section -->
+
+            <!-- Info Section -->
 
             <!-- Reports Section -->
             <section class="reports-section show" id="reportsSection">
@@ -761,18 +796,32 @@ $user = getCurrentUser();
                 <div class="reports-content">
                     <?php if (count($user_risks) > 0): ?>
                         <?php foreach (array_slice($user_risks, 0, 10) as $risk): ?>
-                            <div class="risk-item">
-                                <div class="risk-header">
-                                    <div class="risk-name"><?php echo htmlspecialchars($risk['risk_name']); ?></div>
-                                    <button class="view-btn" onclick="viewRisk(<?php echo $risk['id']; ?>, '<?php echo htmlspecialchars($risk['risk_name']); ?>', '<?php echo htmlspecialchars($risk['risk_description']); ?>', '<?php echo htmlspecialchars($risk['cause_of_risk']); ?>', '<?php echo $risk['created_at']; ?>')">
-                                        View
-                                    </button>
-                                </div>
-                                <div class="risk-meta">
-                                    <span><?php echo date('M d, Y', strtotime($risk['created_at'])); ?></span>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
+    <div class="risk-item">
+        <div class="risk-header">
+            <div class="risk-name"><?php echo htmlspecialchars($risk['risk_name']); ?></div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <?php if ($risk['risk_owner_id']): ?>
+                    <span style="background: #d4edda; color: #155724; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
+                        ✅ Assigned
+                    </span>
+                <?php else: ?>
+                    <span style="background: #fff3cd; color: #856404; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
+                        🔄 Assigning...
+                    </span>
+                <?php endif; ?>
+                <button class="view-btn" onclick="viewRisk(<?php echo $risk['id']; ?>, '<?php echo htmlspecialchars($risk['risk_name']); ?>', '<?php echo htmlspecialchars($risk['risk_description']); ?>', '<?php echo htmlspecialchars($risk['cause_of_risk']); ?>', '<?php echo $risk['created_at']; ?>', <?php echo $risk['risk_owner_id'] ? 'true' : 'false'; ?>)">
+                    View
+                </button>
+            </div>
+        </div>
+        <div class="risk-meta">
+            <span><?php echo date('M d, Y', strtotime($risk['created_at'])); ?></span>
+            <?php if ($risk['risk_owner_id']): ?>
+                <span style="color: #28a745;">• Risk Owner Assigned</span>
+            <?php endif; ?>
+        </div>
+    </div>
+<?php endforeach; ?>
                     <?php else: ?>
                         <div class="empty-state">
                             <div class="empty-icon">📋</div>
@@ -794,8 +843,6 @@ $user = getCurrentUser();
             </div>
             <div class="modal-body">
                 <form method="POST">
-                    <input type="hidden" name="department" value="<?php echo $user['department'] ?? ''; ?>">
-    
                     <div class="form-group">
                         <label for="risk_name">Risk Name</label>
                         <input type="text" id="risk_name" name="risk_name" required placeholder="Enter a clear risk title">
@@ -809,6 +856,11 @@ $user = getCurrentUser();
                     <div class="form-group">
                         <label for="cause_of_risk">Cause of Risk</label>
                         <textarea id="cause_of_risk" name="cause_of_risk" required placeholder="What causes this risk?"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="department">Department</label>
+                        <input type="text" id="department" name="department" required placeholder="Your department" value="<?php echo $user['department'] ?? ''; ?>">
                     </div>
                     
                     <button type="submit" name="submit_risk" class="btn">Submit Risk Report</button>
@@ -841,6 +893,10 @@ $user = getCurrentUser();
                     <label>Date Submitted:</label>
                     <div style="background: #f8f9fa; padding: 1rem; border-radius: 4px; border-left: 3px solid #E60012;" id="modalDateSubmitted"></div>
                 </div>
+<div class="form-group">
+    <label>Assignment Status:</label>
+    <div style="background: #f8f9fa; padding: 1rem; border-radius: 4px; border-left: 3px solid #E60012;" id="modalAssignmentStatus"></div>
+</div>
             </div>
         </div>
     </div>
@@ -894,20 +950,30 @@ $user = getCurrentUser();
             document.getElementById('reportModal').classList.remove('show');
         }
         
-        function viewRisk(id, name, description, cause, date) {
-            document.getElementById('modalRiskName').textContent = name;
-            document.getElementById('modalRiskDescription').textContent = description;
-            document.getElementById('modalCauseOfRisk').textContent = cause;
-            
-            const dateObj = new Date(date);
-            document.getElementById('modalDateSubmitted').textContent = dateObj.toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-            });
-            
-            document.getElementById('riskModal').classList.add('show');
+        function viewRisk(id, name, description, cause, date, isAssigned) {
+    document.getElementById('modalRiskName').textContent = name;
+    document.getElementById('modalRiskDescription').textContent = description;
+    document.getElementById('modalCauseOfRisk').textContent = cause;
+    
+    const dateObj = new Date(date);
+    document.getElementById('modalDateSubmitted').textContent = dateObj.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
+    
+    // Add assignment status to modal
+    const assignmentStatus = document.getElementById('modalAssignmentStatus');
+    if (assignmentStatus) {
+        if (isAssigned) {
+            assignmentStatus.innerHTML = '<span style="color: #28a745; font-weight: 600;">✅ Assigned to Risk Owner</span><br><small style="color: #666;">Risk owner is completing the full assessment and treatment plans.</small>';
+        } else {
+            assignmentStatus.innerHTML = '<span style="color: #ffc107; font-weight: 600;">🔄 Assignment in Progress</span><br><small style="color: #666;">System is assigning this risk to a qualified risk owner.</small>';
         }
+    }
+    
+    document.getElementById('riskModal').classList.add('show');
+}
         
         function closeModal() {
             document.getElementById('riskModal').classList.remove('show');
