@@ -1,40 +1,89 @@
- System Logs
-Audit Trail:
+1. User Search & Filters
+Search by email, name, role, risk level, activity
 
-Record every action (who did what, when)
-Log Filtering: Filter by user, action type, date range
+Filters: Role, account status (active, locked), user id, last login,date range 
 
-Download Logs: Export logs for audits
-Admin receives system alerts (login failures, data breaches)
+2. Role & Permission Management
+Assign/remove roles (Admin, Risk Analyst, Auditor, etc.)
 
-User Activity Logs:Last login time, Actions performed
-and a feature which when a user account is If the user does nothing for 1 minute, PHP logs them out and requires them.
+3. Account Status Controls
+Activate/deactivate accounts
 
-$ User Activity Heatmap
+Lock/unlock users
+
+Force logout
+
+4. Password Controls
+Reset password (as you're building)
+
+Force password change on next login
+
+View last password change date
+
+5. Audit Logs
+Track all user actions (who edited what, when)
+
+View user activity logs (logins, password changes, violations)
+
+
+
+7. Login History
+Show last login IP, time, device
+
+8. User Session Management
+View all active sessions for a user
+
+Force session termination
+
+IP and device details
+
+
+10. User Notes & Internal Tags
+Allow admins to leave internal notes per user
+Add tags 
+
+11. Bulk User Actions
+Bulk reset passwords, assign roles, disable accounts
+
+Upload CSV to onboard/deactivate users in batches
+
+12. Scheduled Account Reviews
+Auto-expire unused accounts
+
+Prompt admins for account reviews (e.g., quarterly)
+
+13. User Metrics
+Daily/weekly/monthly active users
+
+Login trends
+
+Role distribution
+
+14. Access Violation Alerts
+Real-time notifications for failed login attempts
+
+
+15. Dark Mode / Theme Switching
+Improve accessibility and comfort for long sessions
+
+17. Interactive Dashboards
+Graphs showing access patterns, user risk levels
+
+Drill-down features (click chart → filtered user list)
+
+18. user logout if inactive while logged in an account for more than 1 minute php logs them out
+
+19. User Activity Heatmap
 Visual chart showing which times of day users are most active.
-Helps with usage monitoring and security audits.
 Password policy: Password expiration: every 30 days
 
-$Advanced Log Filtering & Alerts
-Filters by IP address, action type (login, edit, delete), user ID
-
-$Set up alerts for suspicious behavior ( 5 failed logins in 5 mins)
-
-Account lockout: After 10 failed attempts Account Lockout Feature in PHP
-Track failed login attempts per user (or IP).
-
-Lock the account after X failures (e.g 6).
+20. Lock the account after X failures (e. g 6).
 and Keep it locked for a duration (e.g. 15 minutes) or until admin unlocks.
-admin feature to unlock  the locked accounts for users whose account is locked who  were  while logging in their accounts were  locked due to  many logging attempts into the system 
+admin feature to unlock  the locked accounts for users whose account is locked who  were  while logging in their accounts were  locked due   to many wrong log in attempts
 
-notify admin on lockout; when an account is locked
-Add “Unlock” button in admin dashboard
-User Session Management : View all currently active sessions.
+Track failed login attempts per user  
 
-Force logout of a user session remotely:On every request, check if the session is still marked active.
-Admin can mark a session as "invalid"  which logs the user out immediately.
-
-Invite New Users with Email Token: Admin Dashboard Integration
+21. Invite New Users with Email Token: Admin Dashboard Integration
 On the admin dashboard:
 Add form: "Invite New User" → email + role
 Show list of pending invites (with resend/revoke options)
@@ -42,17 +91,12 @@ Admin enters user's email and role.
 System creates a user account with a unique token and sends an invite email.
 User clicks the tokenized link → sets password → account is activated.
 
-Backup Database:Create a backup of the entire risk management database.
-
-Admin sends a secure invite link to new users.
-Show custom system message to all users
-
-admin should be able to change roles for the existing users and grant various access to the system and also be able to restrict access to users suspend  users and also be able to activate the suspended  users of the system,
-the suspended users should be able to see the suspension message displayed on the login  page when  they try to  log into the system  
- Reset Password endpoint that is Accessible only by admins
+ 22. A “Create Backup” button for admins Backup Database: Create a backup of the entire risk management database.
+Full Database Dump: Export entire database content into a file ( JSON/CSV)
 
 Lets admins directly reset any user's password from the admin portal (without sending a reset email) 
 Admins to search for a specific user (e.g., by name, email, or username)
-✅ View the user’s profile or result
-✅ Enter a new password for that user and reset it directly from the dashboard
+View the user’s profile or result
+Enter a new password for that user and reset it directly from the dashboard
 
+approval waiting from the admin for new users  to be able to log into the system
