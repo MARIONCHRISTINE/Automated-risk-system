@@ -1759,25 +1759,35 @@ function getStatusBadgeClass($status) {
                 
 
 <div class="dashboard-grid">
-    <div class="stat-card action-card" onclick="showTab('department')" style="cursor: pointer; transition: transform 0.3s;">
+    <div class="stat-card" style="transition: transform 0.3s;">
         <span class="stat-number"><?php echo $stats['department_risks']; ?></span>
         <div class="stat-label">Department Risks</div>
         <div class="stat-description">All risks in <?php echo $user['department']; ?></div>
     </div>
-    <div class="stat-card action-card" onclick="showTab('risks')" style="cursor: pointer; transition: transform 0.3s;">
+    <div class="stat-card" style="transition: transform 0.3s;">
         <span class="stat-number"><?php echo $stats['my_assigned_risks']; ?></span>
         <div class="stat-label">My Assigned Risks</div>
         <div class="stat-description">Risks assigned to you</div>
     </div>
-    <div class="stat-card action-card" onclick="window.location.href='report_risk.php'" style="cursor: pointer; transition: transform 0.3s;">
-        <span class="stat-number">📝</span>
-        <div class="stat-label">Report New Risk</div>
-        <div class="stat-description">Click to report a new risk</div>
+    <div class="stat-card" style="transition: transform 0.3s;">
+        <span class="stat-number"><?php echo $stats['my_high_risks']; ?></span>
+        <div class="stat-label">High/Critical Risks</div>
+        <div class="stat-description">High/Critical risks assigned to you</div>
     </div>
-    <div class="stat-card action-card" onclick="showTab('risks')" style="cursor: pointer; transition: transform 0.3s;">
-        <span class="stat-number"><?php echo $stats['my_reported_risks']; ?></span>
-        <div class="stat-label">Reported Risks</div>
-        <div class="stat-description">Risks you have reported</div>
+    <div class="stat-card" style="transition: transform 0.3s;">
+        <span class="stat-number"><?php 
+        // Calculate successfully managed risks (completed status)
+        $managed_query = "SELECT COUNT(*) as total FROM risk_incidents 
+                         WHERE risk_owner_id = :user_id 
+                         AND risk_status = 'completed'";
+        $managed_stmt = $db->prepare($managed_query);
+        $managed_stmt->bindParam(':user_id', $_SESSION['user_id']);
+        $managed_stmt->execute();
+        $managed_risks = $managed_stmt->fetch(PDO::FETCH_ASSOC)['total'];
+        echo $managed_risks;
+        ?></span>
+        <div class="stat-label">Successfully Managed Risks</div>
+        <div class="stat-description">Risks you have completed</div>
     </div>
 </div>
 
