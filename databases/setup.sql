@@ -1,6 +1,6 @@
 -- Create database
-CREATE DATABASE IF NOT EXISTS risk_management_system;
-USE risk_management_system;
+CREATE DATABASE IF NOT EXISTS airtel_risk_system;
+USE airtel_risk_system;
 
 -- Users table
 CREATE TABLE users (

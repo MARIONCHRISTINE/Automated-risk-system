@@ -58,12 +58,18 @@ if ($_POST && isset($_POST['submit_risk'])) {
                     $assign_stmt->bindParam(':risk_id', $risk_id);
                     
                     if ($assign_stmt->execute()) {
-                        $success_message = "Risk reported and immediately assigned to a risk owner in your department!";
+                        // Redirect to prevent resubmission on page reload
+                        header("Location: staff_dashboard.php?success=assigned");
+                        exit();
                     } else {
-                        $success_message = "Risk reported successfully! Assignment in progress.";
+                        // Redirect to prevent resubmission on page reload
+                        header("Location: staff_dashboard.php?success=reported");
+                        exit();
                     }
                 } else {
-                    $success_message = "Risk reported successfully! No risk owners available in your department at the moment.";
+                    // Redirect to prevent resubmission on page reload
+                    header("Location: staff_dashboard.php?success=no_owner");
+                    exit();
                 }
             } else {
                 $error_message = "Failed to report risk. Please try again.";
@@ -72,6 +78,21 @@ if ($_POST && isset($_POST['submit_risk'])) {
             $error_message = "Database error: " . $e->getMessage();
             error_log("Risk submission error: " . $e->getMessage());
         }
+    }
+}
+
+// Handle success messages from redirect
+if (isset($_GET['success'])) {
+    switch ($_GET['success']) {
+        case 'assigned':
+            $success_message = "Risk reported and immediately assigned to a risk owner in your department!";
+            break;
+        case 'reported':
+            $success_message = "Risk reported successfully! Assignment in progress.";
+            break;
+        case 'no_owner':
+            $success_message = "Risk reported successfully! No risk owners available in your department at the moment.";
+            break;
     }
 }
 
@@ -99,7 +120,6 @@ if (empty($user['department']) || $user['department'] === null) {
         $_SESSION['department'] = $dept_result['department'];
     }
 }
-
 ?>
 
 <!DOCTYPE html>
@@ -318,26 +338,22 @@ if (empty($user['department']) || $user['department'] === null) {
             position: relative;
             border-left: 6px solid #E60012;
         }
-
         .stat-card:hover {
             transform: translateY(-8px);
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
         }
-
         .stat-number {
             font-size: 4.5rem;
             font-weight: 800;
             color: #E60012;
             margin-bottom: 1rem;
         }
-
         .stat-label {
             font-size: 1.4rem;
             font-weight: 600;
             color: #666;
             margin-bottom: 1.5rem;
         }
-
         .stat-hint {
             color: #E60012;
             font-size: 1rem;
@@ -737,7 +753,6 @@ if (empty($user['department']) || $user['department'] === null) {
                 </div>
             </div>
         </header>
-
         <!-- Main Content -->
         <main class="main-content">
             <?php if (isset($success_message)): ?>
@@ -763,7 +778,6 @@ if (empty($user['department']) || $user['department'] === null) {
         </button>
     </div>
 </section>
-
                 <!-- Stats Card -->
                 <div class="stat-card" id="statsCard" onclick="scrollToReports()">
                     <div class="stat-number"><?php echo count($user_risks); ?></div>
@@ -776,11 +790,8 @@ if (empty($user['department']) || $user['department'] === null) {
                     </div>
                 </div>
             </div>
-
             <!-- Workflow Explanation Section -->
-
             <!-- Info Section -->
-
             <!-- Reports Section -->
             <section class="reports-section show" id="reportsSection">
                 <div class="reports-header">
@@ -920,7 +931,6 @@ if (empty($user['department']) || $user['department'] === null) {
                 });
             }
         });
-
         function toggleReports() {
             const reportsSection = document.getElementById('reportsSection');
             if (reportsSection.classList.contains('show')) {
@@ -929,13 +939,11 @@ if (empty($user['department']) || $user['department'] === null) {
                 showReports();
             }
         }
-
         function showReports() {
             const reportsSection = document.getElementById('reportsSection');
             reportsSection.style.display = 'block';
             setTimeout(() => reportsSection.classList.add('show'), 10);
         }
-
         function closeReports() {
             const reportsSection = document.getElementById('reportsSection');
             reportsSection.classList.remove('show');
@@ -1004,7 +1012,6 @@ if (empty($user['department']) || $user['department'] === null) {
                 }
             });
         }
-
         function scrollToReports() {
             const reportsSection = document.getElementById('reportsSection');
             if (reportsSection) {
