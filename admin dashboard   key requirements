@@ -1,0 +1,58 @@
+ System Logs
+Audit Trail:
+
+Record every action (who did what, when)
+Log Filtering: Filter by user, action type, date range
+
+Download Logs: Export logs for audits
+Admin receives system alerts (login failures, data breaches)
+
+User Activity Logs:Last login time, Actions performed
+and a feature which when a user account is If the user does nothing for 1 minute, PHP logs them out and requires them.
+
+$ User Activity Heatmap
+Visual chart showing which times of day users are most active.
+Helps with usage monitoring and security audits.
+Password policy: Password expiration: every 30 days
+
+$Advanced Log Filtering & Alerts
+Filters by IP address, action type (login, edit, delete), user ID
+
+$Set up alerts for suspicious behavior ( 5 failed logins in 5 mins)
+
+Account lockout: After 10 failed attempts Account Lockout Feature in PHP
+Track failed login attempts per user (or IP).
+
+Lock the account after X failures (e.g 6).
+and Keep it locked for a duration (e.g. 15 minutes) or until admin unlocks.
+admin feature to unlock  the locked accounts for users whose account is locked who  were  while logging in their accounts were  locked due to  many logging attempts into the system 
+
+notify admin on lockout; when an account is locked
+Add “Unlock” button in admin dashboard
+User Session Management : View all currently active sessions.
+
+Force logout of a user session remotely:On every request, check if the session is still marked active.
+Admin can mark a session as "invalid"  which logs the user out immediately.
+
+Invite New Users with Email Token: Admin Dashboard Integration
+On the admin dashboard:
+Add form: "Invite New User" → email + role
+Show list of pending invites (with resend/revoke options)
+Admin enters user's email and role.
+System creates a user account with a unique token and sends an invite email.
+User clicks the tokenized link → sets password → account is activated.
+
+Backup Database:Create a backup of the entire risk management database.
+
+Admin sends a secure invite link to new users.
+Show custom system message to all users
+
+admin should be able to change roles for the existing users and grant various access to the system and also be able to restrict access to users suspend  users and also be able to activate the suspended  users of the system,
+the suspended users should be able to see the suspension message displayed on the login  page when  they try to  log into the system  
+ Reset Password endpoint that is Accessible only by admins
+
+Lets admins directly reset any user's password from the admin portal (without sending a reset email) 
+Admins to search for a specific user (e.g., by name, email, or username)
+✅ View the user’s profile or result
+✅ Enter a new password for that user and reset it directly from the dashboard
+
