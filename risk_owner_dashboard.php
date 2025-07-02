@@ -311,7 +311,7 @@ function getStatusBadgeClass($status) {
             color: #333;
             line-height: 1.6;
             min-height: 100vh;
-            padding-top: 100px;
+            padding-top: 150px; /* Increased to accommodate both header and nav */
         }
         
         .dashboard {
@@ -444,7 +444,74 @@ function getStatusBadgeClass($status) {
             border-color: rgba(255, 255, 255, 0.5);
         }
         
-        /* Updated Navigation Tabs */
+        /* Navigation Bar */
+        .nav {
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            position: fixed;
+            top: 100px; /* Position below header */
+            left: 0;
+            right: 0;
+            z-index: 999;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .nav-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        .nav-menu {
+            display: flex;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            align-items: center;
+        }
+
+        .nav-item {
+            margin: 0;
+        }
+
+        .nav-item a {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 1rem 1.5rem;
+            color: #6c757d;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border-bottom: 3px solid transparent;
+        }
+
+        .nav-item a:hover {
+            color: #E60012;
+            background-color: rgba(230, 0, 18, 0.05);
+        }
+
+        .nav-item a.active {
+            color: #E60012;
+            border-bottom-color: #E60012;
+            background-color: rgba(230, 0, 18, 0.05);
+        }
+
+        .flex {
+            display: flex;
+        }
+
+        .justify-between {
+            justify-content: space-between;
+        }
+
+        .items-center {
+            align-items: center;
+        }
+
+        .w-full {
+            width: 100%;
+        }
         
         /* Main Content */
         .main-content {
@@ -921,55 +988,549 @@ function getStatusBadgeClass($status) {
         }
         
         /* Responsive */
-        @media (max-width: 768px) {
-            body {
-                padding-top: 120px; /* Increased padding for mobile header */
-            }
-            
-            .header {
-                padding: 1.2rem 1.5rem;
-            }
-            
-            .header-content {
-                flex-direction: column;
-                gap: 1rem;
-                align-items: flex-start;
-            }
-            
-            .header-right {
-                align-self: flex-end;
-            }
-            
-            .main-title {
-                font-size: 1.3rem;
-            }
-            
-            .sub-title {
-                font-size: 0.9rem;
-            }
-            
-            .logout-btn {
-                margin-left: 0;
-                margin-top: 0.5rem;
-            }
-            
-            .modal-content {
-                width: 95%;
-                margin: 1rem;
-            }
-            
-            .modal-body {
-                padding: 1.5rem;
-            }
-            
-            .form-row {
-                grid-template-columns: 1fr;
-            }
-            .assignment-actions {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-        }
+        /* Enhanced Responsive Styles - IMPROVED VERSION */
+@media (max-width: 768px) {
+    body {
+        padding-top: 200px; /* Increased padding for mobile header + nav */
+    }
+    
+    .header {
+        padding: 1.2rem 1.5rem;
+    }
+    
+    .header-content {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: flex-start;
+    }
+    
+    .header-right {
+        align-self: flex-end;
+    }
+    
+    .main-title {
+        font-size: 1.3rem;
+    }
+    
+    .sub-title {
+        font-size: 0.9rem;
+    }
+    
+    .logout-btn {
+        margin-left: 0;
+        margin-top: 0.5rem;
+    }
+    
+    .nav {
+        top: 120px; /* Adjust for mobile header height */
+        padding: 0.25rem 0; /* Reduced padding */
+    }
+    
+    .nav-content {
+        padding: 0 0.5rem; /* Reduced horizontal padding */
+        overflow-x: auto; /* Enable horizontal scrolling */
+        -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+    }
+    
+    .nav-menu {
+        /* Enable horizontal scrolling layout */
+        flex-wrap: nowrap; /* Don't wrap items */
+        justify-content: flex-start; /* Align to start */
+        gap: 0;
+        min-width: max-content; /* Ensure full width of items */
+        padding: 0 0.5rem; /* Add some padding */
+    }
+    
+    .nav-item {
+        /* Keep horizontal but ensure minimum width */
+        flex: 0 0 auto; /* Don't grow or shrink */
+        min-width: 80px; /* Minimum touch target */
+    }
+    
+    .nav-item a {
+        padding: 0.75rem 0.5rem; /* Reduced padding */
+        font-size: 0.75rem; /* Smaller font */
+        text-align: center;
+        border-bottom: 3px solid transparent;
+        border-left: none;
+        width: 100%;
+        white-space: nowrap; /* Prevent text wrapping */
+        min-height: 44px; /* Minimum touch target height */
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.25rem;
+    }
+    
+    .nav-item a.active {
+        border-bottom-color: #E60012;
+        border-left-color: transparent;
+        background-color: rgba(230, 0, 18, 0.1);
+    }
+    
+    .nav-item a:hover {
+        background-color: rgba(230, 0, 18, 0.05);
+    }
+    
+    /* Notification container adjustments for mobile */
+    .nav-notification-container {
+        padding: 0.75rem 0.5rem;
+        font-size: 0.75rem;
+        min-width: 80px;
+    }
+    
+    .nav-notification-text {
+        font-size: 0.65rem; /* Keep text but smaller */
+    }
+    
+    .nav-notification-bell {
+        font-size: 1rem;
+    }
+    
+    .nav-notification-badge {
+        width: 16px;
+        height: 16px;
+        font-size: 0.6rem;
+    }
+    
+    /* Add scroll indicators */
+    .nav-content::before,
+    .nav-content::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 20px;
+        pointer-events: none;
+        z-index: 1;
+    }
+    
+    .nav-content::before {
+        left: 0;
+        background: linear-gradient(to right, rgba(248, 249, 250, 1), rgba(248, 249, 250, 0));
+    }
+    
+    .nav-content::after {
+        right: 0;
+        background: linear-gradient(to left, rgba(248, 249, 250, 1), rgba(248, 249, 250, 0));
+    }
+    
+    .modal-content {
+        width: 95%;
+        margin: 1rem;
+    }
+    
+    .modal-body {
+        padding: 1.5rem;
+    }
+    
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .assignment-actions {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    /* Mobile Dashboard Grid */
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+    
+    .stat-card {
+        padding: 1.5rem;
+    }
+    
+    .stat-number {
+        font-size: 2rem;
+    }
+    
+    /* Mobile Charts */
+    .chart-container {
+        height: 250px;
+    }
+}
+
+/* Tablet Responsive */
+@media (max-width: 1024px) and (min-width: 769px) {
+    .nav-menu {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    
+    .nav-item a {
+        padding: 0.75rem 1rem; /* Slightly reduced padding */
+        font-size: 0.85rem; /* Slightly smaller font */
+    }
+    
+    .dashboard-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* Small Mobile - Extra adjustments */
+@media (max-width: 480px) {
+    body {
+        padding-top: 180px; /* Reduced since nav is smaller */
+    }
+    
+    .header {
+        padding: 1rem;
+    }
+    
+    .main-title {
+        font-size: 1.1rem;
+    }
+    
+    .sub-title {
+        font-size: 0.8rem;
+    }
+    
+    .nav {
+        top: 110px; /* Adjust for smaller header */
+    }
+    
+    .nav-content {
+        padding: 0 0.25rem; /* Even less padding */
+    }
+    
+    .nav-item {
+        min-width: 70px; /* Smaller minimum width */
+    }
+    
+    .nav-item a {
+        padding: 0.5rem 0.25rem; /* Even smaller padding */
+        font-size: 0.65rem; /* Smaller font */
+        gap: 0.125rem;
+    }
+    
+    /* Hide notification text completely on very small screens */
+    .nav-notification-text {
+        display: none;
+    }
+    
+    .nav-notification-container {
+        min-width: 50px;
+        padding: 0.5rem 0.25rem;
+    }
+    
+    .stat-number {
+        font-size: 1.8rem;
+    }
+    
+    .stat-label {
+        font-size: 0.8rem;
+    }
+}
+
+/* Very Small Mobile - 360px and below */
+@media (max-width: 360px) {
+    body {
+        padding-top: 170px;
+    }
+    
+    .nav {
+        top: 100px;
+    }
+    
+    .nav-item {
+        min-width: 60px;
+    }
+    
+    .nav-item a {
+        padding: 0.4rem 0.2rem;
+        font-size: 0.6rem;
+        gap: 0.1rem;
+    }
+    
+    .nav-notification-container {
+        min-width: 45px;
+        padding: 0.4rem 0.2rem;
+    }
+    
+    .nav-notification-bell {
+        font-size: 0.9rem;
+    }
+    
+    .nav-notification-badge {
+        width: 14px;
+        height: 14px;
+        font-size: 0.55rem;
+    }
+}
+
+/* Landscape orientation on mobile */
+@media (max-width: 768px) and (orientation: landscape) {
+    body {
+        padding-top: 140px;
+    }
+    
+    .header {
+        padding: 0.8rem 1rem;
+    }
+    
+    .nav {
+        top: 80px;
+    }
+    
+    .nav-item a {
+        padding: 0.5rem 0.4rem;
+        font-size: 0.7rem;
+    }
+}
+
+/* Ensure navbar scrolling works smoothly */
+.nav-content {
+    position: relative;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* Internet Explorer 10+ */
+}
+
+.nav-content::-webkit-scrollbar {
+    display: none; /* WebKit */
+}
+
+/* Add smooth scroll behavior */
+.nav-menu {
+    scroll-behavior: smooth;
+}
+
+/* Improve touch targets for mobile */
+@media (max-width: 768px) {
+    .nav-item a {
+        -webkit-tap-highlight-color: rgba(230, 0, 18, 0.1);
+        tap-highlight-color: rgba(230, 0, 18, 0.1);
+    }
+    
+    .nav-item a:active {
+        background-color: rgba(230, 0, 18, 0.15);
+        transform: scale(0.98);
+    }
+}
+
+/* Navigation Notification Styles */
+.notification-nav-item {
+    position: relative;
+}
+
+.nav-notification-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    padding: 1rem 1.5rem;
+    border-radius: 0.25rem;
+    transition: all 0.3s ease;
+    color: #6c757d;
+    text-decoration: none;
+}
+
+.nav-notification-container:hover {
+    background-color: rgba(230, 0, 18, 0.05);
+    color: #E60012;
+    text-decoration: none;
+}
+
+.nav-notification-container.nav-notification-empty {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.nav-notification-container.nav-notification-empty:hover {
+    background-color: transparent;
+    color: #6c757d;
+}
+
+.nav-notification-bell {
+    font-size: 1.1rem;
+    transition: all 0.3s ease;
+}
+
+.nav-notification-container:hover .nav-notification-bell {
+    transform: scale(1.1);
+}
+
+.nav-notification-bell.has-notifications {
+    color: #ffc107;
+    animation: navBellRing 2s infinite;
+}
+
+@keyframes navBellRing {
+    0%, 50%, 100% { transform: rotate(0deg); }
+    10%, 30% { transform: rotate(-10deg); }
+    20%, 40% { transform: rotate(10deg); }
+}
+
+.nav-notification-text {
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.nav-notification-badge {
+    background: #dc3545;
+    color: white;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    font-size: 0.7rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    animation: navPulse 2s infinite;
+    margin-left: auto;
+}
+
+@keyframes navPulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
+
+.nav-notification-dropdown {
+    position: fixed !important;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 0.5rem;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+    width: 400px;
+    max-height: 500px;
+    z-index: 1000;
+    display: none;
+    transition: all 0.3s ease;
+    transform: translateY(-10px);
+}
+
+.nav-notification-dropdown.show {
+    display: block;
+    transform: translateY(0);
+    opacity: 1;
+}
+
+.nav-notification-dropdown.expanded {
+    box-shadow: 0 25px 50px rgba(0,0,0,0.25) !important;
+    width: 90vw !important;
+    max-height: 90vh !important;
+    top: 5vh !important;
+    left: 5vw !important;
+    right: 5vw !important;
+    transform: none !important;
+}
+
+.nav-notification-header {
+    padding: 1rem;
+    border-bottom: 1px solid #dee2e6;
+    font-weight: bold;
+    color: #495057;
+    background: #f8f9fa;
+    border-radius: 0.5rem 0.5rem 0 0;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.nav-notification-content {
+    max-height: 350px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    transition: max-height 0.3s ease;
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e0 #f7fafc;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+}
+
+.nav-notification-dropdown.expanded .nav-notification-content {
+    max-height: 75vh;
+}
+
+.nav-notification-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.nav-notification-content::-webkit-scrollbar-track {
+    background: #f7fafc;
+    border-radius: 4px;
+}
+
+.nav-notification-content::-webkit-scrollbar-thumb {
+    background: #cbd5e0;
+    border-radius: 4px;
+    transition: background 0.3s ease;
+}
+
+.nav-notification-content::-webkit-scrollbar-thumb:hover {
+    background: #a0aec0;
+}
+
+.nav-notification-item {
+    padding: 1rem;
+    border-bottom: 1px solid #f8f9fa;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.nav-notification-item:hover {
+    background-color: #f8f9fa;
+}
+
+.nav-notification-item:last-child {
+    border-bottom: none;
+}
+
+.nav-notification-item.read {
+    opacity: 0.6;
+    background-color: #f1f3f4;
+}
+
+.nav-notification-item.unread {
+    background-color: #fff3cd;
+    border-left: 4px solid #ffc107;
+}
+
+.nav-notification-title {
+    font-weight: bold;
+    color: #495057;
+    margin-bottom: 0.25rem;
+}
+
+.nav-notification-risk {
+    color: #6c757d;
+    font-size: 0.9rem;
+    margin-bottom: 0.25rem;
+}
+
+.nav-notification-date {
+    color: #6c757d;
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+}
+
+.nav-notification-actions {
+    margin-top: 0.5rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.nav-notification-actions .btn {
+    font-size: 0.8rem;
+    padding: 0.25rem 0.5rem;
+}
+
+.nav-notification-footer {
+    padding: 1rem;
+    border-top: 1px solid #dee2e6;
+    background: #f8f9fa;
+    border-radius: 0 0 0.5rem 0.5rem;
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+}
     </style>
 </head>
 <body>
@@ -997,7 +1558,190 @@ function getStatusBadgeClass($status) {
             </div>
         </header>
         
+        <!-- Navigation Bar -->
         
+<nav class="nav">
+    <div class="nav-content">
+        <ul class="nav-menu">
+            <li class="nav-item">
+                <a href="risk_owner_dashboard.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'risk_owner_dashboard.php' ? 'active' : ''; ?>">
+                    🏠 Dashboard
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="report_risk.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'report_risk.php' ? 'active' : ''; ?>">
+                    📝 Report Risk
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="risk_owner_dashboard.php?tab=my-reports" class="<?php echo isset($_GET['tab']) && $_GET['tab'] == 'my-reports' ? 'active' : ''; ?>">
+                    👀 My Reports
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="risk-procedures.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'risk-procedures.php' ? 'active' : ''; ?>" target="_blank">
+                    📋 Procedures
+                </a>
+            </li>
+            <!-- Enhanced Notifications -->
+<li class="nav-item notification-nav-item">
+    <?php
+    // Get comprehensive notifications for the current user
+    if (isset($_SESSION['user_id'])) {
+        require_once 'config/database.php';
+        $database = new Database();
+        $conn = $database->getConnection();
+        
+        // Get treatment assignments
+        $treatment_query = "SELECT rt.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
+                                   owner.full_name as risk_owner_name, 'treatment' as notification_type,
+                                   rt.created_at as notification_date
+                            FROM risk_treatments rt
+                            INNER JOIN risk_incidents ri ON rt.risk_id = ri.id
+                            LEFT JOIN users owner ON ri.risk_owner_id = owner.id
+                            WHERE rt.assigned_to = :user_id 
+                            AND rt.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+        
+        // Get risk assignments (risks assigned to this user)
+        $assignment_query = "SELECT ri.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
+                                    reporter.full_name as reporter_name, 'assignment' as notification_type,
+                                    ri.updated_at as notification_date
+                             FROM risk_incidents ri
+                             LEFT JOIN users reporter ON ri.reported_by = reporter.id
+                             WHERE ri.risk_owner_id = :user_id 
+                             AND ri.updated_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+        
+        // Get recent risk updates where user is involved
+        $update_query = "SELECT ri.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
+                                updater.full_name as updater_name, 'update' as notification_type,
+                                ri.updated_at as notification_date
+                         FROM risk_incidents ri
+                         LEFT JOIN users updater ON ri.reported_by = updater.id
+                         WHERE (ri.risk_owner_id = :user_id OR ri.reported_by = :user_id)
+                         AND ri.updated_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                         AND ri.updated_at != ri.created_at";
+        
+        // Combine all notifications
+        $all_notifications = [];
+        
+        // Get treatment notifications
+        $stmt = $conn->prepare($treatment_query);
+        $stmt->bindParam(':user_id', $_SESSION['user_id']);
+        $stmt->execute();
+        $treatment_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $all_notifications = array_merge($all_notifications, $treatment_notifications);
+        
+        // Get assignment notifications
+        $stmt = $conn->prepare($assignment_query);
+        $stmt->bindParam(':user_id', $_SESSION['user_id']);
+        $stmt->execute();
+        $assignment_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $all_notifications = array_merge($all_notifications, $assignment_notifications);
+        
+        // Get update notifications
+        $stmt = $conn->prepare($update_query);
+        $stmt->bindParam(':user_id', $_SESSION['user_id']);
+        $stmt->execute();
+        $update_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $all_notifications = array_merge($all_notifications, $update_notifications);
+        
+        // Sort by date (newest first)
+        usort($all_notifications, function($a, $b) {
+            return strtotime($b['notification_date']) - strtotime($a['notification_date']);
+        });
+        
+        // Limit to 20 most recent
+        $all_notifications = array_slice($all_notifications, 0, 20);
+        
+        if (!empty($all_notifications)):
+    ?>
+    <div class="nav-notification-container" onclick="toggleNavNotifications()">
+        <i class="fas fa-bell nav-notification-bell"></i>
+        <span class="nav-notification-text">Notifications</span>
+        <span class="nav-notification-badge"><?php echo count($all_notifications); ?></span>
+        
+        <div class="nav-notification-dropdown" id="navNotificationDropdown">
+            <div class="nav-notification-header">
+                <div class="flex justify-between items-center">
+                    <span><i class="fas fa-bell"></i> All Notifications</span>
+                    <button onclick="markAllNavAsRead()" class="btn btn-sm btn-outline">Mark All Read</button>
+                </div>
+            </div>
+            <div class="nav-notification-content" id="navNotificationContent">
+                <?php foreach ($all_notifications as $index => $notification): ?>
+                <div class="nav-notification-item" data-nav-notification-id="<?php echo $index; ?>">
+                    <?php if ($notification['notification_type'] == 'treatment'): ?>
+                        <div class="nav-notification-title">
+                            🎯 Treatment Assignment: <?php echo htmlspecialchars($notification['treatment_name']); ?>
+                        </div>
+                        <div class="nav-notification-risk">
+                            Risk: <?php echo htmlspecialchars($notification['risk_name']); ?>
+                        </div>
+                        <div class="nav-notification-date">
+                            Assigned: <?php echo date('M j, Y g:i A', strtotime($notification['notification_date'])); ?>
+                        </div>
+                        <div class="nav-notification-actions">
+                            <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Risk</a>
+                            <a href="advanced-risk-management.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-warning">Manage Treatment</a>
+                            <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary">Mark Read</button>
+                        </div>
+                    <?php elseif ($notification['notification_type'] == 'assignment'): ?>
+                        <div class="nav-notification-title">
+                            📋 Risk Assignment: <?php echo htmlspecialchars($notification['risk_name']); ?>
+                        </div>
+                        <div class="nav-notification-risk">
+                            Reported by: <?php echo htmlspecialchars($notification['reporter_name'] ?? 'System'); ?>
+                        </div>
+                        <div class="nav-notification-date">
+                            Assigned: <?php echo date('M j, Y g:i A', strtotime($notification['notification_date'])); ?>
+                        </div>
+                        <div class="nav-notification-actions">
+                            <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Details</a>
+                            <a href="risk_assessment.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-success">Start Assessment</a>
+                            <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary">Mark Read</button>
+                        </div>
+                    <?php elseif ($notification['notification_type'] == 'update'): ?>
+                        <div class="nav-notification-title">
+                            🔄 Risk Update: <?php echo htmlspecialchars($notification['risk_name']); ?>
+                        </div>
+                        <div class="nav-notification-risk">
+                            Updated by: <?php echo htmlspecialchars($notification['updater_name'] ?? 'System'); ?>
+                        </div>
+                        <div class="nav-notification-date">
+                            Updated: <?php echo date('M j, Y g:i A', strtotime($notification['notification_date'])); ?>
+                        </div>
+                        <div class="nav-notification-actions">
+                            <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Changes</a>
+                            <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary">Mark Read</button>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            <div class="nav-notification-footer">
+                <div class="flex justify-between items-center">
+                    <button onclick="expandNavNotifications()" class="btn btn-sm btn-primary" id="navExpandButton">
+                        <i class="fas fa-expand-arrows-alt"></i> Expand View
+                    </button>
+                    <a href="notifications.php" class="btn btn-sm btn-outline">View All</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php else: ?>
+    <div class="nav-notification-container nav-notification-empty">
+        <i class="fas fa-bell nav-notification-bell"></i>
+        <span class="nav-notification-text">Notifications</span>
+    </div>
+    <?php 
+        endif;
+    }
+    ?>
+</li>
+        </ul>
+    </div>
+</nav>
+
         <!-- Main Content -->
         <main class="main-content">
             <?php if (isset($success_message)): ?>
@@ -1013,13 +1757,7 @@ function getStatusBadgeClass($status) {
                 
                 <!-- Risk Owner Statistics Cards -->
                 
-<?php if ($stats['recent_assignments'] > 0): ?>
-    <div class="alert-info" style="margin-bottom: 2rem;">
-        <strong>🔔 New Assignment Alert!</strong> 
-        You have <?php echo $stats['recent_assignments']; ?> new risk(s) assigned to you in the last 24 hours.
-        <a href="javascript:void(0)" onclick="showTab('risks')" style="color: #E60012; font-weight: 600; margin-left: 1rem;">View Now →</a>
-    </div>
-<?php endif; ?>
+
 <div class="dashboard-grid">
     <div class="stat-card action-card" onclick="showTab('department')" style="cursor: pointer; transition: transform 0.3s;">
         <span class="stat-number"><?php echo $stats['department_risks']; ?></span>
@@ -1138,19 +1876,23 @@ function getStatusBadgeClass($status) {
         <h3 class="card-title">🚀 Quick Actions</h3>
     </div>
     <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-        <a href="report_risk.php" class="btn btn-primary" style="flex: 1; min-width: 200px; padding: 1rem; text-align: center;">
-            📝 Report New Risk<br>
-            <small>Report a risk you've identified</small>
-        </a>
-        <a href="javascript:void(0)" class="btn btn-secondary" style="flex: 1; min-width: 200px; padding: 1rem; text-align: center;" onclick="showTab('department')">
-            🏢 View Department Risks<br>
-            <small>See all risks in your department</small>
-        </a>
-        <a href="javascript:void(0)" class="btn btn-outline" style="flex: 1; min-width: 200px; padding: 1rem; text-align: center;" onclick="showTab('risks')">
-            📋 My Assigned Risks<br>
-            <small>View risks assigned to you</small>
-        </a>
-    </div>
+    <a href="report_risk.php" class="btn btn-primary" style="flex: 1; min-width: 180px; padding: 1rem; text-align: center;">
+        📝 Report New Risk<br>
+        <small>Report a risk you've identified</small>
+    </a>
+    <a href="javascript:void(0)" class="btn btn-secondary" style="flex: 1; min-width: 180px; padding: 1rem; text-align: center;" onclick="showTab('department')">
+        🏢 View Department Risks<br>
+        <small>See all risks in your department</small>
+    </a>
+    <a href="javascript:void(0)" class="btn btn-outline" style="flex: 1; min-width: 180px; padding: 1rem; text-align: center;" onclick="showTab('risks')">
+        📋 My Assigned Risks<br>
+        <small>View risks assigned to you</small>
+    </a>
+    <a href="javascript:void(0)" class="btn btn-warning" style="flex: 1; min-width: 180px; padding: 1rem; text-align: center;" onclick="showTab('my-reports')">
+        👀 My Reports<br>
+        <small>View risks you have reported</small>
+    </a>
+</div>
 </div>
             </div>
             
@@ -1281,6 +2023,91 @@ function getStatusBadgeClass($status) {
                                     </form>
                                 <?php elseif ($risk['risk_owner_id'] == $_SESSION['user_id']): ?>
                                     <span class="badge badge-success">Mine</span>
+                                <?php endif; ?>
+                            </div>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php endif; ?>
+    </div>
+</div>
+
+<!-- My Reports Tab -->
+<div id="my-reports-tab" class="tab-content">
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">My Reported Risks</h2>
+            <span class="badge badge-info"><?php echo $stats['my_reported_risks']; ?> risks reported by you</span>
+        </div>
+        <?php 
+        // Get risks reported by this user
+        $my_reports_query = "SELECT ri.*, ro.full_name as risk_owner_name
+                            FROM risk_incidents ri 
+                            LEFT JOIN users ro ON ri.risk_owner_id = ro.id
+                            WHERE ri.reported_by = :user_id
+                            ORDER BY ri.created_at DESC";
+        $my_reports_stmt = $db->prepare($my_reports_query);
+        $my_reports_stmt->bindParam(':user_id', $_SESSION['user_id']);
+        $my_reports_stmt->execute();
+        $my_reported_risks = $my_reports_stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        if (empty($my_reported_risks)): ?>
+            <div class="alert-info">
+                <p><strong>You haven't reported any risks yet.</strong></p>
+                <p>When you report risks, they will appear here for you to track their progress.</p>
+                <a href="report_risk.php" class="btn btn-primary">Report Your First Risk</a>
+            </div>
+        <?php else: ?>
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Risk Name</th>
+                        <th>Risk Level</th>
+                        <th>Status</th>
+                        <th>Assigned To</th>
+                        <th>Date Reported</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($my_reported_risks as $risk): ?>
+                    <tr class="risk-row <?php echo getRiskLevel($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>" data-risk-id="<?php echo $risk['id']; ?>">
+                        <td>
+                            <strong><?php echo htmlspecialchars($risk['risk_name']); ?></strong>
+                            <?php if ($risk['risk_description']): ?>
+                                <br><small class="text-muted"><?php echo htmlspecialchars(substr($risk['risk_description'], 0, 100)) . (strlen($risk['risk_description']) > 100 ? '...' : ''); ?></small>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <span class="risk-badge risk-<?php echo getRiskLevel($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>">
+                                <?php echo getRiskLevelText($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>
+                            </span>
+                        </td>
+                        <td>
+                            <span class="status-badge status-<?php echo str_replace('_', '-', $risk['risk_status'] ?? 'pending'); ?>">
+                                <?php echo ucfirst(str_replace('_', ' ', $risk['risk_status'] ?? 'Not Started')); ?>
+                            </span>
+                        </td>
+                        <td>
+                            <?php if ($risk['risk_owner_name']): ?>
+                                <span class="owner-badge"><?php echo htmlspecialchars($risk['risk_owner_name']); ?></span>
+                                <?php if ($risk['risk_owner_id'] == $_SESSION['user_id']): ?>
+                                    <br><small class="text-muted">(You are the owner)</small>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <span class="unassigned-badge">Auto-Assigning...</span>
+                            <?php endif; ?>
+                        </td>
+                        <td><?php echo date('M j, Y', strtotime($risk['created_at'])); ?></td>
+                        <td>
+                            <div class="assignment-actions">
+                                <a href="view_risk.php?id=<?php echo $risk['id']; ?>" class="btn btn-sm btn-primary">View Details</a>
+                                <?php if ($risk['risk_owner_id'] == $_SESSION['user_id']): ?>
+                                    <a href="risk_assessment.php?id=<?php echo $risk['id']; ?>" class="btn btn-sm btn-success">Manage</a>
                                 <?php endif; ?>
                             </div>
                         </td>
@@ -1546,6 +2373,15 @@ function getStatusBadgeClass($status) {
             location.reload();
         }, 300000); // 5 minutes
 
+        // Handle tab parameter from URL
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const tab = urlParams.get('tab');
+            if (tab) {
+                showTab(tab);
+            }
+        });
+
         // IMPROVED BROWSER BACK BUTTON HANDLING
         document.addEventListener('DOMContentLoaded', function() {
             // Get the referrer (where user came from)
@@ -1628,6 +2464,189 @@ function getStatusBadgeClass($status) {
                 console.log('Back navigation blocked - would go to login');
             }
         };
+
+// Navigation notification functionality with persistent storage
+let navIsExpanded = false;
+let navReadNotifications = new Set();
+
+// Load read notifications from localStorage
+function loadReadNotifications() {
+    const stored = localStorage.getItem('readNotifications_<?php echo $_SESSION['user_id']; ?>');
+    if (stored) {
+        navReadNotifications = new Set(JSON.parse(stored));
+    }
+}
+
+// Save read notifications to localStorage
+function saveReadNotifications() {
+    localStorage.setItem('readNotifications_<?php echo $_SESSION['user_id']; ?>', JSON.stringify([...navReadNotifications]));
+}
+
+function toggleNavNotifications() {
+    // Don't open if no notifications
+    const container = document.querySelector('.nav-notification-container');
+    if (container && container.classList.contains('nav-notification-empty')) {
+        return;
+    }
+    
+    const dropdown = document.getElementById('navNotificationDropdown');
+    if (!dropdown) return;
+    
+    if (dropdown.classList.contains('show')) {
+        // Close dropdown
+        dropdown.classList.remove('show');
+        dropdown.style.display = 'none';
+        
+        const bell = document.querySelector('.nav-notification-bell');
+        if (bell) {
+            bell.classList.remove('has-notifications');
+        }
+        
+        // Reset expanded state
+        navIsExpanded = false;
+        dropdown.classList.remove('expanded');
+        updateExpandButton();
+    } else {
+        // Open dropdown
+        dropdown.style.display = 'block';
+        
+        // Position dropdown near the notification icon
+        const icon = document.querySelector('.nav-notification-container');
+        if (icon) {
+            const iconRect = icon.getBoundingClientRect();
+            dropdown.style.top = `${iconRect.bottom + 10}px`;
+            dropdown.style.right = `${Math.max(20, window.innerWidth - iconRect.right)}px`;
+        }
+        
+        // Add show class for animation
+        setTimeout(() => {
+            dropdown.classList.add('show');
+        }, 10);
+        
+        const bell = document.querySelector('.nav-notification-bell');
+        if (bell) {
+            bell.classList.add('has-notifications');
+        }
+        
+        // Apply read states from localStorage
+        applyReadStates();
+        updateExpandButton();
+    }
+}
+
+function expandNavNotifications() {
+    const dropdown = document.getElementById('navNotificationDropdown');
+    if (!dropdown) return;
+    
+    navIsExpanded = !navIsExpanded;
+    
+    if (navIsExpanded) {
+        dropdown.classList.add('expanded');
+        const content = dropdown.querySelector('.nav-notification-content');
+        if (content) {
+            content.style.maxHeight = '75vh';
+        }
+    } else {
+        dropdown.classList.remove('expanded');
+        const icon = document.querySelector('.nav-notification-container');
+        if (icon) {
+            const iconRect = icon.getBoundingClientRect();
+            dropdown.style.top = `${iconRect.bottom + 10}px`;
+            dropdown.style.right = `${Math.max(20, window.innerWidth - iconRect.right)}px`;
+        }
+        const content = dropdown.querySelector('.nav-notification-content');
+        if (content) {
+            content.style.maxHeight = '350px';
+        }
+    }
+    
+    updateExpandButton();
+}
+
+function updateExpandButton() {
+    const button = document.getElementById('navExpandButton');
+    if (!button) return;
+    
+    if (navIsExpanded) {
+        button.innerHTML = '<i class="fas fa-compress-arrows-alt"></i> Collapse View';
+        button.title = 'Collapse to normal size';
+    } else {
+        button.innerHTML = '<i class="fas fa-expand-arrows-alt"></i> Expand All Notifications';
+        button.title = 'Expand to full screen';
+    }
+}
+
+function applyReadStates() {
+    const items = document.querySelectorAll('.nav-notification-item');
+    items.forEach((item, index) => {
+        if (navReadNotifications.has(index)) {
+            item.style.background = '#f1f3f4';
+            item.style.borderLeft = '4px solid #6c757d';
+            item.style.opacity = '0.7';
+            item.classList.add('read');
+            item.classList.remove('unread');
+        } else {
+            item.style.background = '#fff3cd';
+            item.style.borderLeft = '4px solid #ffc107';
+            item.classList.add('unread');
+            item.classList.remove('read');
+        }
+    });
+    updateNavNotificationBadge();
+}
+
+function markNavAsRead(notificationId) {
+    const item = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
+    if (item) {
+        item.style.background = '#f1f3f4';
+        item.style.borderLeft = '4px solid #6c757d';
+        item.style.opacity = '0.7';
+        item.classList.add('read');
+        item.classList.remove('unread');
+        navReadNotifications.add(notificationId);
+        saveReadNotifications();
+        updateNavNotificationBadge();
+    }
+}
+
+function markAllNavAsRead() {
+    const items = document.querySelectorAll('.nav-notification-item');
+    items.forEach((item, index) => {
+        item.style.background = '#f1f3f4';
+        item.style.borderLeft = '4px solid #6c757d';
+        item.style.opacity = '0.7';
+        item.classList.add('read');
+        item.classList.remove('unread');
+        navReadNotifications.add(index);
+    });
+    saveReadNotifications();
+    updateNavNotificationBadge();
+}
+
+function updateNavNotificationBadge() {
+    const badge = document.querySelector('.nav-notification-badge');
+    const items = document.querySelectorAll('.nav-notification-item');
+    const totalNotifications = items.length;
+    const unreadCount = totalNotifications - navReadNotifications.size;
+    
+    if (badge) {
+        if (unreadCount > 0) {
+            badge.textContent = unreadCount;
+            badge.style.display = 'flex';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+}
+
+// Initialize notifications on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadReadNotifications();
+    setTimeout(() => {
+        applyReadStates();
+        updateExpandButton();
+    }, 100);
+});
     </script>
 </body>
 </html>
