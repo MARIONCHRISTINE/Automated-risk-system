@@ -203,6 +203,20 @@ $stmt->bindParam(':department', $user['department']);
 $stmt->execute();
 $department_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+// Get risks reported by this user
+$query = "SELECT ri.*, 
+                 ro.full_name as risk_owner_name,
+                 reporter.full_name as reporter_name
+          FROM risk_incidents ri 
+          LEFT JOIN users ro ON ri.risk_owner_id = ro.id
+          LEFT JOIN users reporter ON ri.reported_by = reporter.id
+          WHERE ri.reported_by = :user_id
+          ORDER BY ri.created_at DESC";
+$stmt = $db->prepare($query);
+$stmt->bindParam(':user_id', $_SESSION['user_id']);
+$stmt->execute();
+$my_reported_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Get pending assignments (if you have a separate assignments table)
 $pending_assignments = []; // Initialize as empty array since we're not sure if this table exists
 
@@ -249,18 +263,18 @@ $stmt->bindParam(':department', $user['department']);
 $stmt->execute();
 $risk_levels = $stmt->fetch(PDO::FETCH_ASSOC);
 
-// Risk status distribution for department
-$query = "SELECT 
-    risk_status,
+// NEW: Risk category distribution for department
+$category_query = "SELECT 
+    risk_category,
     COUNT(*) as count
     FROM risk_incidents 
     WHERE department = :department
-    GROUP BY risk_status
+    GROUP BY risk_category
     ORDER BY count DESC";
-$stmt = $db->prepare($query);
-$stmt->bindParam(':department', $user['department']);
-$stmt->execute();
-$risk_by_status = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$category_stmt = $db->prepare($category_query);
+$category_stmt->bindParam(':department', $user['department']);
+$category_stmt->execute();
+$risk_by_category = $category_stmt->fetchAll(PDO::FETCH_ASSOC);
 
 function getRiskLevel($probability, $impact) {
     if (!$probability || !$impact) return 'not-assessed';
@@ -330,7 +344,6 @@ function getStatusBadgeClass($status) {
             z-index: 1000;
             box-shadow: 0 2px 10px rgba(230, 0, 18, 0.2);
         }
-
         .header-content {
             max-width: 1200px;
             margin: 0 auto;
@@ -338,13 +351,11 @@ function getStatusBadgeClass($status) {
             justify-content: space-between;
             align-items: center;
         }
-
         .header-left {
             display: flex;
             align-items: center;
             gap: 1rem;
         }
-
         .logo-circle {
             width: 55px;
             height: 55px;
@@ -356,19 +367,16 @@ function getStatusBadgeClass($status) {
             overflow: hidden;
             padding: 5px;
         }
-
         .logo-circle img {
             width: 100%;
             height: 100%;
             object-fit: contain;
             border-radius: 50%;
         }
-
         .header-titles {
             display: flex;
             flex-direction: column;
         }
-
         .main-title {
             font-size: 1.5rem;
             font-weight: 700;
@@ -376,7 +384,6 @@ function getStatusBadgeClass($status) {
             margin: 0;
             line-height: 1.2;
         }
-
         .sub-title {
             font-size: 1rem;
             font-weight: 400;
@@ -384,13 +391,11 @@ function getStatusBadgeClass($status) {
             margin: 0;
             line-height: 1.2;
         }
-
         .header-right {
             display: flex;
             align-items: center;
             gap: 1rem;
         }
-
         .user-avatar {
             width: 45px;
             height: 45px;
@@ -403,13 +408,11 @@ function getStatusBadgeClass($status) {
             font-weight: 700;
             font-size: 1.2rem;
         }
-
         .user-details {
             display: flex;
             flex-direction: column;
             align-items: flex-start;
         }
-
         .user-email {
             font-size: 1rem;
             font-weight: 500;
@@ -417,7 +420,6 @@ function getStatusBadgeClass($status) {
             margin: 0;
             line-height: 1.2;
         }
-
         .user-role {
             font-size: 0.9rem;
             font-weight: 400;
@@ -425,7 +427,6 @@ function getStatusBadgeClass($status) {
             margin: 0;
             line-height: 1.2;
         }
-
         .logout-btn {
             background: rgba(255, 255, 255, 0.2);
             color: white;
@@ -438,7 +439,6 @@ function getStatusBadgeClass($status) {
             transition: all 0.3s;
             margin-left: 1rem;
         }
-
         .logout-btn:hover {
             background: rgba(255, 255, 255, 0.3);
             border-color: rgba(255, 255, 255, 0.5);
@@ -455,13 +455,11 @@ function getStatusBadgeClass($status) {
             z-index: 999;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-
         .nav-content {
             max-width: 1200px;
             margin: 0 auto;
             padding: 0 2rem;
         }
-
         .nav-menu {
             display: flex;
             list-style: none;
@@ -469,11 +467,9 @@ function getStatusBadgeClass($status) {
             padding: 0;
             align-items: center;
         }
-
         .nav-item {
             margin: 0;
         }
-
         .nav-item a {
             display: flex;
             align-items: center;
@@ -485,30 +481,24 @@ function getStatusBadgeClass($status) {
             transition: all 0.3s ease;
             border-bottom: 3px solid transparent;
         }
-
         .nav-item a:hover {
             color: #E60012;
             background-color: rgba(230, 0, 18, 0.05);
         }
-
         .nav-item a.active {
             color: #E60012;
             border-bottom-color: #E60012;
             background-color: rgba(230, 0, 18, 0.05);
         }
-
         .flex {
             display: flex;
         }
-
         .justify-between {
             justify-content: space-between;
         }
-
         .items-center {
             align-items: center;
         }
-
         .w-full {
             width: 100%;
         }
@@ -594,7 +584,6 @@ function getStatusBadgeClass($status) {
             transform: translateY(-5px);
             box-shadow: 0 8px 25px rgba(230, 0, 18, 0.2);
         }
-
         .action-card .stat-number {
             font-size: 3rem;
         }
@@ -1153,7 +1142,6 @@ function getStatusBadgeClass($status) {
         height: 250px;
     }
 }
-
 /* Tablet Responsive */
 @media (max-width: 1024px) and (min-width: 769px) {
     .nav-menu {
@@ -1170,7 +1158,6 @@ function getStatusBadgeClass($status) {
         grid-template-columns: repeat(2, 1fr);
     }
 }
-
 /* Small Mobile - Extra adjustments */
 @media (max-width: 480px) {
     body {
@@ -1225,7 +1212,6 @@ function getStatusBadgeClass($status) {
         font-size: 0.8rem;
     }
 }
-
 /* Very Small Mobile - 360px and below */
 @media (max-width: 360px) {
     body {
@@ -1261,7 +1247,6 @@ function getStatusBadgeClass($status) {
         font-size: 0.55rem;
     }
 }
-
 /* Landscape orientation on mobile */
 @media (max-width: 768px) and (orientation: landscape) {
     body {
@@ -1281,23 +1266,19 @@ function getStatusBadgeClass($status) {
         font-size: 0.7rem;
     }
 }
-
 /* Ensure navbar scrolling works smoothly */
 .nav-content {
     position: relative;
     scrollbar-width: none; /* Firefox */
     -ms-overflow-style: none; /* Internet Explorer 10+ */
 }
-
 .nav-content::-webkit-scrollbar {
     display: none; /* WebKit */
 }
-
 /* Add smooth scroll behavior */
 .nav-menu {
     scroll-behavior: smooth;
 }
-
 /* Improve touch targets for mobile */
 @media (max-width: 768px) {
     .nav-item a {
@@ -1310,12 +1291,10 @@ function getStatusBadgeClass($status) {
         transform: scale(0.98);
     }
 }
-
 /* Navigation Notification Styles */
 .notification-nav-item {
     position: relative;
 }
-
 .nav-notification-container {
     position: relative;
     display: flex;
@@ -1328,48 +1307,39 @@ function getStatusBadgeClass($status) {
     color: #6c757d;
     text-decoration: none;
 }
-
 .nav-notification-container:hover {
     background-color: rgba(230, 0, 18, 0.05);
     color: #E60012;
     text-decoration: none;
 }
-
 .nav-notification-container.nav-notification-empty {
     opacity: 0.6;
     cursor: default;
 }
-
 .nav-notification-container.nav-notification-empty:hover {
     background-color: transparent;
     color: #6c757d;
 }
-
 .nav-notification-bell {
     font-size: 1.1rem;
     transition: all 0.3s ease;
 }
-
 .nav-notification-container:hover .nav-notification-bell {
     transform: scale(1.1);
 }
-
 .nav-notification-bell.has-notifications {
     color: #ffc107;
     animation: navBellRing 2s infinite;
 }
-
 @keyframes navBellRing {
     0%, 50%, 100% { transform: rotate(0deg); }
     10%, 30% { transform: rotate(-10deg); }
     20%, 40% { transform: rotate(10deg); }
 }
-
 .nav-notification-text {
     font-size: 0.9rem;
     font-weight: 500;
 }
-
 .nav-notification-badge {
     background: #dc3545;
     color: white;
@@ -1384,13 +1354,11 @@ function getStatusBadgeClass($status) {
     animation: navPulse 2s infinite;
     margin-left: auto;
 }
-
 @keyframes navPulse {
     0% { transform: scale(1); }
     50% { transform: scale(1.2); }
     100% { transform: scale(1); }
 }
-
 .nav-notification-dropdown {
     position: fixed !important;
     background: white;
@@ -1404,13 +1372,11 @@ function getStatusBadgeClass($status) {
     transition: all 0.3s ease;
     transform: translateY(-10px);
 }
-
 .nav-notification-dropdown.show {
     display: block;
     transform: translateY(0);
     opacity: 1;
 }
-
 .nav-notification-dropdown.expanded {
     box-shadow: 0 25px 50px rgba(0,0,0,0.25) !important;
     width: 90vw !important;
@@ -1420,7 +1386,6 @@ function getStatusBadgeClass($status) {
     right: 5vw !important;
     transform: none !important;
 }
-
 .nav-notification-header {
     padding: 1rem;
     border-bottom: 1px solid #dee2e6;
@@ -1432,7 +1397,6 @@ function getStatusBadgeClass($status) {
     top: 0;
     z-index: 10;
 }
-
 .nav-notification-content {
     max-height: 350px;
     overflow-y: auto;
@@ -1443,85 +1407,69 @@ function getStatusBadgeClass($status) {
     -webkit-overflow-scrolling: touch;
     scroll-behavior: smooth;
 }
-
 .nav-notification-dropdown.expanded .nav-notification-content {
     max-height: 75vh;
 }
-
 .nav-notification-content::-webkit-scrollbar {
     width: 8px;
 }
-
 .nav-notification-content::-webkit-scrollbar-track {
     background: #f7fafc;
     border-radius: 4px;
 }
-
 .nav-notification-content::-webkit-scrollbar-thumb {
     background: #cbd5e0;
     border-radius: 4px;
     transition: background 0.3s ease;
 }
-
 .nav-notification-content::-webkit-scrollbar-thumb:hover {
     background: #a0aec0;
 }
-
 .nav-notification-item {
     padding: 1rem;
     border-bottom: 1px solid #f8f9fa;
     transition: all 0.3s ease;
     position: relative;
 }
-
 .nav-notification-item:hover {
     background-color: #f8f9fa;
 }
-
 .nav-notification-item:last-child {
     border-bottom: none;
 }
-
 .nav-notification-item.read {
     opacity: 0.6;
     background-color: #f1f3f4;
 }
-
 .nav-notification-item.unread {
     background-color: #fff3cd;
     border-left: 4px solid #ffc107;
 }
-
 .nav-notification-title {
     font-weight: bold;
     color: #495057;
     margin-bottom: 0.25rem;
 }
-
 .nav-notification-risk {
     color: #6c757d;
     font-size: 0.9rem;
     margin-bottom: 0.25rem;
 }
-
 .nav-notification-date {
     color: #6c757d;
     font-size: 0.8rem;
     margin-bottom: 0.5rem;
 }
-
 .nav-notification-actions {
     margin-top: 0.5rem;
     display: flex;
     gap: 0.5rem;
     flex-wrap: wrap;
 }
-
 .nav-notification-actions .btn {
     font-size: 0.8rem;
     padding: 0.25rem 0.5rem;
 }
-
 .nav-notification-footer {
     padding: 1rem;
     border-top: 1px solid #dee2e6;
@@ -1741,7 +1689,6 @@ function getStatusBadgeClass($status) {
         </ul>
     </div>
 </nav>
-
         <!-- Main Content -->
         <main class="main-content">
             <?php if (isset($success_message)): ?>
@@ -1757,7 +1704,6 @@ function getStatusBadgeClass($status) {
                 
                 <!-- Risk Owner Statistics Cards -->
                 
-
 <div class="dashboard-grid">
     <div class="stat-card" style="transition: transform 0.3s;">
         <span class="stat-number"><?php echo $stats['department_risks']; ?></span>
@@ -1790,35 +1736,26 @@ function getStatusBadgeClass($status) {
         <div class="stat-description">Risks you have completed</div>
     </div>
 </div>
-
                 <!-- Charts Section -->
                 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
-    <!-- Risk Status in Department -->
+<div class="dashboard-grid">
+    <!-- Risk Category Chart (NEW) -->
     <div class="card">
-        <div class="card-header">
-            <h3 class="card-title">Risk Status (<?php echo $user['department']; ?>)</h3>
-        </div>
-        <div style="padding: 1rem;">
-            <div class="chart-container">
-                <canvas id="statusChart"></canvas>
-            </div>
+        <h3 class="card-title">Risk Categories Distribution</h3>
+        <div class="chart-container">
+            <canvas id="categoryChart"></canvas>
         </div>
     </div>
     
-    <!-- Risk Level Distribution -->
+    <!-- Risk Level Chart (EXISTING) -->
     <div class="card">
-        <div class="card-header">
-            <h3 class="card-title">Risk Level Distribution (<?php echo $user['department']; ?>)</h3>
-        </div>
-        <div style="padding: 1rem;">
-            <div class="chart-container">
-                <canvas id="levelChart"></canvas>
-            </div>
+        <h3 class="card-title">Risk Level Distribution</h3>
+        <div class="chart-container">
+            <canvas id="levelChart"></canvas>
         </div>
     </div>
+    
 </div>
-
                 <!-- Risk Owner Guidelines -->
                 
 <div class="card">
@@ -1878,7 +1815,6 @@ function getStatusBadgeClass($status) {
         <strong>🔒 Access Scope:</strong> Your access is limited to <?php echo $user['department']; ?> department risks only. For system-wide risk reports, contact the Compliance Team at compliance@airtel.africa.
     </div>
 </div>
-
                 <!-- Quick Actions -->
                 
 <div class="card">
@@ -1969,7 +1905,6 @@ function getStatusBadgeClass($status) {
                     <?php endif; ?>
                 </div>
             </div>
-
             <!-- Department Risks Tab -->
 <div id="department-tab" class="tab-content">
     <div class="card">
@@ -2044,92 +1979,214 @@ function getStatusBadgeClass($status) {
         <?php endif; ?>
     </div>
 </div>
-
 <!-- My Reports Tab -->
 <div id="my-reports-tab" class="tab-content">
-    <div class="card">
-        <div class="card-header">
-            <h2 class="card-title">My Reported Risks</h2>
-            <span class="badge badge-info"><?php echo $stats['my_reported_risks']; ?> risks reported by you</span>
-        </div>
-        <?php 
-        // Get risks reported by this user
-        $my_reports_query = "SELECT ri.*, ro.full_name as risk_owner_name
-                            FROM risk_incidents ri 
-                            LEFT JOIN users ro ON ri.risk_owner_id = ro.id
-                            WHERE ri.reported_by = :user_id
-                            ORDER BY ri.created_at DESC";
-        $my_reports_stmt = $db->prepare($my_reports_query);
-        $my_reports_stmt->bindParam(':user_id', $_SESSION['user_id']);
-        $my_reports_stmt->execute();
-        $my_reported_risks = $my_reports_stmt->fetchAll(PDO::FETCH_ASSOC);
+    <!-- Statistics Cards -->
+    <div class="dashboard-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 2rem;">
+        <?php
+        // Calculate report statistics
+        $total_reports = count($my_reported_risks);
+        $open_reports = 0;
+        $in_progress_reports = 0;
+        $completed_reports = 0;
         
-        if (empty($my_reported_risks)): ?>
-            <div class="alert-info">
-                <p><strong>You haven't reported any risks yet.</strong></p>
-                <p>When you report risks, they will appear here for you to track their progress.</p>
-                <a href="report_risk.php" class="btn btn-primary">Report Your First Risk</a>
+        foreach ($my_reported_risks as $risk) {
+            switch ($risk['risk_status']) {
+                case 'pending':
+                    $open_reports++;
+                    break;
+                case 'in_progress':
+                    $in_progress_reports++;
+                    break;
+                case 'completed':
+                    $completed_reports++;
+                    break;
+            }
+        }
+        ?>
+        
+        <div class="stat-card" style="border-left: 4px solid #E60012;">
+            <div class="stat-number" style="color: #E60012;"><?php echo $total_reports; ?></div>
+            <div class="stat-label" style="color: #8B4513; font-weight: 600;">Total Reports</div>
+            <div class="stat-description" style="color: #666;">All risks you have reported</div>
+        </div>
+        
+        <div class="stat-card" style="border-left: 4px solid #E60012;">
+            <div class="stat-number" style="color: #E60012;"><?php echo $open_reports; ?></div>
+            <div class="stat-label" style="color: #8B4513; font-weight: 600;">Open</div>
+            <div class="stat-description" style="color: #666;">Awaiting review</div>
+        </div>
+        
+        <div class="stat-card" style="border-left: 4px solid #E60012;">
+            <div class="stat-number" style="color: #E60012;"><?php echo $in_progress_reports; ?></div>
+            <div class="stat-label" style="color: #8B4513; font-weight: 600;">In Progress</div>
+            <div class="stat-description" style="color: #666;">Being addressed</div>
+        </div>
+        
+        <div class="stat-card" style="border-left: 4px solid #E60012;">
+            <div class="stat-number" style="color: #E60012;"><?php echo $completed_reports; ?></div>
+            <div class="stat-label" style="color: #8B4513; font-weight: 600;">Completed</div>
+            <div class="stat-description" style="color: #666;">Successfully managed</div>
+        </div>
+    </div>
+    <!-- Action Buttons and Search -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
+        <div style="display: flex; gap: 1rem;">
+            <a href="report_risk.php" class="btn" style="background: #E60012; color: white; padding: 0.75rem 1.5rem; border-radius: 5px; text-decoration: none; font-weight: 500;">
+                📝 Report New Risk
+            </a>
+            <a href="risk_owner_dashboard.php" class="btn" style="background: #6c757d; color: white; padding: 0.75rem 1.5rem; border-radius: 5px; text-decoration: none; font-weight: 500;">
+                🏠 Back to Dashboard
+            </a>
+        </div>
+        <div>
+            <input type="text" id="searchRisks" placeholder="Search risks..." style="padding: 0.75rem; border: 1px solid #ddd; border-radius: 5px; width: 250px;">
+        </div>
+    </div>
+    <!-- Reports Table -->
+    <div class="card" style="padding: 0;">
+        <div style="padding: 1.5rem 2rem; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="margin: 0; color: #8B4513; font-size: 1.2rem; font-weight: 600;">All My Risk Reports</h3>
+            <select id="statusFilter" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; background: white;">
+                <option value="">All Statuses</option>
+                <option value="pending">Open</option>
+                <option value="in_progress">In Progress</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+            </select>
+        </div>
+        
+        <?php if (empty($my_reported_risks)): ?>
+            <div style="padding: 3rem; text-align: center; color: #666;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">📋</div>
+                <h3 style="margin-bottom: 0.5rem;">No Risk Reports Yet</h3>
+                <p style="margin-bottom: 1.5rem;">You haven't reported any risks yet. Start by reporting your first risk.</p>
+                <a href="report_risk.php" class="btn" style="background: #E60012; color: white; padding: 0.75rem 1.5rem; border-radius: 5px; text-decoration: none;">
+                    Report Your First Risk
+                </a>
             </div>
         <?php else: ?>
-        <div class="table-responsive">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Risk Name</th>
-                        <th>Risk Level</th>
-                        <th>Status</th>
-                        <th>Assigned To</th>
-                        <th>Date Reported</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($my_reported_risks as $risk): ?>
-                    <tr class="risk-row <?php echo getRiskLevel($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>" data-risk-id="<?php echo $risk['id']; ?>">
-                        <td>
-                            <strong><?php echo htmlspecialchars($risk['risk_name']); ?></strong>
-                            <?php if ($risk['risk_description']): ?>
-                                <br><small class="text-muted"><?php echo htmlspecialchars(substr($risk['risk_description'], 0, 100)) . (strlen($risk['risk_description']) > 100 ? '...' : ''); ?></small>
-                            <?php endif; ?>
-                        </td>
-                        <td>
-                            <span class="risk-badge risk-<?php echo getRiskLevel($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>">
-                                <?php echo getRiskLevelText($risk['probability'] ?? 0, $risk['impact'] ?? 0); ?>
-                            </span>
-                        </td>
-                        <td>
-                            <span class="status-badge status-<?php echo str_replace('_', '-', $risk['risk_status'] ?? 'pending'); ?>">
-                                <?php echo ucfirst(str_replace('_', ' ', $risk['risk_status'] ?? 'Not Started')); ?>
-                            </span>
-                        </td>
-                        <td>
-                            <?php if ($risk['risk_owner_name']): ?>
-                                <span class="owner-badge"><?php echo htmlspecialchars($risk['risk_owner_name']); ?></span>
-                                <?php if ($risk['risk_owner_id'] == $_SESSION['user_id']): ?>
-                                    <br><small class="text-muted">(You are the owner)</small>
+            <div class="table-responsive">
+                <table class="table" style="margin: 0;">
+                    <thead style="background: #f8f9fa;">
+                        <tr>
+                            <th style="padding: 1rem; font-weight: 600; color: #495057;">Risk Name</th>
+                            <th style="padding: 1rem; font-weight: 600; color: #495057;">Category</th>
+                            <th style="padding: 1rem; font-weight: 600; color: #495057;">Risk Level</th>
+                            <th style="padding: 1rem; font-weight: 600; color: #495057;">Status</th>
+                            <th style="padding: 1rem; font-weight: 600; color: #495057;">Risk Owner</th>
+                            <th style="padding: 1rem; font-weight: 600; color: #495057;">Reported Date</th>
+                            <th style="padding: 1rem; font-weight: 600; color: #495057;">Last Updated</th>
+                            <th style="padding: 1rem; font-weight: 600; color: #495057;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reportsTableBody">
+                        <?php foreach ($my_reported_risks as $risk): ?>
+                        <tr class="risk-report-row" data-status="<?php echo $risk['risk_status'] ?? 'pending'; ?>" data-search="<?php echo strtolower($risk['risk_name'] . ' ' . ($risk['risk_category'] ?? '')); ?>">
+                            <td style="padding: 1rem; border-left: 4px solid #E60012;">
+                                <div style="font-weight: 600; color: #333; margin-bottom: 0.25rem;">
+                                    <?php echo htmlspecialchars($risk['risk_name']); ?>
+                                </div>
+                                <?php if ($risk['risk_description']): ?>
+                                    <div style="font-size: 0.85rem; color: #666; line-height: 1.4;">
+                                        <?php echo htmlspecialchars(substr($risk['risk_description'], 0, 80)) . (strlen($risk['risk_description']) > 80 ? '...' : ''); ?>
+                                    </div>
                                 <?php endif; ?>
-                            <?php else: ?>
-                                <span class="unassigned-badge">Auto-Assigning...</span>
-                            <?php endif; ?>
-                        </td>
-                        <td><?php echo date('M j, Y', strtotime($risk['created_at'])); ?></td>
-                        <td>
-                            <div class="assignment-actions">
-                                <a href="view_risk.php?id=<?php echo $risk['id']; ?>" class="btn btn-sm btn-primary">View Details</a>
-                                <?php if ($risk['risk_owner_id'] == $_SESSION['user_id']): ?>
-                                    <a href="risk_assessment.php?id=<?php echo $risk['id']; ?>" class="btn btn-sm btn-success">Manage</a>
+                            </td>
+                            <td style="padding: 1rem;">
+                                <span style="background: #f8f9fa; color: #495057; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">
+                                    <?php echo htmlspecialchars($risk['risk_category'] ?? 'Uncategorized'); ?>
+                                </span>
+                            </td>
+                            <td style="padding: 1rem;">
+                                <?php 
+                                $level = getRiskLevel($risk['probability'] ?? 0, $risk['impact'] ?? 0);
+                                $levelText = getRiskLevelText($risk['probability'] ?? 0, $risk['impact'] ?? 0);
+                                $levelColors = [
+                                    'low' => '#28a745',
+                                    'medium' => '#ffc107', 
+                                    'high' => '#fd7e14',
+                                    'critical' => '#dc3545',
+                                    'not-assessed' => '#6c757d'
+                                ];
+                                ?>
+                                <span style="background: <?php echo $levelColors[$level] ?? '#6c757d'; ?>; color: white; padding: 0.25rem 0.75rem; border-radius: 15px; font-size: 0.8rem; font-weight: 500;">
+                                    <?php echo $levelText; ?>
+                                </span>
+                            </td>
+                            <td style="padding: 1rem;">
+                                <?php 
+                                $status = $risk['risk_status'] ?? 'pending';
+                                $statusColors = [
+                                    'pending' => '#ffc107',
+                                    'in_progress' => '#007bff',
+                                    'completed' => '#28a745',
+                                    'cancelled' => '#dc3545'
+                                ];
+                                $statusLabels = [
+                                    'pending' => 'Open',
+                                    'in_progress' => 'In Progress', 
+                                    'completed' => 'Completed',
+                                    'cancelled' => 'Cancelled'
+                                ];
+                                ?>
+                                <span style="background: <?php echo $statusColors[$status] ?? '#6c757d'; ?>; color: white; padding: 0.25rem 0.75rem; border-radius: 15px; font-size: 0.8rem; font-weight: 500;">
+                                    <?php echo $statusLabels[$status] ?? ucfirst($status); ?>
+                                </span>
+                            </td>
+                            <td style="padding: 1rem;">
+                                <?php if ($risk['risk_owner_name']): ?>
+                                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                        <div style="width: 32px; height: 32px; background: #E60012; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.8rem;">
+                                            <?php echo strtoupper(substr($risk['risk_owner_name'], 0, 1)); ?>
+                                        </div>
+                                        <div>
+                                            <div style="font-weight: 500; color: #333; font-size: 0.9rem;">
+                                                <?php echo htmlspecialchars($risk['risk_owner_name']); ?>
+                                            </div>
+                                            <?php if ($risk['risk_owner_id'] == $_SESSION['user_id']): ?>
+                                                <div style="font-size: 0.75rem; color: #28a745;">You are the owner</div>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                <?php else: ?>
+                                    <span style="color: #ffc107; font-style: italic; font-size: 0.9rem;">Auto-assigning...</span>
                                 <?php endif; ?>
-                            </div>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
+                            </td>
+                            <td style="padding: 1rem; color: #666; font-size: 0.9rem;">
+                                <?php echo date('M j, Y', strtotime($risk['created_at'])); ?>
+                                <div style="font-size: 0.8rem; color: #999;">
+                                    <?php echo date('g:i A', strtotime($risk['created_at'])); ?>
+                                </div>
+                            </td>
+                            <td style="padding: 1rem; color: #666; font-size: 0.9rem;">
+                                <?php echo date('M j, Y', strtotime($risk['updated_at'])); ?>
+                                <div style="font-size: 0.8rem; color: #999;">
+                                    <?php echo date('g:i A', strtotime($risk['updated_at'])); ?>
+                                </div>
+                            </td>
+                            <td style="padding: 1rem;">
+                                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                    <a href="view_risk.php?id=<?php echo $risk['id']; ?>" 
+                                       style="background: #007bff; color: white; padding: 0.4rem 0.8rem; border-radius: 4px; text-decoration: none; font-size: 0.8rem; font-weight: 500;">
+                                        View
+                                    </a>
+                                    <?php if ($risk['risk_owner_id'] == $_SESSION['user_id']): ?>
+                                        <a href="risk_assessment.php?id=<?php echo $risk['id']; ?>" 
+                                           style="background: #28a745; color: white; padding: 0.4rem 0.8rem; border-radius: 4px; text-decoration: none; font-size: 0.8rem; font-weight: 500;">
+                                            Manage
+                                        </a>
+                                    <?php endif; ?>
+                                </div>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
         <?php endif; ?>
     </div>
 </div>
-
             <!-- Assignments Tab (Notifications) -->
             <div id="assignments-tab" class="tab-content">
                 <div class="card">
@@ -2184,7 +2241,6 @@ function getStatusBadgeClass($status) {
             </div>
         </div>
     </div>
-
     <!-- Risk Assessment Modal -->
     <div id="assessmentModal" class="modal">
         <div class="modal-content">
@@ -2226,24 +2282,29 @@ function getStatusBadgeClass($status) {
     </div>
     
     <script>
-        // Risk Status Chart (replace department chart)
-        const statusData = <?php echo json_encode($risk_by_status); ?>;
-        const statusCtx = document.getElementById('statusChart').getContext('2d');
-
-        if (statusData.length > 0) {
-            new Chart(statusCtx, {
+        // Risk Category Chart (NEW)
+        const categoryData = <?php echo json_encode($risk_by_category); ?>;
+        const categoryCtx = document.getElementById('categoryChart').getContext('2d');
+        if (categoryData.length > 0) {
+            const categoryColors = {
+                'Strategic Risk': '#6f42c1',
+                'Operational Risk': '#dc3545',
+                'Financial Risk': '#28a745',
+                'Compliance Risk': '#ffc107',
+                'Technology Risk': '#007bff',
+                'Reputational Risk': '#fd7e14',
+                'Human Resources Risk': '#20c997',
+                'Environmental Risk': '#6c757d'
+            };
+            new Chart(categoryCtx, {
                 type: 'doughnut',
                 data: {
-                    labels: statusData.map(item => item.risk_status ? item.risk_status.replace('_', ' ').toUpperCase() : 'PENDING'),
+                    labels: categoryData.map(item => item.risk_category || 'Uncategorized'),
                     datasets: [{
-                        data: statusData.map(item => item.count),
-                        backgroundColor: [
-                            '#28a745', // completed
-                            '#ffc107', // in_progress  
-                            '#6c757d', // pending
-                            '#dc3545', // cancelled
-                            '#17a2b8'  // on_hold
-                        ],
+                        data: categoryData.map(item => item.count),
+                        backgroundColor: categoryData.map(item => 
+                            categoryColors[item.risk_category] || '#6c757d'
+                        ),
                         borderWidth: 2,
                         borderColor: '#fff'
                     }]
@@ -2253,13 +2314,28 @@ function getStatusBadgeClass($status) {
                     maintainAspectRatio: false,
                     plugins: {
                         legend: {
-                            position: 'bottom'
+                            position: 'bottom',
+                            labels: {
+                                padding: 15,
+                                usePointStyle: true
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.parsed;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = ((value / total) * 100).toFixed(1);
+                                    return `${label}: ${value} risks (${percentage}%)`;
+                                }
+                            }
                         }
                     }
                 }
             });
         } else {
-            statusCtx.canvas.parentNode.innerHTML = '<p style="text-align: center; color: #666;">No data available</p>';
+            categoryCtx.canvas.parentNode.innerHTML = '<p style="text-align: center; color: #666; padding: 2rem;">No risk categories data available</p>';
         }
         
         // Risk Level Chart
@@ -2347,7 +2423,6 @@ function getStatusBadgeClass($status) {
                 }
             });
         }
-
         // Handle highlighting updated risk row
         <?php if (isset($_GET['updated']) && isset($_GET['risk_id'])): ?>
         document.addEventListener('DOMContentLoaded', function() {
@@ -2382,7 +2457,6 @@ function getStatusBadgeClass($status) {
         setTimeout(function() {
             location.reload();
         }, 300000); // 5 minutes
-
         // Handle tab parameter from URL
         document.addEventListener('DOMContentLoaded', function() {
             const urlParams = new URLSearchParams(window.location.search);
@@ -2391,7 +2465,6 @@ function getStatusBadgeClass($status) {
                 showTab(tab);
             }
         });
-
         // IMPROVED BROWSER BACK BUTTON HANDLING
         document.addEventListener('DOMContentLoaded', function() {
             // Get the referrer (where user came from)
@@ -2423,7 +2496,6 @@ function getStatusBadgeClass($status) {
                 sessionStorage.setItem('validReferrer', referrer);
             }
         });
-
         // Handle the browser's back button
         window.addEventListener('popstate', function(event) {
             // Check if this is our prevented back state
@@ -2452,7 +2524,6 @@ function getStatusBadgeClass($status) {
                 );
             }
         });
-
         // Prevent navigation to login page via back button
         window.addEventListener('beforeunload', function() {
             // Clear login-related referrers
@@ -2461,7 +2532,6 @@ function getStatusBadgeClass($status) {
                 sessionStorage.setItem('lastValidPage', window.location.href);
             }
         });
-
         // Additional safety: Override history.back() if needed
         const originalBack = window.history.back;
         window.history.back = function() {
@@ -2474,11 +2544,9 @@ function getStatusBadgeClass($status) {
                 console.log('Back navigation blocked - would go to login');
             }
         };
-
 // Navigation notification functionality with persistent storage
 let navIsExpanded = false;
 let navReadNotifications = new Set();
-
 // Load read notifications from localStorage
 function loadReadNotifications() {
     const stored = localStorage.getItem('readNotifications_<?php echo $_SESSION['user_id']; ?>');
@@ -2486,12 +2554,10 @@ function loadReadNotifications() {
         navReadNotifications = new Set(JSON.parse(stored));
     }
 }
-
 // Save read notifications to localStorage
 function saveReadNotifications() {
     localStorage.setItem('readNotifications_<?php echo $_SESSION['user_id']; ?>', JSON.stringify([...navReadNotifications]));
 }
-
 function toggleNavNotifications() {
     // Don't open if no notifications
     const container = document.querySelector('.nav-notification-container');
@@ -2543,7 +2609,6 @@ function toggleNavNotifications() {
         updateExpandButton();
     }
 }
-
 function expandNavNotifications() {
     const dropdown = document.getElementById('navNotificationDropdown');
     if (!dropdown) return;
@@ -2572,7 +2637,6 @@ function expandNavNotifications() {
     
     updateExpandButton();
 }
-
 function updateExpandButton() {
     const button = document.getElementById('navExpandButton');
     if (!button) return;
@@ -2585,7 +2649,6 @@ function updateExpandButton() {
         button.title = 'Expand to full screen';
     }
 }
-
 function applyReadStates() {
     const items = document.querySelectorAll('.nav-notification-item');
     items.forEach((item, index) => {
@@ -2604,7 +2667,6 @@ function applyReadStates() {
     });
     updateNavNotificationBadge();
 }
-
 function markNavAsRead(notificationId) {
     const item = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
     if (item) {
@@ -2618,7 +2680,6 @@ function markNavAsRead(notificationId) {
         updateNavNotificationBadge();
     }
 }
-
 function markAllNavAsRead() {
     const items = document.querySelectorAll('.nav-notification-item');
     items.forEach((item, index) => {
@@ -2632,7 +2693,6 @@ function markAllNavAsRead() {
     saveReadNotifications();
     updateNavNotificationBadge();
 }
-
 function updateNavNotificationBadge() {
     const badge = document.querySelector('.nav-notification-badge');
     const items = document.querySelectorAll('.nav-notification-item');
@@ -2648,7 +2708,6 @@ function updateNavNotificationBadge() {
         }
     }
 }
-
 // Initialize notifications on page load
 document.addEventListener('DOMContentLoaded', function() {
     loadReadNotifications();
@@ -2656,6 +2715,37 @@ document.addEventListener('DOMContentLoaded', function() {
         applyReadStates();
         updateExpandButton();
     }, 100);
+});
+// Search and Filter functionality for Reports
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('searchRisks');
+    const statusFilter = document.getElementById('statusFilter');
+    const tableRows = document.querySelectorAll('.risk-report-row');
+    function filterReports() {
+        const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+        const statusFilter = document.getElementById('statusFilter');
+        const selectedStatus = statusFilter ? statusFilter.value : '';
+        tableRows.forEach(row => {
+            const searchData = row.getAttribute('data-search') || '';
+            const rowStatus = row.getAttribute('data-status') || '';
+            
+            const matchesSearch = searchData.includes(searchTerm);
+            const matchesStatus = !selectedStatus || rowStatus === selectedStatus;
+            
+            if (matchesSearch && matchesStatus) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    }
+    if (searchInput) {
+        searchInput.addEventListener('input', filterReports);
+    }
+    
+    if (statusFilter) {
+        statusFilter.addEventListener('change', filterReports);
+    }
 });
     </script>
 </body>
