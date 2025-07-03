@@ -177,7 +177,6 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -198,7 +197,7 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
             color: #333;
             line-height: 1.6;
             min-height: 100vh;
-            padding-top: 100px;
+            padding-top: 150px; /* Updated to accommodate both header and nav */
         }
         
         /* Header - Same as dashboard */
@@ -313,6 +312,122 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
             border-color: rgba(255, 255, 255, 0.5);
         }
         
+        /* Navigation Bar - Same as dashboard */
+        .nav {
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            position: fixed;
+            top: 100px;
+            left: 0;
+            right: 0;
+            z-index: 999;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .nav-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+        .nav-menu {
+            display: flex;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            align-items: center;
+        }
+        .nav-item {
+            margin: 0;
+        }
+        .nav-item a {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 1rem 1.5rem;
+            color: #6c757d;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border-bottom: 3px solid transparent;
+        }
+        .nav-item a:hover {
+            color: #E60012;
+            background-color: rgba(230, 0, 18, 0.05);
+        }
+        .nav-item a.active {
+            color: #E60012;
+            border-bottom-color: #E60012;
+            background-color: rgba(230, 0, 18, 0.05);
+        }
+        
+        /* Notification styles */
+        .notification-nav-item {
+            position: relative;
+        }
+        .nav-notification-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            padding: 1rem 1.5rem;
+            border-radius: 0.25rem;
+            transition: all 0.3s ease;
+            color: #6c757d;
+            text-decoration: none;
+        }
+        .nav-notification-container:hover {
+            background-color: rgba(230, 0, 18, 0.05);
+            color: #E60012;
+            text-decoration: none;
+        }
+        .nav-notification-container.nav-notification-empty {
+            opacity: 0.6;
+            cursor: default;
+        }
+        .nav-notification-container.nav-notification-empty:hover {
+            background-color: transparent;
+            color: #6c757d;
+        }
+        .nav-notification-bell {
+            font-size: 1.1rem;
+            transition: all 0.3s ease;
+        }
+        .nav-notification-container:hover .nav-notification-bell {
+            transform: scale(1.1);
+        }
+        .nav-notification-bell.has-notifications {
+            color: #ffc107;
+            animation: navBellRing 2s infinite;
+        }
+        @keyframes navBellRing {
+            0%, 50%, 100% { transform: rotate(0deg); }
+            10%, 30% { transform: rotate(-10deg); }
+            20%, 40% { transform: rotate(10deg); }
+        }
+        .nav-notification-text {
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        .nav-notification-badge {
+            background: #dc3545;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 0.7rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            animation: navPulse 2s infinite;
+            margin-left: auto;
+        }
+        @keyframes navPulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+        
         /* Main Content */
         .main-content {
             max-width: 1200px;
@@ -425,110 +540,96 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
         
         /* File Upload Styles */
         .file-upload-section {
-    background: #f8f9fa;
-    border: 2px dashed #dee2e6;
-    border-radius: 0.25rem;
-    padding: 0.5rem;
-    margin-top: 0.5rem;
-    transition: all 0.3s;
-}
-
-.file-upload-section:hover {
-    border-color: #E60012;
-    background: #fff5f5;
-}
-
-.file-upload-section.dragover {
-    border-color: #E60012;
-    background: #fff5f5;
-    transform: scale(1.01);
-}
-
-.file-input-wrapper {
-    position: relative;
-    display: inline-block;
-    width: 100%;
-}
-
-.file-input {
-    position: absolute;
-    opacity: 0;
-    width: 100%;
-    height: 100%;
-    cursor: pointer;
-}
-
-.file-input-label {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    padding: 0.4rem;
-    border: 1px dashed #ccc;
-    border-radius: 0.25rem;
-    background: white;
-    cursor: pointer;
-    transition: all 0.3s;
-    text-align: center;
-    font-size: 0.85rem;
-}
-
-.file-input-label:hover {
-    border-color: #E60012;
-    background: #fff5f5;
-}
-
-.file-list {
-    margin-top: 0.5rem;
-}
-
-.file-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.4rem;
-    background: white;
-    border: 1px solid #dee2e6;
-    border-radius: 0.25rem;
-    margin-bottom: 0.4rem;
-    font-size: 0.85rem;
-}
-
-.file-info {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-}
-
-.file-name {
-    font-weight: 500;
-}
-
-.file-size {
-    color: #666;
-    font-size: 0.8rem;
-}
-
-.file-remove {
-    background: #dc3545;
-    color: white;
-    border: none;
-    padding: 0.2rem 0.4rem;
-    border-radius: 0.2rem;
-    cursor: pointer;
-    font-size: 0.75rem;
-}
-
-.file-remove:hover {
-    background: #c82333;
-}
-
-.file-types-info {
-    font-size: 0.75rem;
-    color: #666;
-    margin-top: 0.4rem;
-    text-align: center;
-}
+            background: #f8f9fa;
+            border: 2px dashed #dee2e6;
+            border-radius: 0.25rem;
+            padding: 0.5rem;
+            margin-top: 0.5rem;
+            transition: all 0.3s;
+        }
+        .file-upload-section:hover {
+            border-color: #E60012;
+            background: #fff5f5;
+        }
+        .file-upload-section.dragover {
+            border-color: #E60012;
+            background: #fff5f5;
+            transform: scale(1.01);
+        }
+        .file-input-wrapper {
+            position: relative;
+            display: inline-block;
+            width: 100%;
+        }
+        .file-input {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+        .file-input-label {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.4rem;
+            border: 1px dashed #ccc;
+            border-radius: 0.25rem;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+            font-size: 0.85rem;
+        }
+        .file-input-label:hover {
+            border-color: #E60012;
+            background: #fff5f5;
+        }
+        .file-list {
+            margin-top: 0.5rem;
+        }
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.4rem;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            margin-bottom: 0.4rem;
+            font-size: 0.85rem;
+        }
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .file-name {
+            font-weight: 500;
+        }
+        .file-size {
+            color: #666;
+            font-size: 0.8rem;
+        }
+        .file-remove {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.2rem;
+            cursor: pointer;
+            font-size: 0.75rem;
+        }
+        .file-remove:hover {
+            background: #c82333;
+        }
+        .file-types-info {
+            font-size: 0.75rem;
+            color: #666;
+            margin-top: 0.4rem;
+            text-align: center;
+        }
         
         .risk-matrix {
             display: grid;
@@ -615,7 +716,7 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
         /* Responsive */
         @media (max-width: 768px) {
             body {
-                padding-top: 120px;
+                padding-top: 200px;
             }
             
             .header {
@@ -643,6 +744,76 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
             .logout-btn {
                 margin-left: 0;
                 margin-top: 0.5rem;
+            }
+            
+            .nav {
+                top: 120px;
+                padding: 0.25rem 0;
+            }
+            
+            .nav-content {
+                padding: 0 0.5rem;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            
+            .nav-menu {
+                flex-wrap: nowrap;
+                justify-content: flex-start;
+                gap: 0;
+                min-width: max-content;
+                padding: 0 0.5rem;
+            }
+            
+            .nav-item {
+                flex: 0 0 auto;
+                min-width: 80px;
+            }
+            
+            .nav-item a {
+                padding: 0.75rem 0.5rem;
+                font-size: 0.75rem;
+                text-align: center;
+                border-bottom: 3px solid transparent;
+                border-left: none;
+                width: 100%;
+                white-space: nowrap;
+                min-height: 44px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 0.25rem;
+            }
+            
+            .nav-item a.active {
+                border-bottom-color: #E60012;
+                border-left-color: transparent;
+                background-color: rgba(230, 0, 18, 0.1);
+            }
+            
+            .nav-item a:hover {
+                background-color: rgba(230, 0, 18, 0.05);
+            }
+            
+            .nav-notification-container {
+                padding: 0.75rem 0.5rem;
+                font-size: 0.75rem;
+                min-width: 80px;
+            }
+            
+            .nav-notification-text {
+                font-size: 0.65rem;
+            }
+            
+            .nav-notification-bell {
+                font-size: 1rem;
+            }
+            
+            .nav-notification-badge {
+                width: 16px;
+                height: 16px;
+                font-size: 0.6rem;
             }
             
             .form-row {
@@ -678,6 +849,110 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
             </div>
         </div>
     </header>
+    
+    <!-- Navigation Bar -->
+    <nav class="nav">
+        <div class="nav-content">
+            <ul class="nav-menu">
+                <li class="nav-item">
+                    <a href="risk_owner_dashboard.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'risk_owner_dashboard.php' ? 'active' : ''; ?>">
+                        🏠 Dashboard
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="report_risk.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'report_risk.php' ? 'active' : ''; ?>">
+                        📝 Report Risk
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="risk_owner_dashboard.php?tab=my-reports" class="<?php echo isset($_GET['tab']) && $_GET['tab'] == 'my-reports' ? 'active' : ''; ?>">
+                        👀 My Reports
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="risk-procedures.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'risk-procedures.php' ? 'active' : ''; ?>" target="_blank">
+                        📋 Procedures
+                    </a>
+                </li>
+                <li class="nav-item notification-nav-item">
+                    <?php
+                    if (isset($_SESSION['user_id'])) {
+                        require_once 'config/database.php';
+                        $database = new Database();
+                        $conn = $database->getConnection();
+                        
+                        $treatment_query = "SELECT rt.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
+                                                   owner.full_name as risk_owner_name, 'treatment' as notification_type,
+                                                   rt.created_at as notification_date
+                                            FROM risk_treatments rt
+                                            INNER JOIN risk_incidents ri ON rt.risk_id = ri.id
+                                            LEFT JOIN users owner ON ri.risk_owner_id = owner.id
+                                            WHERE rt.assigned_to = :user_id 
+                                            AND rt.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+                        
+                        $assignment_query = "SELECT ri.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
+                                                    reporter.full_name as reporter_name, 'assignment' as notification_type,
+                                                    ri.updated_at as notification_date
+                                             FROM risk_incidents ri
+                                             LEFT JOIN users reporter ON ri.reported_by = reporter.id
+                                             WHERE ri.risk_owner_id = :user_id 
+                                             AND ri.updated_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+                        
+                        $update_query = "SELECT ri.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
+                                                updater.full_name as updater_name, 'update' as notification_type,
+                                                ri.updated_at as notification_date
+                                         FROM risk_incidents ri
+                                         LEFT JOIN users updater ON ri.reported_by = updater.id
+                                         WHERE (ri.risk_owner_id = :user_id OR ri.reported_by = :user_id)
+                                         AND ri.updated_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                                         AND ri.updated_at != ri.created_at";
+                        
+                        $all_notifications = [];
+                        
+                        $stmt = $conn->prepare($treatment_query);
+                        $stmt->bindParam(':user_id', $_SESSION['user_id']);
+                        $stmt->execute();
+                        $treatment_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                        $all_notifications = array_merge($all_notifications, $treatment_notifications);
+                        
+                        $stmt = $conn->prepare($assignment_query);
+                        $stmt->bindParam(':user_id', $_SESSION['user_id']);
+                        $stmt->execute();
+                        $assignment_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                        $all_notifications = array_merge($all_notifications, $assignment_notifications);
+                        
+                        $stmt = $conn->prepare($update_query);
+                        $stmt->bindParam(':user_id', $_SESSION['user_id']);
+                        $stmt->execute();
+                        $update_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                        $all_notifications = array_merge($all_notifications, $update_notifications);
+                        
+                        usort($all_notifications, function($a, $b) {
+                            return strtotime($b['notification_date']) - strtotime($a['notification_date']);
+                        });
+                        
+                        $all_notifications = array_slice($all_notifications, 0, 20);
+                        
+                        if (!empty($all_notifications)):
+                    ?>
+                    <div class="nav-notification-container">
+                        <i class="fas fa-bell nav-notification-bell"></i>
+                        <span class="nav-notification-text">Notifications</span>
+                        <span class="nav-notification-badge"><?php echo count($all_notifications); ?></span>
+                    </div>
+                    <?php else: ?>
+                    <div class="nav-notification-container nav-notification-empty">
+                        <i class="fas fa-bell nav-notification-bell"></i>
+                        <span class="nav-notification-text">Notifications</span>
+                    </div>
+                    <?php 
+                        endif;
+                    }
+                    ?>
+                </li>
+            </ul>
+        </div>
+    </nav>
     
     <!-- Main Content -->
     <div class="main-content">
