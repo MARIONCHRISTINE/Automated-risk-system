@@ -76,8 +76,8 @@ function handleFileUploads($files, $risk_id, $section_type, $db) {
                 
                 if (move_uploaded_file($file_tmp, $file_path)) {
                     // Save to database
-                    $query = "INSERT INTO risk_documents (risk_id, section_type, original_filename, stored_filename, file_path, file_size, uploaded_by, uploaded_at) 
-                              VALUES (:risk_id, :section_type, :original_filename, :stored_filename, :file_path, :file_size, :uploaded_by, NOW())";
+                    $query = "INSERT INTO risk_documents (risk_id, section_type, original_filename, stored_filename, file_path, file_size, uploaded_by, uploaded_at)
+                               VALUES (:risk_id, :section_type, :original_filename, :stored_filename, :file_path, :file_size, :uploaded_by, NOW())";
                     $stmt = $db->prepare($query);
                     $stmt->bindParam(':risk_id', $risk_id);
                     $stmt->bindParam(':section_type', $section_type);
@@ -197,10 +197,10 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
             color: #333;
             line-height: 1.6;
             min-height: 100vh;
-            padding-top: 150px; /* Updated to accommodate both header and nav */
+            padding-top: 150px;
         }
         
-        /* Header - Same as dashboard */
+        /* Header */
         .header {
             background: #E60012;
             padding: 1.5rem 2rem;
@@ -312,7 +312,7 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
             border-color: rgba(255, 255, 255, 0.5);
         }
         
-        /* Navigation Bar - Same as dashboard */
+        /* Navigation Bar */
         .nav {
             background: #f8f9fa;
             border-bottom: 1px solid #dee2e6;
@@ -526,6 +526,53 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
         .nav-notification-actions .btn {
             font-size: 0.8rem;
             padding: 0.25rem 0.5rem;
+        }
+        .flex {
+            display: flex;
+        }
+        .justify-between {
+            justify-content: space-between;
+        }
+        .items-center {
+            align-items: center;
+        }
+        .btn-sm {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.8rem;
+        }
+        .btn-primary {
+            background: #007bff;
+        }
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        .btn-outline {
+            background: transparent;
+            color: #E60012;
+            border: 1px solid #E60012;
+        }
+        .btn-outline:hover {
+            background: #E60012;
+            color: white;
+        }
+        .btn-secondary {
+            background: #6c757d;
+        }
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
+        }
+        .btn-warning:hover {
+            background: #e0a800;
+        }
+        .btn-success {
+            background: #28a745;
+        }
+        .btn-success:hover {
+            background: #218838;
         }
         
         /* Main Content */
@@ -785,15 +832,6 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
             box-shadow: 0 4px 12px rgba(230, 0, 18, 0.3);
         }
         
-        .btn-secondary {
-            background: #6c757d;
-        }
-        
-        .btn-secondary:hover {
-            background: #545b62;
-            box-shadow: 0 4px 12px rgba(108, 117, 125, 0.3);
-        }
-        
         .alert {
             padding: 1rem;
             border-radius: 5px;
@@ -916,6 +954,12 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                 font-size: 0.6rem;
             }
             
+            .nav-notification-dropdown {
+                width: 95vw;
+                left: 2.5vw !important;
+                right: 2.5vw !important;
+            }
+            
             .form-row {
                 grid-template-columns: 1fr;
             }
@@ -976,27 +1020,24 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                 </li>
                 <li class="nav-item notification-nav-item">
                     <?php
+                    // Use the same notification system as the dashboard
                     if (isset($_SESSION['user_id'])) {
-                        require_once 'config/database.php';
-                        $database = new Database();
-                        $conn = $database->getConnection();
-                        
                         $treatment_query = "SELECT rt.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
                                                    owner.full_name as risk_owner_name, 'treatment' as notification_type,
                                                    rt.created_at as notification_date
                                             FROM risk_treatments rt
                                             INNER JOIN risk_incidents ri ON rt.risk_id = ri.id
                                             LEFT JOIN users owner ON ri.risk_owner_id = owner.id
-                                            WHERE rt.assigned_to = :user_id 
-                                            AND rt.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+                                            WHERE rt.assigned_to = :user_id
+                                             AND rt.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
                         
                         $assignment_query = "SELECT ri.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
                                                     reporter.full_name as reporter_name, 'assignment' as notification_type,
                                                     ri.updated_at as notification_date
                                              FROM risk_incidents ri
                                              LEFT JOIN users reporter ON ri.reported_by = reporter.id
-                                             WHERE ri.risk_owner_id = :user_id 
-                                             AND ri.updated_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+                                             WHERE ri.risk_owner_id = :user_id
+                                              AND ri.updated_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
                         
                         $update_query = "SELECT ri.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
                                                 updater.full_name as updater_name, 'update' as notification_type,
@@ -1009,19 +1050,19 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                         
                         $all_notifications = [];
                         
-                        $stmt = $conn->prepare($treatment_query);
+                        $stmt = $db->prepare($treatment_query);
                         $stmt->bindParam(':user_id', $_SESSION['user_id']);
                         $stmt->execute();
                         $treatment_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         $all_notifications = array_merge($all_notifications, $treatment_notifications);
                         
-                        $stmt = $conn->prepare($assignment_query);
+                        $stmt = $db->prepare($assignment_query);
                         $stmt->bindParam(':user_id', $_SESSION['user_id']);
                         $stmt->execute();
                         $assignment_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         $all_notifications = array_merge($all_notifications, $assignment_notifications);
                         
-                        $stmt = $conn->prepare($update_query);
+                        $stmt = $db->prepare($update_query);
                         $stmt->bindParam(':user_id', $_SESSION['user_id']);
                         $stmt->execute();
                         $update_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1179,7 +1220,7 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                         <label class="form-label">
                             Risk Name *
                         </label>
-                        <input type="text" name="risk_name" class="form-control" required 
+                        <input type="text" name="risk_name" class="form-control" required
                                placeholder="e.g., Customer Data Breach, Regulatory Non-Compliance, System Downtime"
                                value="<?php echo isset($_POST['risk_name']) ? htmlspecialchars($_POST['risk_name']) : ''; ?>">
                     </div>
@@ -1188,16 +1229,16 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                         <label class="form-label">
                             Risk Description *
                         </label>
-                        <textarea name="risk_description" class="form-control" rows="4" required 
-                                  placeholder="Describe what could go wrong, the potential impact, and who/what would be affected..."><?php echo isset($_POST['risk_description']) ? htmlspecialchars($_POST['risk_description']) : ''; ?></textarea>
+                        <textarea name="risk_description" class="form-control" rows="4" required
+                                   placeholder="Describe what could go wrong, the potential impact, and who/what would be affected..."><?php echo isset($_POST['risk_description']) ? htmlspecialchars($_POST['risk_description']) : ''; ?></textarea>
                     </div>
                     
                     <div class="form-group">
                         <label class="form-label">
                             Cause of Risk *
                         </label>
-                        <textarea name="cause_of_risk" class="form-control" rows="3" required 
-                                  placeholder="What factors or conditions could cause this risk to occur?"><?php echo isset($_POST['cause_of_risk']) ? htmlspecialchars($_POST['cause_of_risk']) : ''; ?></textarea>
+                        <textarea name="cause_of_risk" class="form-control" rows="3" required
+                                   placeholder="What factors or conditions could cause this risk to occur?"><?php echo isset($_POST['cause_of_risk']) ? htmlspecialchars($_POST['cause_of_risk']) : ''; ?></textarea>
                     </div>
                     
                     <div class="form-group">
@@ -1310,16 +1351,16 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                         <label class="form-label">
                             Treatment Action
                         </label>
-                        <textarea name="treatment_action" class="form-control" rows="3" 
-                                  placeholder="Describe the treatment strategy and approach..."><?php echo isset($_POST['treatment_action']) ? htmlspecialchars($_POST['treatment_action']) : ''; ?></textarea>
+                        <textarea name="treatment_action" class="form-control" rows="3"
+                                   placeholder="Describe the treatment strategy and approach..."><?php echo isset($_POST['treatment_action']) ? htmlspecialchars($_POST['treatment_action']) : ''; ?></textarea>
                     </div>
                     
                     <div class="form-group">
                         <label class="form-label">
                             Controls / Action Plans
                         </label>
-                        <textarea name="controls_action_plans" class="form-control" rows="4" 
-                                  placeholder="List specific actions, controls, timelines, and resources required..."><?php echo isset($_POST['controls_action_plans']) ? htmlspecialchars($_POST['controls_action_plans']) : ''; ?></textarea>
+                        <textarea name="controls_action_plans" class="form-control" rows="4"
+                                   placeholder="List specific actions, controls, timelines, and resources required..."><?php echo isset($_POST['controls_action_plans']) ? htmlspecialchars($_POST['controls_action_plans']) : ''; ?></textarea>
                         
                         <!-- File Upload Section for Controls/Action Plans -->
                         <div class="file-upload-section">
@@ -1341,7 +1382,7 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                         <label class="form-label">
                             Target Completion Date
                         </label>
-                        <input type="date" name="target_completion_date" class="form-control" 
+                        <input type="date" name="target_completion_date" class="form-control"
                                value="<?php echo isset($_POST['target_completion_date']) ? $_POST['target_completion_date'] : ''; ?>">
                     </div>
                     
@@ -1359,8 +1400,10 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                         <label class="form-label">
                             Progress Update
                         </label>
-                        <textarea name="progress_update" class="form-control" rows="3" 
-                                  placeholder="Provide current status, progress updates, or initial assessment..."><?php echo isset($_POST['progress_update']) ? htmlspecialchars($_POST['progress_update']) : ''; ?></textarea>
+                        <textarea name="progress_update" class="form-control" rows="3"
+                                   placeholder="Provide current status, progress updates, or initial assessment..."><?php echo isset($_POST['progress_update']) ? htmlspecialchars($_POST['progress_update']) : ''; ?></textarea>
+                        
+                        <!-- File? htmlspecialchars($_POST['progress_update']) : ''; ?></textarea>
                         
                         <!-- File Upload Section for Progress Update -->
                         <div class="file-upload-section">
@@ -1457,8 +1500,8 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
             }
             
             function validateFile(file) {
-                const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
-                                    'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                     'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                                     'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
                                     'text/plain', 'image/jpeg', 'image/jpg', 'image/png'];
                 const maxSize = 10 * 1024 * 1024; // 10MB
@@ -1578,10 +1621,10 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
             steps[3].className = 'progress-step';
         }
         
-        // Notification functionality
+        // Notification functionality - Synchronized with dashboard
         let notificationDropdownVisible = false;
         let readNotifications = JSON.parse(localStorage.getItem('readNotifications') || '[]');
-
+        
         function toggleNavNotifications() {
             const dropdown = document.getElementById('navNotificationDropdown');
             if (dropdown) {
@@ -1596,7 +1639,7 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                 }
             }
         }
-
+        
         function positionNotificationDropdown() {
             const container = document.querySelector('.nav-notification-container');
             const dropdown = document.getElementById('navNotificationDropdown');
@@ -1617,7 +1660,7 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                 dropdown.style.top = (rect.bottom + 5) + 'px';
             }
         }
-
+        
         function handleOutsideClick(event) {
             const container = document.querySelector('.nav-notification-container');
             const dropdown = document.getElementById('navNotificationDropdown');
@@ -1630,7 +1673,7 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                 document.removeEventListener('click', handleOutsideClick);
             }
         }
-
+        
         function markNavAsRead(notificationId) {
             const notificationItem = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
             if (notificationItem) {
@@ -1650,7 +1693,7 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                 updateNotificationCount();
             }
         }
-
+        
         function readAllNotifications() {
             const notificationItems = document.querySelectorAll('.nav-notification-item');
             notificationItems.forEach((item, index) => {
@@ -1670,7 +1713,7 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
             localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
             updateNotificationCount();
         }
-
+        
         function clearAllNotifications() {
             const notificationItems = document.querySelectorAll('.nav-notification-item');
             notificationItems.forEach((item, index) => {
@@ -1697,7 +1740,7 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                 container.classList.add('nav-notification-empty');
             }
         }
-
+        
         function updateNotificationCount() {
             const badge = document.querySelector('.nav-notification-badge');
             const bell = document.querySelector('.nav-notification-bell');
@@ -1731,7 +1774,7 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                 }
             }
         }
-
+        
         // Initialize notification states on page load
         document.addEventListener('DOMContentLoaded', function() {
             // Apply read states from localStorage
@@ -1750,14 +1793,14 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
             
             updateNotificationCount();
         });
-
+        
         // Handle window resize for notification dropdown positioning
         window.addEventListener('resize', function() {
             if (notificationDropdownVisible) {
                 positionNotificationDropdown();
             }
         });
-
+        
         // Initialize everything on page load
         document.addEventListener('DOMContentLoaded', function() {
             // Setup file uploads

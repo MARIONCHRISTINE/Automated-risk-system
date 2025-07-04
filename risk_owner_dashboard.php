@@ -157,7 +157,7 @@ $stats['my_reported_risks'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 $query = "SELECT COUNT(*) as total FROM risk_incidents 
           WHERE risk_owner_id = :user_id 
           AND ((inherent_likelihood IS NOT NULL AND inherent_consequence IS NOT NULL AND (inherent_likelihood * inherent_consequence) >= 9)
-         OR (residual_likelihood IS NOT NULL AND residual_consequence IS NOT NULL AND (residual_likelihood * residual_consequence) >= 9))";
+        OR (residual_likelihood IS NOT NULL AND residual_consequence IS NOT NULL AND (residual_likelihood * residual_consequence) >= 9))";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':user_id', $_SESSION['user_id']);
 $stmt->execute();
@@ -173,31 +173,31 @@ $recent_stmt->execute();
 $stats['recent_assignments'] = $recent_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
 // Get assigned risks (risks assigned to this user)
-$query = "SELECT r.*, u.full_name as reporter_name 
-         FROM risk_incidents r 
-         LEFT JOIN users u ON r.reported_by = u.id 
+$query = "SELECT r.*, u.full_name as reporter_name
+         FROM risk_incidents r
+         LEFT JOIN users u ON r.reported_by = u.id
          WHERE r.risk_owner_id = :user_id
-         ORDER BY r.created_at DESC";
+        ORDER BY r.created_at DESC";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':user_id', $_SESSION['user_id']);
 $stmt->execute();
 $assigned_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Get department risks
-$query = "SELECT ri.*, u.full_name as reporter_name, ro.full_name as risk_owner_name 
-         FROM risk_incidents ri 
+$query = "SELECT ri.*, u.full_name as reporter_name, ro.full_name as risk_owner_name
+         FROM risk_incidents ri
          LEFT JOIN users u ON ri.reported_by = u.id
-         LEFT JOIN users ro ON ri.risk_owner_id = ro.id
-         WHERE ri.department = :department
-         ORDER BY 
+        LEFT JOIN users ro ON ri.risk_owner_id = ro.id
+        WHERE ri.department = :department
+        ORDER BY 
             CASE 
               WHEN ri.inherent_likelihood IS NOT NULL AND ri.inherent_consequence IS NOT NULL 
               THEN (ri.inherent_likelihood * ri.inherent_consequence)
-              WHEN ri.residual_likelihood IS NOT NULL AND ri.residual_consequence IS NOT NULL 
+             WHEN ri.residual_likelihood IS NOT NULL AND ri.residual_consequence IS NOT NULL 
               THEN (ri.residual_likelihood * residual_consequence)
-             ELSE 0 
+            ELSE 0 
             END DESC,
-            ri.created_at DESC";
+           ri.created_at DESC";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':department', $user['department']);
 $stmt->execute();
@@ -206,12 +206,12 @@ $department_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 // Get risks reported by this user
 $query = "SELECT ri.*, 
                  ro.full_name as risk_owner_name,
-                reporter.full_name as reporter_name 
-         FROM risk_incidents ri 
+                reporter.full_name as reporter_name
+         FROM risk_incidents ri
          LEFT JOIN users ro ON ri.risk_owner_id = ro.id
-         LEFT JOIN users reporter ON ri.reported_by = reporter.id
-         WHERE ri.reported_by = :user_id
-         ORDER BY ri.created_at DESC";
+        LEFT JOIN users reporter ON ri.reported_by = reporter.id
+        WHERE ri.reported_by = :user_id
+        ORDER BY ri.created_at DESC";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':user_id', $_SESSION['user_id']);
 $stmt->execute();
@@ -222,12 +222,12 @@ $pending_assignments = []; // Initialize as empty array since we're not sure if 
 
 // Try to get pending assignments, but handle if table doesn't exist
 try {
-    $pending_query = "SELECT r.*, u.full_name as reporter_name, ra.assignment_date 
+    $pending_query = "SELECT r.*, u.full_name as reporter_name, ra.assignment_date
                      FROM risk_assignments ra
-                     JOIN risk_incidents r ON ra.risk_id = r.id
-                     JOIN users u ON r.reported_by = u.id
-                     WHERE ra.assigned_to = :user_id AND ra.status = 'Pending'
-                     ORDER BY ra.assignment_date DESC";
+                    JOIN risk_incidents r ON ra.risk_id = r.id
+                    JOIN users u ON r.reported_by = u.id
+                    WHERE ra.assigned_to = :user_id AND ra.status = 'Pending'
+                    ORDER BY ra.assignment_date DESC";
     $pending_stmt = $db->prepare($pending_query);
     $pending_stmt->bindParam(':user_id', $_SESSION['user_id']);
     $pending_stmt->execute();
@@ -241,23 +241,23 @@ try {
 $query = "SELECT 
     SUM(CASE 
         WHEN probability IS NULL OR impact IS NULL THEN 1
-        WHEN (probability * impact) <= 3 THEN 1 
+       WHEN (probability * impact) <= 3 THEN 1 
         ELSE 0 
     END) as low_risks,
-    SUM(CASE 
+   SUM(CASE 
         WHEN probability IS NOT NULL AND impact IS NOT NULL AND (probability * impact) BETWEEN 4 AND 8 
         THEN 1 ELSE 0 
     END) as medium_risks,
-    SUM(CASE 
+   SUM(CASE 
         WHEN probability IS NOT NULL AND impact IS NOT NULL AND (probability * impact) BETWEEN 9 AND 14 
         THEN 1 ELSE 0 
     END) as high_risks,
-    SUM(CASE 
+   SUM(CASE 
         WHEN probability IS NOT NULL AND impact IS NOT NULL AND (probability * impact) >= 15 
         THEN 1 ELSE 0 
     END) as critical_risks
-    FROM risk_incidents 
-    WHERE department = :department";
+   FROM risk_incidents 
+   WHERE department = :department";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':department', $user['department']);
 $stmt->execute();
@@ -266,11 +266,11 @@ $risk_levels = $stmt->fetch(PDO::FETCH_ASSOC);
 // NEW: Risk category distribution for department
 $category_query = "SELECT 
     risk_category,
-    COUNT(*) as count
-    FROM risk_incidents 
-    WHERE department = :department
-    GROUP BY risk_category
-    ORDER BY count DESC";
+   COUNT(*) as count
+   FROM risk_incidents 
+   WHERE department = :department
+   GROUP BY risk_category
+   ORDER BY count DESC";
 $category_stmt = $db->prepare($category_query);
 $category_stmt->bindParam(':department', $user['department']);
 $category_stmt->execute();
@@ -973,7 +973,6 @@ function getStatusBadgeClass($status) {
         .text-muted {
             color: #6c757d;
         }
-
         /* Procedures Specific Styles */
         .procedure-section {
             margin: 2rem 0;
@@ -1234,8 +1233,7 @@ function getStatusBadgeClass($status) {
             border-bottom: none;
         }
         .nav-notification-item.read {
-            opacity: 0.6;
-            background-color: #f1f3f4;
+            display: none !important;
         }
         .nav-notification-item.unread {
             background-color: #fff3cd;
@@ -1419,7 +1417,6 @@ function getStatusBadgeClass($status) {
             .chart-container {
                 height: 250px;
             }
-
             .main-content {
                 padding: 1rem;
             }
@@ -1438,7 +1435,6 @@ function getStatusBadgeClass($status) {
                 padding: 1rem;
             }
         }
-
         @media print {
             .main-content { margin: 0; }
             .card { box-shadow: none; }
@@ -1564,7 +1560,10 @@ function getStatusBadgeClass($status) {
                                 <div class="nav-notification-header">
                                     <div class="flex justify-between items-center">
                                         <span><i class="fas fa-bell"></i> All Notifications</span>
-                                        <button onclick="clearAllNotifications()" class="btn btn-sm btn-outline">Clear All</button>
+                                        <div style="display: flex; gap: 0.5rem;">
+                                            <button onclick="readAllNotifications()" class="btn btn-sm btn-primary">Read All</button>
+                                            <button onclick="clearAllNotifications()" class="btn btn-sm btn-outline">Clear All</button>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="nav-notification-content" id="navNotificationContent">
@@ -1625,8 +1624,8 @@ function getStatusBadgeClass($status) {
                             <i class="fas fa-bell nav-notification-bell"></i>
                             <span class="nav-notification-text">Notifications</span>
                         </div>
-                        <?php
-                             endif;
+                        <?php 
+                            endif;
                         }
                         ?>
                     </li>
@@ -1664,11 +1663,11 @@ function getStatusBadgeClass($status) {
                         <div class="stat-description">High/Critical risks assigned to you</div>
                     </div>
                     <div class="stat-card" style="transition: transform 0.3s;">
-                        <span class="stat-number"><?php
-                         // Calculate successfully managed risks (completed status)
-                        $managed_query = "SELECT COUNT(*) as total FROM risk_incidents
-                                          WHERE risk_owner_id = :user_id
-                                          AND risk_status = 'completed'";
+                        <span class="stat-number"><?php 
+                        // Calculate successfully managed risks (completed status)
+                        $managed_query = "SELECT COUNT(*) as total FROM risk_incidents 
+                                         WHERE risk_owner_id = :user_id 
+                                         AND risk_status = 'completed'";
                         $managed_stmt = $db->prepare($managed_query);
                         $managed_stmt->bindParam(':user_id', $_SESSION['user_id']);
                         $managed_stmt->execute();
@@ -1713,10 +1712,6 @@ function getStatusBadgeClass($status) {
                                     <small>View and manage all risks within <?php echo $user['department']; ?></small>
                                 </li>
                                 <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
-                                    <strong>🔄 Auto-Assigned Risks</strong><br>
-                                    <small>All risks are automatically assigned to risk owners</small>
-                                </li>
-                                <li style="padding: 0.5rem 0; border-bottom: 1px solid #eee;">
                                     <strong>📝 Risk Reporting</strong><br>
                                     <small>Report new risks discovered in your department</small>
                                 </li>
@@ -1748,14 +1743,6 @@ function getStatusBadgeClass($status) {
                             </ul>
                         </div>
                     </div>
-                    
-                    <div style="background: #e8f5e8; border-left: 4px solid #28a745; padding: 1rem; margin-top: 2rem; border-radius: 0 0.25rem 0.25rem 0;">
-                        <strong>🤖 Auto-Assignment System:</strong> Staff members can report risks which are automatically assigned to risk owners in their department. You'll receive new assignments and can complete the full risk assessment and treatment planning.
-                    </div>
-                    
-                    <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 1rem; margin-top: 2rem; border-radius: 0 0.25rem 0.25rem 0;">
-                        <strong>🔒 Access Scope:</strong> Your access is limited to <?php echo $user['department']; ?> department risks only. For system-wide risk reports, contact the Compliance Team at compliance@airtel.africa.
-                    </div>
                 </div>
                 
                 <!-- Quick Actions -->
@@ -1764,21 +1751,13 @@ function getStatusBadgeClass($status) {
                         <h3 class="card-title">🚀 Quick Actions</h3>
                     </div>
                     <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-                        <a href="report_risk.php" class="btn btn-primary" style="flex: 1; min-width: 180px; padding: 1rem; text-align: center;">
-                            📝 Report New Risk<br>
-                            <small>Report a risk you've identified</small>
+                        <a href="#" class="btn btn-primary" style="flex: 1; min-width: 180px; padding: 1rem; text-align: center;" onclick="openTeamChat()">
+                            💬 Team Chat<br>
+                            <small>Collaborate with your team members</small>
                         </a>
-                        <a href="javascript:void(0)" class="btn btn-secondary" style="flex: 1; min-width: 180px; padding: 1rem; text-align: center;" onclick="showTab('department')">
-                            🏢 View Department Risks<br>
-                            <small>See all risks in your department</small>
-                        </a>
-                        <a href="javascript:void(0)" class="btn btn-outline" style="flex: 1; min-width: 180px; padding: 1rem; text-align: center;" onclick="showTab('risks')">
-                            📋 My Assigned Risks<br>
-                            <small>View risks assigned to you</small>
-                        </a>
-                        <a href="javascript:void(0)" class="btn btn-warning" style="flex: 1; min-width: 180px; padding: 1rem; text-align: center;" onclick="showTab('my-reports')">
-                            👀 My Reports<br>
-                            <small>View risks you have reported</small>
+                        <a href="#" class="btn btn-secondary" style="flex: 1; min-width: 180px; padding: 1rem; text-align: center;" onclick="openChatBot()">
+                            🤖 AI Assistant<br>
+                            <small>Get help with risk management</small>
                         </a>
                     </div>
                 </div>
@@ -2045,8 +2024,8 @@ function getStatusBadgeClass($status) {
                                             </span>
                                         </td>
                                         <td style="padding: 1rem;">
-                                            <?php
-                                             // Use actual assessed values for risk level calculation
+                                            <?php 
+                                            // Use actual assessed values for risk level calculation
                                             $probability = $risk['probability'] ?? $risk['inherent_likelihood'] ?? $risk['residual_likelihood'] ?? 0;
                                             $impact = $risk['impact'] ?? $risk['inherent_consequence'] ?? $risk['residual_consequence'] ?? 0;
                                             
@@ -2080,8 +2059,8 @@ function getStatusBadgeClass($status) {
                                             </span>
                                         </td>
                                         <td style="padding: 1rem;">
-                                            <?php
-                                             $status = $risk['risk_status'] ?? 'pending';
+                                            <?php 
+                                            $status = $risk['risk_status'] ?? 'pending';
                                             switch($status) {
                                                 case 'pending':
                                                     $statusText = 'Open';
@@ -2120,8 +2099,8 @@ function getStatusBadgeClass($status) {
                                             <?php echo date('M j, Y', strtotime($risk['created_at'])); ?>
                                         </td>
                                         <td style="padding: 1rem; color: #666; font-size: 0.9rem;">
-                                            <?php
-                                             if ($risk['updated_at'] != $risk['created_at']) {
+                                            <?php 
+                                            if ($risk['updated_at'] != $risk['created_at']) {
                                                 echo date('M j, Y', strtotime($risk['updated_at']));
                                             } else {
                                                 echo 'Not updated';
@@ -2130,7 +2109,7 @@ function getStatusBadgeClass($status) {
                                         </td>
                                         <td style="padding: 1rem;">
                                             <a href="view_risk.php?id=<?php echo $risk['id']; ?>"
-                                                style="background: #E60012; color: white; padding: 0.5rem 1rem; border-radius: 4px; text-decoration: none; font-size: 0.9rem; font-weight: 500; display: inline-block; text-align: center; transition: all 0.3s ease;"
+                                               style="background: #E60012; color: white; padding: 0.5rem 1rem; border-radius: 4px; text-decoration: none; font-size: 0.9rem; font-weight: 500; display: inline-block; text-align: center; transition: all 0.3s ease;"
                                                onmouseover="this.style.background='#B8000E';"
                                                onmouseout="this.style.background='#E60012';">
                                                 View
@@ -2144,7 +2123,6 @@ function getStatusBadgeClass($status) {
                     <?php endif; ?>
                 </div>
             </div>
-
             <!-- Procedures Tab -->
             <div id="procedures-tab" class="tab-content">
                 <div class="card">
@@ -2174,7 +2152,6 @@ function getStatusBadgeClass($status) {
                                 <li><a href="javascript:void(0)" onclick="scrollToProcedureSection('definitions')">10. Field Definitions</a></li>
                             </ul>
                         </div>
-
                         <!-- 1. Overview -->
                         <div id="overview" class="procedure-section">
                             <div class="procedure-title"><i class="fas fa-info-circle"></i> 1. OVERVIEW</div>
@@ -2202,7 +2179,6 @@ function getStatusBadgeClass($status) {
                                 <li>Environmental risks</li>
                             </ul>
                         </div>
-
                         <!-- 2. Automatic Assignment System -->
                         <div id="auto-assignment" class="procedure-section">
                             <div class="procedure-title"><i class="fas fa-robot"></i> 2. AUTOMATIC ASSIGNMENT SYSTEM</div>
@@ -2250,7 +2226,6 @@ function getStatusBadgeClass($status) {
                                 <li>Daily digest for pending actions</li>
                             </ul>
                         </div>
-
                         <!-- 3. Department Structure -->
                         <div id="departments" class="procedure-section">
                             <div class="procedure-title"><i class="fas fa-building"></i> 3. DEPARTMENT STRUCTURE & RESPONSIBILITIES</div>
@@ -2349,7 +2324,6 @@ function getStatusBadgeClass($status) {
                                 <li><strong>Major System Outage:</strong> IT, Operations, Customer Service</li>
                             </ul>
                         </div>
-
                         <!-- 4. Risk Identification -->
                         <div id="identification" class="procedure-section">
                             <div class="procedure-title"><i class="fas fa-search"></i> 4. RISK IDENTIFICATION</div>
@@ -2393,7 +2367,6 @@ function getStatusBadgeClass($status) {
                                 <div class="field-description">Primary department affected by the risk - this determines automatic assignment to the appropriate risk owner</div>
                             </div>
                         </div>
-
                         <!-- 5. Risk Assessment -->
                         <div id="assessment" class="procedure-section">
                             <div class="procedure-title"><i class="fas fa-calculator"></i> 5. RISK ASSESSMENT</div>
@@ -2440,7 +2413,6 @@ function getStatusBadgeClass($status) {
                             <h4>5.4 Department-Specific Assessment Guidelines</h4>
                             <p>Each department may have specific criteria for assessing risks within their domain. Risk owners should consider department-specific impact factors when conducting assessments.</p>
                         </div>
-
                         <!-- 6. Risk Treatment -->
                         <div id="treatment" class="procedure-section">
                             <div class="procedure-title"><i class="fas fa-shield-alt"></i> 6. RISK TREATMENT</div>
@@ -2475,7 +2447,6 @@ function getStatusBadgeClass($status) {
                                 <div class="field-description">Individual responsible for managing the risk and implementing treatment actions (automatically assigned based on department)</div>
                             </div>
                         </div>
-
                         <!-- 7. Monitoring & Review -->
                         <div id="monitoring" class="procedure-section">
                             <div class="procedure-title"><i class="fas fa-chart-bar"></i> 7. MONITORING & REVIEW</div>
@@ -2512,7 +2483,6 @@ function getStatusBadgeClass($status) {
                                 <li>Monthly summary reports to department heads</li>
                             </ul>
                         </div>
-
                         <!-- 8. Roles & Responsibilities -->
                         <div id="roles" class="procedure-section">
                             <div class="procedure-title"><i class="fas fa-users-cog"></i> 8. ROLES & RESPONSIBILITIES</div>
@@ -2561,7 +2531,6 @@ function getStatusBadgeClass($status) {
                                 <li>Review department risk performance</li>
                             </ul>
                         </div>
-
                         <!-- 9. Risk Assessment Matrix -->
                         <div id="matrix" class="procedure-section">
                             <div class="procedure-title"><i class="fas fa-table"></i> 9. RISK ASSESSMENT MATRIX</div>
@@ -2634,7 +2603,6 @@ function getStatusBadgeClass($status) {
                                 </div>
                             </div>
                         </div>
-
                         <!-- 10. Field Definitions -->
                         <div id="definitions" class="procedure-section">
                             <div class="procedure-title"><i class="fas fa-book"></i> 10. FIELD DEFINITIONS</div>
@@ -2762,10 +2730,10 @@ function getStatusBadgeClass($status) {
                 tab.classList.remove('active');
             });
             
-            // Remove active class from all nav links
-            const navLinks = document.querySelectorAll('.nav-item a');
-            navLinks.forEach(link => {
-                link.classList.remove('active');
+            // Remove active class from all nav items
+            const navItems = document.querySelectorAll('.nav-item a');
+            navItems.forEach(item => {
+                item.classList.remove('active');
             });
             
             // Show selected tab
@@ -2774,24 +2742,110 @@ function getStatusBadgeClass($status) {
                 selectedTab.classList.add('active');
             }
             
-            // Add active class to clicked nav link
-            const activeLink = document.querySelector(`[onclick="showTab('${tabName}')"]`);
-            if (activeLink) {
-                activeLink.classList.add('active');
-            }
+            // Add active class to clicked nav item
+            event.target.classList.add('active');
             
             // Update URL without page reload
             const url = new URL(window.location);
-            if (tabName === 'dashboard') {
-                url.searchParams.delete('tab');
-            } else {
+            if (tabName !== 'dashboard') {
                 url.searchParams.set('tab', tabName);
+            } else {
+                url.searchParams.delete('tab');
             }
             window.history.pushState({}, '', url);
         }
         
-        // Initialize tab based on URL parameter
+        // Initialize charts
         document.addEventListener('DOMContentLoaded', function() {
+            // Risk Category Chart with unique colors
+            const categoryCtx = document.getElementById('categoryChart').getContext('2d');
+            const categoryData = <?php echo json_encode($risk_by_category); ?>;
+            
+            // Define unique colors for each category
+            const categoryColors = [
+                '#E60012',  // Airtel Red
+                '#FF6B35',  // Orange Red
+                '#F7931E',  // Orange
+                '#FFD700',  // Gold
+                '#32CD32',  // Lime Green
+                '#20B2AA',  // Light Sea Green
+                '#4169E1',  // Royal Blue
+                '#9370DB',  // Medium Purple
+                '#FF1493',  // Deep Pink
+                '#FF4500'   // Orange Red
+            ];
+            
+            new Chart(categoryCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: categoryData.map(item => item.risk_category || 'Uncategorized'),
+                    datasets: [{
+                        data: categoryData.map(item => item.count),
+                        backgroundColor: categoryColors.slice(0, categoryData.length),
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                padding: 20,
+                                usePointStyle: true
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Risk Level Chart
+            const levelCtx = document.getElementById('levelChart').getContext('2d');
+            const levelData = <?php echo json_encode($risk_levels); ?>;
+            
+            new Chart(levelCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['Low', 'Medium', 'High', 'Critical'],
+                    datasets: [{
+                        label: 'Number of Risks',
+                        data: [
+                            levelData.low_risks,
+                            levelData.medium_risks,
+                            levelData.high_risks,
+                            levelData.critical_risks
+                        ],
+                        backgroundColor: [
+                            '#28a745',
+                            '#ffc107',
+                            '#fd7e14',
+                            '#dc3545'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+            
+            // Initialize based on URL parameter
             const urlParams = new URLSearchParams(window.location.search);
             const tab = urlParams.get('tab');
             if (tab) {
@@ -2799,74 +2853,7 @@ function getStatusBadgeClass($status) {
             }
         });
         
-        // Chart initialization
-        document.addEventListener('DOMContentLoaded', function() {
-            // Risk Level Chart
-            const levelCtx = document.getElementById('levelChart');
-            if (levelCtx) {
-                new Chart(levelCtx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: ['Low', 'Medium', 'High', 'Critical'],
-                        datasets: [{
-                            data: [
-                                <?php echo $risk_levels['low_risks']; ?>,
-                                <?php echo $risk_levels['medium_risks']; ?>,
-                                <?php echo $risk_levels['high_risks']; ?>,
-                                <?php echo $risk_levels['critical_risks']; ?>
-                            ],
-                            backgroundColor: ['#28a745', '#ffc107', '#fd7e14', '#dc3545']
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                position: 'bottom'
-                            }
-                        }
-                    }
-                });
-            }
-            
-            // Risk Category Chart
-            const categoryCtx = document.getElementById('categoryChart');
-            if (categoryCtx) {
-                new Chart(categoryCtx, {
-                    type: 'bar',
-                    data: {
-                        labels: [<?php echo implode(',', array_map(function($cat) { return '"' . htmlspecialchars($cat['risk_category'] ?? 'Uncategorized') . '"'; }, $risk_by_category)); ?>],
-                        datasets: [{
-                            label: 'Number of Risks',
-                            data: [<?php echo implode(',', array_column($risk_by_category, 'count')); ?>],
-                            backgroundColor: '#E60012',
-                            borderColor: '#B8000E',
-                            borderWidth: 1
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                display: false
-                            }
-                        },
-                        scales: {
-                            y: {
-                                beginAtZero: true,
-                                ticks: {
-                                    stepSize: 1
-                                }
-                            }
-                        }
-                    }
-                });
-            }
-        });
-        
-        // Search functionality for My Reports
+        // Search and filter functionality for My Reports
         document.addEventListener('DOMContentLoaded', function() {
             const searchInput = document.getElementById('searchRisks');
             const statusFilter = document.getElementById('statusFilter');
@@ -2897,6 +2884,25 @@ function getStatusBadgeClass($status) {
                 statusFilter.addEventListener('change', filterReports);
             }
         });
+        
+        // Procedure section scrolling
+        function scrollToProcedureSection(sectionId) {
+            const section = document.getElementById(sectionId);
+            if (section) {
+                section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+        
+        // Quick Actions functionality
+        function openTeamChat() {
+            // This would integrate with your team chat system
+            alert('Team Chat feature will be integrated with your collaboration platform (e.g., Microsoft Teams, Slack, etc.)');
+        }
+        
+        function openChatBot() {
+            // This would open your AI assistant/chatbot
+            alert('AI Assistant feature will be integrated to help with risk management questions and guidance.');
+        }
         
         // Notification functionality
         let notificationDropdownVisible = false;
@@ -2971,7 +2977,7 @@ function getStatusBadgeClass($status) {
             }
         }
         
-        function clearAllNotifications() {
+        function readAllNotifications() {
             const notificationItems = document.querySelectorAll('.nav-notification-item');
             notificationItems.forEach((item, index) => {
                 item.classList.remove('unread');
@@ -2989,12 +2995,32 @@ function getStatusBadgeClass($status) {
             
             localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
             updateNotificationCount();
+        }
+        
+        function clearAllNotifications() {
+            const notificationItems = document.querySelectorAll('.nav-notification-item');
+            notificationItems.forEach((item, index) => {
+                item.style.display = 'none';
+                
+                if (!readNotifications.includes(index)) {
+                    readNotifications.push(index);
+                }
+            });
+            
+            localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
+            updateNotificationCount();
             
             // Close dropdown after clearing
             notificationDropdownVisible = false;
             const dropdown = document.getElementById('navNotificationDropdown');
             if (dropdown) {
                 dropdown.classList.remove('show');
+            }
+            
+            // Show empty state
+            const container = document.querySelector('.nav-notification-container');
+            if (container) {
+                container.classList.add('nav-notification-empty');
             }
         }
         
@@ -3050,23 +3076,6 @@ function getStatusBadgeClass($status) {
             
             updateNotificationCount();
         });
-        
-        // Procedure section scrolling
-        function scrollToProcedureSection(sectionId) {
-            // First ensure we're on the procedures tab
-            showTab('procedures');
-            
-            // Wait a moment for the tab to be shown, then scroll
-            setTimeout(() => {
-                const section = document.getElementById(sectionId);
-                if (section) {
-                    section.scrollIntoView({ 
-                        behavior: 'smooth',
-                        block: 'start'
-                    });
-                }
-            }, 100);
-        }
         
         // Handle window resize for notification dropdown positioning
         window.addEventListener('resize', function() {
