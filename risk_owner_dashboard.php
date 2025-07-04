@@ -855,7 +855,6 @@ function getStatusBadgeClass($status) {
             border-radius: 5px;
             margin-bottom: 1rem;
             border-left: 4px solid #17a2b8;
-            font-weight: 500;
         }
         
         .pending-badge {
@@ -1171,7 +1170,7 @@ function getStatusBadgeClass($status) {
             }
             
             .nav-content {
-                padding: 0.25rem;
+                padding: 0 0.25rem;
             }
             
             .nav-item {
@@ -1494,7 +1493,176 @@ function getStatusBadgeClass($status) {
             </div>
         </header>
         
-        <?php include_once 'includes/navbar.php'; ?>
+        <nav class="nav">
+            <div class="nav-content">
+                <ul class="nav-menu">
+                    <li class="nav-item">
+                        <a href="risk_owner_dashboard.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'risk_owner_dashboard.php' ? 'active' : ''; ?>">
+                            🏠 Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="report_risk.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'report_risk.php' ? 'active' : ''; ?>">
+                            📝 Report Risk
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="risk_owner_dashboard.php?tab=my-reports" class="<?php echo isset($_GET['tab']) && $_GET['tab'] == 'my-reports' ? 'active' : ''; ?>">
+                            👀 My Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="risk-procedures.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'risk-procedures.php' ? 'active' : ''; ?>" target="_blank">
+                            📋 Procedures
+                        </a>
+                    </li>
+                    <li class="nav-item notification-nav-item">
+                        <?php
+                        if (isset($_SESSION['user_id'])) {
+                            require_once 'config/database.php';
+                            $database = new Database();
+                            $conn = $database->getConnection();
+                            
+                            $treatment_query = "SELECT rt.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
+                                                       owner.full_name as risk_owner_name, 'treatment' as notification_type,
+                                                       rt.created_at as notification_date
+                                                FROM risk_treatments rt
+                                                INNER JOIN risk_incidents ri ON rt.risk_id = ri.id
+                                                LEFT JOIN users owner ON ri.risk_owner_id = owner.id
+                                                WHERE rt.assigned_to = :user_id 
+                                                AND rt.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+                            
+                            $assignment_query = "SELECT ri.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
+                                                        reporter.full_name as reporter_name, 'assignment' as notification_type,
+                                                        ri.updated_at as notification_date
+                                                 FROM risk_incidents ri
+                                                 LEFT JOIN users reporter ON ri.reported_by = reporter.id
+                                                 WHERE ri.risk_owner_id = :user_id 
+                                                 AND ri.updated_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+                            
+                            $update_query = "SELECT ri.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
+                                                    updater.full_name as updater_name, 'update' as notification_type,
+                                                    ri.updated_at as notification_date
+                                             FROM risk_incidents ri
+                                             LEFT JOIN users updater ON ri.reported_by = updater.id
+                                             WHERE (ri.risk_owner_id = :user_id OR ri.reported_by = :user_id)
+                                             AND ri.updated_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                                             AND ri.updated_at != ri.created_at";
+                            
+                            $all_notifications = [];
+                            
+                            $stmt = $conn->prepare($treatment_query);
+                            $stmt->bindParam(':user_id', $_SESSION['user_id']);
+                            $stmt->execute();
+                            $treatment_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                            $all_notifications = array_merge($all_notifications, $treatment_notifications);
+                            
+                            $stmt = $conn->prepare($assignment_query);
+                            $stmt->bindParam(':user_id', $_SESSION['user_id']);
+                            $stmt->execute();
+                            $assignment_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                            $all_notifications = array_merge($all_notifications, $assignment_notifications);
+                            
+                            $stmt = $conn->prepare($update_query);
+                            $stmt->bindParam(':user_id', $_SESSION['user_id']);
+                            $stmt->execute();
+                            $update_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                            $all_notifications = array_merge($all_notifications, $update_notifications);
+                            
+                            usort($all_notifications, function($a, $b) {
+                                return strtotime($b['notification_date']) - strtotime($a['notification_date']);
+                            });
+                            
+                            $all_notifications = array_slice($all_notifications, 0, 20);
+                            
+                            if (!empty($all_notifications)):
+                        ?>
+                        <div class="nav-notification-container" onclick="toggleNavNotifications()">
+                            <i class="fas fa-bell nav-notification-bell"></i>
+                            <span class="nav-notification-text">Notifications</span>
+                            <span class="nav-notification-badge"><?php echo count($all_notifications); ?></span>
+                            
+                            <div class="nav-notification-dropdown" id="navNotificationDropdown">
+                                <div class="nav-notification-header">
+                                    <div class="flex justify-between items-center">
+                                        <span><i class="fas fa-bell"></i> All Notifications</span>
+                                        <button onclick="markAllNavAsRead()" class="btn btn-sm btn-outline">Mark All Read</button>
+                                    </div>
+                                </div>
+                                <div class="nav-notification-content" id="navNotificationContent">
+                                    <?php foreach ($all_notifications as $index => $notification): ?>
+                                    <div class="nav-notification-item" data-nav-notification-id="<?php echo $index; ?>">
+                                        <?php if ($notification['notification_type'] == 'treatment'): ?>
+                                            <div class="nav-notification-title">
+                                                🎯 Treatment Assignment: <?php echo htmlspecialchars($notification['treatment_name']); ?>
+                                            </div>
+                                            <div class="nav-notification-risk">
+                                                Risk: <?php echo htmlspecialchars($notification['risk_name']); ?>
+                                            </div>
+                                            <div class="nav-notification-date">
+                                                Assigned: <?php echo date('M j, Y g:i A', strtotime($notification['notification_date'])); ?>
+                                            </div>
+                                            <div class="nav-notification-actions">
+                                                <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Risk</a>
+                                                <a href="advanced-risk-management.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-warning">Manage Treatment</a>
+                                                <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary">Mark Read</button>
+                                            </div>
+                                        <?php elseif ($notification['notification_type'] == 'assignment'): ?>
+                                            <div class="nav-notification-title">
+                                                📋 Risk Assignment: <?php echo htmlspecialchars($notification['risk_name']); ?>
+                                            </div>
+                                            <div class="nav-notification-risk">
+                                                Reported by: <?php echo htmlspecialchars($notification['reporter_name'] ?? 'System'); ?>
+                                            </div>
+                                            <div class="nav-notification-date">
+                                                Assigned: <?php echo date('M j, Y g:i A', strtotime($notification['notification_date'])); ?>
+                                            </div>
+                                            <div class="nav-notification-actions">
+                                                <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Details</a>
+                                                <a href="risk_assessment.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-success">Start Assessment</a>
+                                                <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary">Mark Read</button>
+                                            </div>
+                                        <?php elseif ($notification['notification_type'] == 'update'): ?>
+                                            <div class="nav-notification-title">
+                                                🔄 Risk Update: <?php echo htmlspecialchars($notification['risk_name']); ?>
+                                            </div>
+                                            <div class="nav-notification-risk">
+                                                Updated by: <?php echo htmlspecialchars($notification['updater_name'] ?? 'System'); ?>
+                                            </div>
+                                            <div class="nav-notification-date">
+                                                Updated: <?php echo date('M j, Y g:i A', strtotime($notification['notification_date'])); ?>
+                                            </div>
+                                            <div class="nav-notification-actions">
+                                                <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Changes</a>
+                                                <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary">Mark Read</button>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+                                    <?php endforeach; ?>
+                                </div>
+                                <div class="nav-notification-footer">
+                                    <div class="flex justify-between items-center">
+                                        <button onclick="expandNavNotifications()" class="btn btn-sm btn-primary" id="navExpandButton">
+                                            <i class="fas fa-expand-arrows-alt"></i> Expand View
+                                        </button>
+                                        <a href="notifications.php" class="btn btn-sm btn-outline">View All</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <?php else: ?>
+                        <div class="nav-notification-container nav-notification-empty">
+                            <i class="fas fa-bell nav-notification-bell"></i>
+                            <span class="nav-notification-text">Notifications</span>
+                        </div>
+                        <?php 
+                            endif;
+                        }
+                        ?>
+                    </li>
+                </ul>
+            </div>
+        </nav>
         
         <main class="main-content">
             <?php if (isset($success_message)): ?>
@@ -1890,7 +2058,7 @@ function getStatusBadgeClass($status) {
                                 </thead>
                                 <tbody id="reportsTableBody">
                                     <?php foreach ($my_reported_risks as $risk): ?>
-                                    <tr class="risk-report-row" data-status="<?php echo $risk['risk_status'] ?? 'pending'; ?>" data-name="<?php echo strtolower($risk['risk_name']); ?>" data-category="<?php echo strtolower($risk['risk_category'] ?? ''); ?>">
+                                    <tr class="risk-report-row" data-status="<?php echo $risk['risk_status'] ?? 'pending'; ?>" data-search="<?php echo strtolower($risk['risk_name'] . ' ' . ($risk['risk_category'] ?? '')); ?>">
                                         <td style="padding: 1rem; border-left: 4px solid #E60012;">
                                             <div style="font-weight: 600; color: #333; margin-bottom: 0.25rem;">
                                                 <?php echo htmlspecialchars($risk['risk_name']); ?>
@@ -2103,328 +2271,515 @@ function getStatusBadgeClass($status) {
     </div>
 
     <script>
-    // Risk Category Chart (NEW)
-    const categoryData = <?php echo json_encode($risk_by_category); ?>;
-    const categoryCtx = document.getElementById('categoryChart').getContext('2d');
-    if (categoryData.length > 0) {
-        const categoryColors = {
-            'Strategic Risk': '#6f42c1',
-            'Operational Risk': '#dc3545',
-            'Financial Risk': '#28a745',
-            'Compliance Risk': '#ffc107',
-            'Technology Risk': '#007bff',
-            'Reputational Risk': '#fd7e14',
-            'Human Resources Risk': '#20c997',
-            'Environmental Risk': '#6c757d'
-        };
-        new Chart(categoryCtx, {
-            type: 'doughnut',
+        // Risk Category Chart (NEW)
+        const categoryData = <?php echo json_encode($risk_by_category); ?>;
+        const categoryCtx = document.getElementById('categoryChart').getContext('2d');
+        if (categoryData.length > 0) {
+            const categoryColors = {
+                'Strategic Risk': '#6f42c1',
+                'Operational Risk': '#dc3545',
+                'Financial Risk': '#28a745',
+                'Compliance Risk': '#ffc107',
+                'Technology Risk': '#007bff',
+                'Reputational Risk': '#fd7e14',
+                'Human Resources Risk': '#20c997',
+                'Environmental Risk': '#6c757d'
+            };
+            new Chart(categoryCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: categoryData.map(item => item.risk_category || 'Uncategorized'),
+                    datasets: [{
+                        data: categoryData.map(item => item.count),
+                        backgroundColor: categoryData.map(item => 
+                            categoryColors[item.risk_category] || '#6c757d'
+                        ),
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                padding: 15,
+                                usePointStyle: true
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.parsed;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = ((value / total) * 100).toFixed(1);
+                                    return `${label}: ${value} risks (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        } else {
+            categoryCtx.canvas.parentNode.innerHTML = '<p style="text-align: center; color: #666; padding: 2rem;">No risk categories data available</p>';
+        }
+        
+        // Risk Level Chart
+        const riskLevels = <?php echo json_encode($risk_levels); ?>;
+        const levelCtx = document.getElementById('levelChart').getContext('2d');
+        
+        new Chart(levelCtx, {
+            type: 'bar',
             data: {
-                labels: categoryData.map(item => item.risk_category || 'Uncategorized'),
+                labels: ['Low (1-3)', 'Medium (4-8)', 'High (9-14)', 'Critical (15+)'],
                 datasets: [{
-                    data: categoryData.map(item => item.count),
-                    backgroundColor: categoryData.map(item => 
-                        categoryColors[item.risk_category] || '#6c757d'
-                    ),
-                    borderWidth: 2,
-                    borderColor: '#fff'
+                    label: 'Number of Risks',
+                    data: [
+                        parseInt(riskLevels.low_risks) || 0,
+                        parseInt(riskLevels.medium_risks) || 0,
+                        parseInt(riskLevels.high_risks) || 0,
+                        parseInt(riskLevels.critical_risks) || 0
+                    ],
+                    backgroundColor: [
+                        '#28a745',
+                        '#ffc107',
+                        '#fd7e14',
+                        '#dc3545'
+                    ],
+                    borderWidth: 1
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1
+                        }
+                    }
+                },
                 plugins: {
                     legend: {
-                        position: 'bottom',
-                        labels: {
-                            padding: 15,
-                            usePointStyle: true
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const label = context.label || '';
-                                const value = context.parsed;
-                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                const percentage = ((value / total) * 100).toFixed(1);
-                                return `${label}: ${value} risks (${percentage}%)`;
-                            }
-                        }
+                        display: false
                     }
                 }
             }
         });
-    } else {
-        categoryCtx.canvas.parentNode.innerHTML = '<p style="text-align: center; color: #666; padding: 2rem;">No risk categories data available</p>';
-    }
-    
-    // Risk Level Chart
-    const riskLevels = <?php echo json_encode($risk_levels); ?>;
-    const levelCtx = document.getElementById('levelChart').getContext('2d');
-    
-    new Chart(levelCtx, {
-        type: 'bar',
-        data: {
-            labels: ['Low (1-3)', 'Medium (4-8)', 'High (9-14)', 'Critical (15+)'],
-            datasets: [{
-                label: 'Number of Risks',
-                data: [
-                    parseInt(riskLevels.low_risks) || 0,
-                    parseInt(riskLevels.medium_risks) || 0,
-                    parseInt(riskLevels.high_risks) || 0,
-                    parseInt(riskLevels.critical_risks) || 0
-                ],
-                backgroundColor: [
-                    '#28a745',
-                    '#ffc107',
-                    '#fd7e14',
-                    '#dc3545'
-                ],
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        stepSize: 1
-                    }
+        
+        function showTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Remove active class from all buttons
+            document.querySelectorAll('.nav-tabs button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName + '-tab').classList.add('active');
+            if (event.target) {
+                event.target.classList.add('active');
+            }
+        }
+        
+        function openClassificationModal(riskId) {
+            document.getElementById('classification_risk_id').value = riskId;
+            document.getElementById('classificationModal').classList.add('show');
+        }
+        
+        function openAssessmentModal(riskId) {
+            document.getElementById('assessment_risk_id').value = riskId;
+            document.getElementById('assessmentModal').classList.add('show');
+        }
+        
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
+        }
+        
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modals = document.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                if (event.target === modal) {
+                    modal.classList.remove('show');
                 }
-            },
-            plugins: {
-                legend: {
-                    display: false
-                }
-            }
-        }
-    });
-    
-    function showTab(tabName) {
-        // Hide all tabs
-        document.querySelectorAll('.tab-content').forEach(tab => {
-            tab.classList.remove('active');
-        });
-        
-        // Remove active class from all buttons
-        document.querySelectorAll('.nav-tabs button').forEach(btn => {
-            btn.classList.remove('active');
-        });
-        
-        // Show selected tab
-        document.getElementById(tabName + '-tab').classList.add('active');
-        if (event.target) {
-            event.target.classList.add('active');
-        }
-    }
-    
-    function openClassificationModal(riskId) {
-        document.getElementById('classification_risk_id').value = riskId;
-        document.getElementById('classificationModal').classList.add('show');
-    }
-    
-    function openAssessmentModal(riskId) {
-        document.getElementById('assessment_risk_id').value = riskId;
-        document.getElementById('assessmentModal').classList.add('show');
-    }
-    
-    function closeModal(modalId) {
-        document.getElementById(modalId).classList.remove('show');
-    }
-    
-    // Close modal when clicking outside
-    window.onclick = function(event) {
-        const modals = document.querySelectorAll('.modal');
-        modals.forEach(modal => {
-            if (event.target === modal) {
-                modal.classList.remove('show');
-            }
-        });
-    }
-    
-    // Handle highlighting updated risk row
-    <?php if (isset($_GET['updated']) && isset($_GET['risk_id'])): ?>
-    document.addEventListener('DOMContentLoaded', function() {
-        const updatedRiskId = <?php echo (int)$_GET['risk_id']; ?>;
-        
-        // Clean the URL to remove the parameters
-        if (window.history.replaceState) {
-            window.history.replaceState(null, null, 'risk_owner_dashboard.php');
+            });
         }
         
-        // Highlight the updated risk row
-        setTimeout(function() {
-            const riskRow = document.querySelector(`tr[data-risk-id="${updatedRiskId}"]`);
-            if (riskRow) {
-                riskRow.style.backgroundColor = '#d4edda';
-                riskRow.style.border = '2px solid #28a745';
-                
-                // Scroll to the row
-                riskRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                
-                // Remove highlight after 8 seconds
-                setTimeout(() => {
-                    riskRow.style.backgroundColor = '';
-                    riskRow.style.border = '';
-                }, 8000);
-            }
-        }, 500);
-    });
-    <?php endif; ?>
-    
-    // Auto-refresh page every 5 minutes to show updated assignments
-    setTimeout(function() {
-        location.reload();
-    }, 300000); // 5 minutes
-    
-    // Handle tab parameter from URL
-    document.addEventListener('DOMContentLoaded', function() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const tab = urlParams.get('tab');
-        if (tab) {
-            showTab(tab);
-        }
-    });
-    
-    // IMPROVED BROWSER BACK BUTTON HANDLING
-    document.addEventListener('DOMContentLoaded', function() {
-        // Get the referrer (where user came from)
-        const referrer = document.referrer;
-        
-        // Check if user came from login page
-        const cameFromLogin = referrer.includes('login.php') || referrer.includes('logout.php') || !referrer;
-        
-        if (cameFromLogin) {
-            // If user came from login, replace the current history entry
-            // This prevents the back button from going to login
+        // Handle highlighting updated risk row
+        <?php if (isset($_GET['updated']) && isset($_GET['risk_id'])): ?>
+        document.addEventListener('DOMContentLoaded', function() {
+            const updatedRiskId = <?php echo (int)$_GET['risk_id']; ?>;
+            
+            // Clean the URL to remove the parameters
             if (window.history.replaceState) {
-                // Create a safe fallback page in history
-                window.history.replaceState(
-                    { page: 'dashboard', preventBack: true }, 
+                window.history.replaceState(null, null, 'risk_owner_dashboard.php');
+            }
+            
+            // Highlight the updated risk row
+            setTimeout(function() {
+                const riskRow = document.querySelector(`tr[data-risk-id="${updatedRiskId}"]`);
+                if (riskRow) {
+                    riskRow.style.backgroundColor = '#d4edda';
+                    riskRow.style.border = '2px solid #28a745';
+                    
+                    // Scroll to the row
+                    riskRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    
+                    // Remove highlight after 8 seconds
+                    setTimeout(() => {
+                        riskRow.style.backgroundColor = '';
+                        riskRow.style.border = '';
+                    }, 8000);
+                }
+            }, 500);
+        });
+        <?php endif; ?>
+        
+        // Auto-refresh page every 5 minutes to show updated assignments
+        setTimeout(function() {
+            location.reload();
+        }, 300000); // 5 minutes
+        
+        // Handle tab parameter from URL
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const tab = urlParams.get('tab');
+            if (tab) {
+                showTab(tab);
+            }
+        });
+        
+        // IMPROVED BROWSER BACK BUTTON HANDLING
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get the referrer (where user came from)
+            const referrer = document.referrer;
+            
+            // Check if user came from login page
+            const cameFromLogin = referrer.includes('login.php') || referrer.includes('logout.php') || !referrer;
+            
+            if (cameFromLogin) {
+                // If user came from login, replace the current history entry
+                // This prevents the back button from going to login
+                if (window.history.replaceState) {
+                    // Create a safe fallback page in history
+                    window.history.replaceState(
+                        { page: 'dashboard', preventBack: true }, 
+                        'Risk Owner Dashboard', 
+                        'risk_owner_dashboard.php'
+                    );
+                    
+                    // Add a new entry so back button has somewhere safe to go
+                    window.history.pushState(
+                        { page: 'dashboard' }, 
+                        'Risk Owner Dashboard', 
+                        'risk_owner_dashboard.php'
+                    );
+                }
+            } else {
+                // User came from a valid page, store it
+                sessionStorage.setItem('validReferrer', referrer);
+            }
+        });
+        
+        // Handle the browser's back button
+        window.addEventListener('popstate', function(event) {
+            // Check if this is our prevented back state
+            if (event.state && event.state.preventBack) {
+                // Don't allow going back to login, stay on dashboard
+                window.history.pushState(
+                    { page: 'dashboard' }, 
                     'Risk Owner Dashboard', 
                     'risk_owner_dashboard.php'
                 );
-                
-                // Add a new entry so back button has somewhere safe to go
+                return;
+            }
+            
+            // Check if we have a valid referrer stored
+            const validReferrer = sessionStorage.getItem('validReferrer');
+            
+            if (validReferrer && !validReferrer.includes('login.php')) {
+                // Go to the valid referrer
+                window.location.href = validReferrer;
+            } else {
+                // No valid referrer, stay on dashboard
                 window.history.pushState(
                     { page: 'dashboard' }, 
                     'Risk Owner Dashboard', 
                     'risk_owner_dashboard.php'
                 );
             }
-        } else {
-            // User came from a valid page, store it
-            sessionStorage.setItem('validReferrer', referrer);
-        }
-    });
-    
-    // Handle the browser's back button
-    window.addEventListener('popstate', function(event) {
-        // Check if this is our prevented back state
-        if (event.state && event.state.preventBack) {
-            // Don't allow going back to login, stay on dashboard
-            window.history.pushState(
-                { page: 'dashboard' }, 
-                'Risk Owner Dashboard', 
-                'risk_owner_dashboard.php'
-            );
-            return;
-        }
-        
-        // Check if we have a valid referrer stored
-        const validReferrer = sessionStorage.getItem('validReferrer');
-        
-        if (validReferrer && !validReferrer.includes('login.php')) {
-            // Go to the valid referrer
-            window.location.href = validReferrer;
-        } else {
-            // No valid referrer, stay on dashboard
-            window.history.pushState(
-                { page: 'dashboard' }, 
-                'Risk Owner Dashboard', 
-                'risk_owner_dashboard.php'
-            );
-        }
-    });
-    
-    // Prevent navigation to login page via back button
-    window.addEventListener('beforeunload', function() {
-        // Clear login-related referrers
-        const referrer = document.referrer;
-        if (referrer && !referrer.includes('login.php') && !referrer.includes('logout.php')) {
-            sessionStorage.setItem('lastValidPage', window.location.href);
-        }
-    });
-    
-    // Additional safety: Override history.back() if needed
-    const originalBack = window.history.back;
-    window.history.back = function() {
-        const validReferrer = sessionStorage.getItem('validReferrer');
-        
-        if (validReferrer && !validReferrer.includes('login.php')) {
-            window.location.href = validReferrer;
-        } else {
-            // Stay on current page or go to a safe default
-            console.log('Back navigation blocked - would go to login');
-        }
-    };
-    
-    // Navigation notification functionality
-    function toggleNavNotifications() {
-        // Don't open if no notifications
-        const container = document.querySelector('.nav-notification-container');
-        if (container && container.classList.contains('nav-notification-empty')) {
-            return;
-        }
-        
-        const dropdown = document.getElementById('navNotificationDropdown');
-        if (!dropdown) return;
-        
-        if (dropdown.classList.contains('show')) {
-            dropdown.classList.remove('show');
-            dropdown.style.display = 'none';
-        } else {
-            dropdown.style.display = 'block';
-            const icon = document.querySelector('.nav-notification-container');
-            if (icon) {
-                const iconRect = icon.getBoundingClientRect();
-                dropdown.style.top = `${iconRect.bottom + 10}px`;
-                dropdown.style.right = `${Math.max(20, window.innerWidth - iconRect.right)}px`;
-            }
-            setTimeout(() => {
-                dropdown.classList.add('show');
-            }, 10);
-        }
-    }
-
-    function markNavAsRead(notificationId) {
-        const item = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
-        if (item) {
-            item.style.background = '#f1f3f4';
-            item.style.borderLeft = '4px solid #6c757d';
-            item.style.opacity = '0.7';
-        }
-    }
-
-    function markAllNavAsRead() {
-        const items = document.querySelectorAll('.nav-notification-item');
-        items.forEach((item) => {
-            item.style.background = '#f1f3f4';
-            item.style.borderLeft = '4px solid #6c757d';
-            item.style.opacity = '0.7';
         });
-    }
-
-    function expandNavNotifications() {
-        const dropdown = document.getElementById('navNotificationDropdown');
-        if (!dropdown) return;
         
-        dropdown.classList.toggle('expanded');
-    }
+        // Prevent navigation to login page via back button
+        window.addEventListener('beforeunload', function() {
+            // Clear login-related referrers
+            const referrer = document.referrer;
+            if (referrer && !referrer.includes('login.php') && !referrer.includes('logout.php')) {
+                sessionStorage.setItem('lastValidPage', window.location.href);
+            }
+        });
+        
+        // Additional safety: Override history.back() if needed
+        const originalBack = window.history.back;
+        window.history.back = function() {
+            const validReferrer = sessionStorage.getItem('validReferrer');
+            
+            if (validReferrer && !validReferrer.includes('login.php')) {
+                window.location.href = validReferrer;
+            } else {
+                // Stay on current page or go to a safe default
+                console.log('Back navigation blocked - would go to login');
+            }
+        };
+        
+        // Navigation notification functionality with persistent storage
+        let navIsExpanded = false;
+        let navReadNotifications = new Set();
+        
+        // Load read notifications from localStorage
+        function loadReadNotifications() {
+            const stored = localStorage.getItem('readNotifications_<?php echo $_SESSION['user_id']; ?>');
+            if (stored) {
+                navReadNotifications = new Set(JSON.parse(stored));
+            }
+        }
+        
+        // Save read notifications to localStorage
+        function saveReadNotifications() {
+            localStorage.setItem('readNotifications_<?php echo $_SESSION['user_id']; ?>', JSON.stringify([...navReadNotifications]));
+        }
+        
+        function toggleNavNotifications() {
+            // Don't open if no notifications
+            const container = document.querySelector('.nav-notification-container');
+            if (container && container.classList.contains('nav-notification-empty')) {
+                return;
+            }
+            
+            const dropdown = document.getElementById('navNotificationDropdown');
+            if (!dropdown) return;
+            
+            if (dropdown.classList.contains('show')) {
+                // Close dropdown
+                dropdown.classList.remove('show');
+                dropdown.style.display = 'none';
+                
+                const bell = document.querySelector('.nav-notification-bell');
+                if (bell) {
+                    bell.classList.remove('has-notifications');
+                }
+                
+                // Reset expanded state
+                navIsExpanded = false;
+                dropdown.classList.remove('expanded');
+                updateExpandButton();
+            } else {
+                // Open dropdown
+                dropdown.style.display = 'block';
+                
+                // Position dropdown near the notification icon
+                const icon = document.querySelector('.nav-notification-container');
+                if (icon) {
+                    const iconRect = icon.getBoundingClientRect();
+                    dropdown.style.top = `${iconRect.bottom + 10}px`;
+                    dropdown.style.right = `${Math.max(20, window.innerWidth - iconRect.right)}px`;
+                }
+                
+                // Add show class for animation
+                setTimeout(() => {
+                    dropdown.classList.add('show');
+                }, 10);
+                
+                const bell = document.querySelector('.nav-notification-bell');
+                if (bell) {
+                    bell.classList.add('has-notifications');
+                }
+                
+                // Apply read states from localStorage
+                applyReadStates();
+                updateExpandButton();
+            }
+        }
+        
+        function expandNavNotifications() {
+            const dropdown = document.getElementById('navNotificationDropdown');
+            if (!dropdown) return;
+            
+            navIsExpanded = !navIsExpanded;
+            
+            if (navIsExpanded) {
+                dropdown.classList.add('expanded');
+                const content = dropdown.querySelector('.nav-notification-content');
+                if (content) {
+                    content.style.maxHeight = '75vh';
+                }
+            } else {
+                dropdown.classList.remove('expanded');
+                const icon = document.querySelector('.nav-notification-container');
+                if (icon) {
+                    const iconRect = icon.getBoundingClientRect();
+                    dropdown.style.top = `${iconRect.bottom + 10}px`;
+                    dropdown.style.right = `${Math.max(20, window.innerWidth - iconRect.right)}px`;
+                }
+                const content = dropdown.querySelector('.nav-notification-content');
+                if (content) {
+                    content.style.maxHeight = '350px';
+                }
+            }
+            
+            updateExpandButton();
+        }
+        
+        function updateExpandButton() {
+            const button = document.getElementById('navExpandButton');
+            if (!button) return;
+            
+            if (navIsExpanded) {
+                button.innerHTML = '<i class="fas fa-compress-arrows-alt"></i> Collapse View';
+                button.title = 'Collapse to normal size';
+            } else {
+                button.innerHTML = '<i class="fas fa-expand-arrows-alt"></i> Expand All Notifications';
+                button.title = 'Expand to full screen';
+            }
+        }
+        
+        function applyReadStates() {
+            const items = document.querySelectorAll('.nav-notification-item');
+            items.forEach((item, index) => {
+                if (navReadNotifications.has(index)) {
+                    item.style.background = '#f1f3f4';
+                    item.style.borderLeft = '4px solid #6c757d';
+                    item.style.opacity = '0.7';
+                    item.classList.add('read');
+                    item.classList.remove('unread');
+                } else {
+                    item.style.background = '#fff3cd';
+                    item.style.borderLeft = '4px solid #ffc107';
+                    item.classList.add('unread');
+                    item.classList.remove('read');
+                }
+            });
+            updateNavNotificationBadge();
+        }
+        
+        function markNavAsRead(notificationId) {
+            const item = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
+            if (item) {
+                item.style.background = '#f1f3f4';
+                item.style.borderLeft = '4px solid #6c757d';
+                item.style.opacity = '0.7';
+                item.classList.add('read');
+                item.classList.remove('unread');
+                navReadNotifications.add(notificationId);
+                saveReadNotifications();
+                updateNavNotificationBadge();
+            }
+        }
+        
+        function markAllNavAsRead() {
+            const items = document.querySelectorAll('.nav-notification-item');
+            items.forEach((item, index) => {
+                item.style.background = '#f1f3f4';
+                item.style.borderLeft = '4px solid #6c757d';
+                item.style.opacity = '0.7';
+                item.classList.add('read');
+                item.classList.remove('unread');
+                navReadNotifications.add(index);
+            });
+            saveReadNotifications();
+            updateNavNotificationBadge();
+        }
+        
+        function updateNavNotificationBadge() {
+            const badge = document.querySelector('.nav-notification-badge');
+            const items = document.querySelectorAll('.nav-notification-item');
+            const totalNotifications = items.length;
+            const unreadCount = totalNotifications - navReadNotifications.size;
+            
+            if (badge) {
+                if (unreadCount > 0) {
+                    badge.textContent = unreadCount;
+                    badge.style.display = 'flex';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+        }
+        
+        // Initialize notifications on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadReadNotifications();
+            setTimeout(() => {
+                applyReadStates();
+                updateExpandButton();
+            }, 100);
+        });
+        
+        // Enhanced Search and Filter functionality for Reports
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.getElementById('searchRisks');
+            const statusFilter = document.getElementById('statusFilter');
+            
+            function filterReports() {
+                const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+                const selectedStatus = statusFilter ? statusFilter.value : '';
+                const tableRows = document.querySelectorAll('.risk-report-row');
+                
+                let visibleCount = 0;
+                
+                tableRows.forEach(row => {
+                    const searchData = row.getAttribute('data-search') || '';
+                    const rowStatus = row.getAttribute('data-status') || '';
+                    
+                    const matchesSearch = !searchTerm || searchData.includes(searchTerm);
+                    const matchesStatus = !selectedStatus || rowStatus === selectedStatus;
+                    
+                    if (matchesSearch && matchesStatus) {
+                        row.style.display = '';
+                        visibleCount++;
+                    } else {
+                        row.style.display = 'none';
+                    }
+                });
+                
+                // Show/hide "no results" message
+                const tableBody = document.getElementById('reportsTableBody');
+                const existingNoResults = document.getElementById('noResultsRow');
+                
+                if (visibleCount === 0 && tableRows.length > 0) {
+                    if (!existingNoResults) {
+                        const noResultsRow = document.createElement('tr');
+                        noResultsRow.id = 'noResultsRow';
+                        noResultsRow.innerHTML = `
+                            <td colspan="8" style="padding: 2rem; text-align: center; color: #666;">
+                                <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">🔍</div>
+                                <div>No risks match your current filters</div>
+                                <div style="font-size: 0.9rem; margin-top: 0.5rem;">Try adjusting your search or filter criteria</div>
+                            </td>
+                        `;
+                        tableBody.appendChild(noResultsRow);
+                    }
+                } else if (existingNoResults) {
+                    existingNoResults.remove();
+                }
+            }
+            
+            if (searchInput) {
+                searchInput.addEventListener('input', filterReports);
+            }
+            
+            if (statusFilter) {
+                statusFilter.addEventListener('change', filterReports);
+            }
+        });
     </script>
 </body>
 </html>
-</merged_code>
