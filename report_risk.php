@@ -428,6 +428,106 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
             100% { transform: scale(1); }
         }
         
+        /* Notification Dropdown Styles */
+        .nav-notification-dropdown {
+            position: fixed !important;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 0.5rem;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+            width: 400px;
+            max-height: 500px;
+            z-index: 1000;
+            display: none;
+            transition: all 0.3s ease;
+            transform: translateY(-10px);
+        }
+        .nav-notification-dropdown.show {
+            display: block;
+            transform: translateY(0);
+            opacity: 1;
+        }
+        .nav-notification-header {
+            padding: 1rem;
+            border-bottom: 1px solid #dee2e6;
+            font-weight: bold;
+            color: #495057;
+            background: #f8f9fa;
+            border-radius: 0.5rem 0.5rem 0 0;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .nav-notification-content {
+            max-height: 350px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            transition: max-height 0.3s ease;
+            scrollbar-width: thin;
+            scrollbar-color: #cbd5e0 #f7fafc;
+            -webkit-overflow-scrolling: touch;
+            scroll-behavior: smooth;
+        }
+        .nav-notification-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        .nav-notification-content::-webkit-scrollbar-track {
+            background: #f7fafc;
+            border-radius: 4px;
+        }
+        .nav-notification-content::-webkit-scrollbar-thumb {
+            background: #cbd5e0;
+            border-radius: 4px;
+            transition: background 0.3s ease;
+        }
+        .nav-notification-content::-webkit-scrollbar-thumb:hover {
+            background: #a0aec0;
+        }
+        .nav-notification-item {
+            padding: 1rem;
+            border-bottom: 1px solid #f8f9fa;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        .nav-notification-item:hover {
+            background-color: #f8f9fa;
+        }
+        .nav-notification-item:last-child {
+            border-bottom: none;
+        }
+        .nav-notification-item.read {
+            display: none !important;
+        }
+        .nav-notification-item.unread {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+        .nav-notification-title {
+            font-weight: bold;
+            color: #495057;
+            margin-bottom: 0.25rem;
+        }
+        .nav-notification-risk {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-bottom: 0.25rem;
+        }
+        .nav-notification-date {
+            color: #6c757d;
+            font-size: 0.8rem;
+            margin-bottom: 0.5rem;
+        }
+        .nav-notification-actions {
+            margin-top: 0.5rem;
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .nav-notification-actions .btn {
+            font-size: 0.8rem;
+            padding: 0.25rem 0.5rem;
+        }
+        
         /* Main Content */
         .main-content {
             max-width: 1200px;
@@ -935,10 +1035,73 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                         
                         if (!empty($all_notifications)):
                     ?>
-                    <div class="nav-notification-container">
+                    <div class="nav-notification-container" onclick="toggleNavNotifications()">
                         <i class="fas fa-bell nav-notification-bell"></i>
                         <span class="nav-notification-text">Notifications</span>
                         <span class="nav-notification-badge"><?php echo count($all_notifications); ?></span>
+                        
+                        <div class="nav-notification-dropdown" id="navNotificationDropdown">
+                            <div class="nav-notification-header">
+                                <div class="flex justify-between items-center">
+                                    <span><i class="fas fa-bell"></i> All Notifications</span>
+                                    <div style="display: flex; gap: 0.5rem;">
+                                        <button onclick="readAllNotifications()" class="btn btn-sm btn-primary">Read All</button>
+                                        <button onclick="clearAllNotifications()" class="btn btn-sm btn-outline">Clear All</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="nav-notification-content" id="navNotificationContent">
+                                <?php foreach ($all_notifications as $index => $notification): ?>
+                                <div class="nav-notification-item" data-nav-notification-id="<?php echo $index; ?>">
+                                    <?php if ($notification['notification_type'] == 'treatment'): ?>
+                                        <div class="nav-notification-title">
+                                            🎯 Treatment Assignment: <?php echo htmlspecialchars($notification['treatment_name']); ?>
+                                        </div>
+                                        <div class="nav-notification-risk">
+                                            Risk: <?php echo htmlspecialchars($notification['risk_name']); ?>
+                                        </div>
+                                        <div class="nav-notification-date">
+                                            Assigned: <?php echo date('M j, Y g:i A', strtotime($notification['notification_date'])); ?>
+                                        </div>
+                                        <div class="nav-notification-actions">
+                                            <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Risk</a>
+                                            <a href="advanced-risk-management.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-warning">Manage Treatment</a>
+                                            <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary mark-read-btn">Mark Read</button>
+                                        </div>
+                                    <?php elseif ($notification['notification_type'] == 'assignment'): ?>
+                                        <div class="nav-notification-title">
+                                            📋 Risk Assignment: <?php echo htmlspecialchars($notification['risk_name']); ?>
+                                        </div>
+                                        <div class="nav-notification-risk">
+                                            Reported by: <?php echo htmlspecialchars($notification['reporter_name'] ?? 'System'); ?>
+                                        </div>
+                                        <div class="nav-notification-date">
+                                            Assigned: <?php echo date('M j, Y g:i A', strtotime($notification['notification_date'])); ?>
+                                        </div>
+                                        <div class="nav-notification-actions">
+                                            <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Details</a>
+                                            <a href="risk_assessment.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-success">Start Assessment</a>
+                                            <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary mark-read-btn">Mark Read</button>
+                                        </div>
+                                    <?php elseif ($notification['notification_type'] == 'update'): ?>
+                                        <div class="nav-notification-title">
+                                            🔄 Risk Update: <?php echo htmlspecialchars($notification['risk_name']); ?>
+                                        </div>
+                                        <div class="nav-notification-risk">
+                                            Updated by: <?php echo htmlspecialchars($notification['updater_name'] ?? 'System'); ?>
+                                        </div>
+                                        <div class="nav-notification-date">
+                                            Updated: <?php echo date('M j, Y g:i A', strtotime($notification['notification_date'])); ?>
+                                        </div>
+                                        <div class="nav-notification-actions">
+                                            <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Changes</a>
+                                            <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary mark-read-btn">Mark Read</button>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
                     </div>
                     <?php else: ?>
                     <div class="nav-notification-container nav-notification-empty">
@@ -1415,6 +1578,186 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
             steps[3].className = 'progress-step';
         }
         
+        // Notification functionality
+        let notificationDropdownVisible = false;
+        let readNotifications = JSON.parse(localStorage.getItem('readNotifications') || '[]');
+
+        function toggleNavNotifications() {
+            const dropdown = document.getElementById('navNotificationDropdown');
+            if (dropdown) {
+                notificationDropdownVisible = !notificationDropdownVisible;
+                dropdown.classList.toggle('show', notificationDropdownVisible);
+                
+                if (notificationDropdownVisible) {
+                    positionNotificationDropdown();
+                    document.addEventListener('click', handleOutsideClick);
+                } else {
+                    document.removeEventListener('click', handleOutsideClick);
+                }
+            }
+        }
+
+        function positionNotificationDropdown() {
+            const container = document.querySelector('.nav-notification-container');
+            const dropdown = document.getElementById('navNotificationDropdown');
+            
+            if (container && dropdown) {
+                const rect = container.getBoundingClientRect();
+                const dropdownWidth = 400;
+                
+                let left = rect.left;
+                if (left + dropdownWidth > window.innerWidth) {
+                    left = window.innerWidth - dropdownWidth - 20;
+                }
+                if (left < 20) {
+                    left = 20;
+                }
+                
+                dropdown.style.left = left + 'px';
+                dropdown.style.top = (rect.bottom + 5) + 'px';
+            }
+        }
+
+        function handleOutsideClick(event) {
+            const container = document.querySelector('.nav-notification-container');
+            const dropdown = document.getElementById('navNotificationDropdown');
+            
+            if (container && dropdown && 
+                !container.contains(event.target) && 
+                !dropdown.contains(event.target)) {
+                notificationDropdownVisible = false;
+                dropdown.classList.remove('show');
+                document.removeEventListener('click', handleOutsideClick);
+            }
+        }
+
+        function markNavAsRead(notificationId) {
+            const notificationItem = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
+            if (notificationItem) {
+                notificationItem.classList.remove('unread');
+                notificationItem.classList.add('read');
+                
+                const markReadBtn = notificationItem.querySelector('.mark-read-btn');
+                if (markReadBtn) {
+                    markReadBtn.style.display = 'none';
+                }
+                
+                if (!readNotifications.includes(notificationId)) {
+                    readNotifications.push(notificationId);
+                    localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
+                }
+                
+                updateNotificationCount();
+            }
+        }
+
+        function readAllNotifications() {
+            const notificationItems = document.querySelectorAll('.nav-notification-item');
+            notificationItems.forEach((item, index) => {
+                item.classList.remove('unread');
+                item.classList.add('read');
+                
+                const markReadBtn = item.querySelector('.mark-read-btn');
+                if (markReadBtn) {
+                    markReadBtn.style.display = 'none';
+                }
+                
+                if (!readNotifications.includes(index)) {
+                    readNotifications.push(index);
+                }
+            });
+            
+            localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
+            updateNotificationCount();
+        }
+
+        function clearAllNotifications() {
+            const notificationItems = document.querySelectorAll('.nav-notification-item');
+            notificationItems.forEach((item, index) => {
+                item.style.display = 'none';
+                
+                if (!readNotifications.includes(index)) {
+                    readNotifications.push(index);
+                }
+            });
+            
+            localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
+            updateNotificationCount();
+            
+            // Close dropdown after clearing
+            notificationDropdownVisible = false;
+            const dropdown = document.getElementById('navNotificationDropdown');
+            if (dropdown) {
+                dropdown.classList.remove('show');
+            }
+            
+            // Show empty state
+            const container = document.querySelector('.nav-notification-container');
+            if (container) {
+                container.classList.add('nav-notification-empty');
+            }
+        }
+
+        function updateNotificationCount() {
+            const badge = document.querySelector('.nav-notification-badge');
+            const bell = document.querySelector('.nav-notification-bell');
+            const container = document.querySelector('.nav-notification-container');
+            
+            const totalNotifications = document.querySelectorAll('.nav-notification-item').length;
+            const unreadCount = totalNotifications - readNotifications.length;
+            
+            if (badge) {
+                if (unreadCount > 0) {
+                    badge.textContent = unreadCount;
+                    badge.style.display = 'flex';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+            
+            if (bell) {
+                if (unreadCount > 0) {
+                    bell.classList.add('has-notifications');
+                } else {
+                    bell.classList.remove('has-notifications');
+                }
+            }
+            
+            if (container) {
+                if (unreadCount === 0) {
+                    container.classList.add('nav-notification-empty');
+                } else {
+                    container.classList.remove('nav-notification-empty');
+                }
+            }
+        }
+
+        // Initialize notification states on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Apply read states from localStorage
+            readNotifications.forEach(notificationId => {
+                const notificationItem = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
+                if (notificationItem) {
+                    notificationItem.classList.remove('unread');
+                    notificationItem.classList.add('read');
+                    
+                    const markReadBtn = notificationItem.querySelector('.mark-read-btn');
+                    if (markReadBtn) {
+                        markReadBtn.style.display = 'none';
+                    }
+                }
+            });
+            
+            updateNotificationCount();
+        });
+
+        // Handle window resize for notification dropdown positioning
+        window.addEventListener('resize', function() {
+            if (notificationDropdownVisible) {
+                positionNotificationDropdown();
+            }
+        });
+
         // Initialize everything on page load
         document.addEventListener('DOMContentLoaded', function() {
             // Setup file uploads
