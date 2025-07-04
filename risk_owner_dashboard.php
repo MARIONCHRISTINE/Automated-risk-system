@@ -157,7 +157,7 @@ $stats['my_reported_risks'] = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 $query = "SELECT COUNT(*) as total FROM risk_incidents 
           WHERE risk_owner_id = :user_id 
           AND ((inherent_likelihood IS NOT NULL AND inherent_consequence IS NOT NULL AND (inherent_likelihood * inherent_consequence) >= 9)
-          OR (residual_likelihood IS NOT NULL AND residual_consequence IS NOT NULL AND (residual_likelihood * residual_consequence) >= 9))";
+         OR (residual_likelihood IS NOT NULL AND residual_consequence IS NOT NULL AND (residual_likelihood * residual_consequence) >= 9))";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':user_id', $_SESSION['user_id']);
 $stmt->execute();
@@ -173,30 +173,30 @@ $recent_stmt->execute();
 $stats['recent_assignments'] = $recent_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
 // Get assigned risks (risks assigned to this user)
-$query = "SELECT r.*, u.full_name as reporter_name
-          FROM risk_incidents r 
-          LEFT JOIN users u ON r.reported_by = u.id 
-          WHERE r.risk_owner_id = :user_id
-          ORDER BY r.created_at DESC";
+$query = "SELECT r.*, u.full_name as reporter_name 
+         FROM risk_incidents r 
+         LEFT JOIN users u ON r.reported_by = u.id 
+         WHERE r.risk_owner_id = :user_id
+         ORDER BY r.created_at DESC";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':user_id', $_SESSION['user_id']);
 $stmt->execute();
 $assigned_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Get department risks
-$query = "SELECT ri.*, u.full_name as reporter_name, ro.full_name as risk_owner_name
-          FROM risk_incidents ri 
-          LEFT JOIN users u ON ri.reported_by = u.id
-          LEFT JOIN users ro ON ri.risk_owner_id = ro.id
-          WHERE ri.department = :department
-          ORDER BY 
+$query = "SELECT ri.*, u.full_name as reporter_name, ro.full_name as risk_owner_name 
+         FROM risk_incidents ri 
+         LEFT JOIN users u ON ri.reported_by = u.id
+         LEFT JOIN users ro ON ri.risk_owner_id = ro.id
+         WHERE ri.department = :department
+         ORDER BY 
             CASE 
               WHEN ri.inherent_likelihood IS NOT NULL AND ri.inherent_consequence IS NOT NULL 
-              THEN (ri.inherent_likelihood * ri.inherent_consequence) 
+              THEN (ri.inherent_likelihood * ri.inherent_consequence)
               WHEN ri.residual_likelihood IS NOT NULL AND ri.residual_consequence IS NOT NULL 
               THEN (ri.residual_likelihood * residual_consequence)
-              ELSE 0 
-            END DESC, 
+             ELSE 0 
+            END DESC,
             ri.created_at DESC";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':department', $user['department']);
@@ -206,12 +206,12 @@ $department_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 // Get risks reported by this user
 $query = "SELECT ri.*, 
                  ro.full_name as risk_owner_name,
-                 reporter.full_name as reporter_name
-          FROM risk_incidents ri 
-          LEFT JOIN users ro ON ri.risk_owner_id = ro.id
-          LEFT JOIN users reporter ON ri.reported_by = reporter.id
-          WHERE ri.reported_by = :user_id
-          ORDER BY ri.created_at DESC";
+                reporter.full_name as reporter_name 
+         FROM risk_incidents ri 
+         LEFT JOIN users ro ON ri.risk_owner_id = ro.id
+         LEFT JOIN users reporter ON ri.reported_by = reporter.id
+         WHERE ri.reported_by = :user_id
+         ORDER BY ri.created_at DESC";
 $stmt = $db->prepare($query);
 $stmt->bindParam(':user_id', $_SESSION['user_id']);
 $stmt->execute();
@@ -222,12 +222,12 @@ $pending_assignments = []; // Initialize as empty array since we're not sure if 
 
 // Try to get pending assignments, but handle if table doesn't exist
 try {
-    $pending_query = "SELECT r.*, u.full_name as reporter_name, ra.assignment_date
-                      FROM risk_assignments ra
-                      JOIN risk_incidents r ON ra.risk_id = r.id
-                      JOIN users u ON r.reported_by = u.id
-                      WHERE ra.assigned_to = :user_id AND ra.status = 'Pending'
-                      ORDER BY ra.assignment_date DESC";
+    $pending_query = "SELECT r.*, u.full_name as reporter_name, ra.assignment_date 
+                     FROM risk_assignments ra
+                     JOIN risk_incidents r ON ra.risk_id = r.id
+                     JOIN users u ON r.reported_by = u.id
+                     WHERE ra.assigned_to = :user_id AND ra.status = 'Pending'
+                     ORDER BY ra.assignment_date DESC";
     $pending_stmt = $db->prepare($pending_query);
     $pending_stmt->bindParam(':user_id', $_SESSION['user_id']);
     $pending_stmt->execute();
@@ -303,7 +303,6 @@ function getStatusBadgeClass($status) {
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -478,6 +477,7 @@ function getStatusBadgeClass($status) {
             font-weight: 500;
             transition: all 0.3s ease;
             border-bottom: 3px solid transparent;
+            cursor: pointer;
         }
         .nav-item a:hover {
             color: #E60012;
@@ -535,6 +535,8 @@ function getStatusBadgeClass($status) {
             justify-content: space-between;
             align-items: center;
             margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #eee;
         }
         .card-title {
             color: #333;
@@ -722,7 +724,6 @@ function getStatusBadgeClass($status) {
             transition: background 0.3s;
             border: none;
             cursor: pointer;
-            margin-bottom: 2rem;
         }
         
         .cta-button:hover {
@@ -972,6 +973,309 @@ function getStatusBadgeClass($status) {
         .text-muted {
             color: #6c757d;
         }
+
+        /* Procedures Specific Styles */
+        .procedure-section {
+            margin: 2rem 0;
+            padding: 1.5rem;
+            border-left: 4px solid #E60012;
+            background: #f8f9fa;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .procedure-title {
+            color: #E60012;
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        
+        .field-definition {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            padding: 1rem;
+            margin: 0.5rem 0;
+        }
+        
+        .field-name {
+            font-weight: 600;
+            color: #E60012;
+            margin-bottom: 0.5rem;
+        }
+        
+        .field-description {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        
+        .risk-matrix-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+        
+        .risk-matrix-table th,
+        .risk-matrix-table td {
+            border: 1px solid #dee2e6;
+            padding: 0.75rem;
+            text-align: center;
+        }
+        
+        .risk-matrix-table th {
+            background: #E60012;
+            color: white;
+        }
+        
+        .matrix-1 { background: #d4edda; }
+        .matrix-2 { background: #fff3cd; }
+        .matrix-3 { background: #f8d7da; }
+        .matrix-4 { background: #f5c6cb; }
+        .matrix-5 { background: #dc3545; color: white; }
+        
+        .toc {
+            background: #e9ecef;
+            padding: 1.5rem;
+            border-radius: 0.25rem;
+            margin-bottom: 2rem;
+        }
+        
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        .toc li {
+            margin: 0.5rem 0;
+        }
+        
+        .toc a {
+            text-decoration: none;
+            color: #E60012;
+        }
+        
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        
+        .department-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        
+        .department-card {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            border-left: 4px solid #E60012;
+        }
+        
+        .department-title {
+            font-weight: 600;
+            color: #E60012;
+            margin-bottom: 0.5rem;
+        }
+        
+        .auto-assignment-flow {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+        
+        .flow-step {
+            display: flex;
+            align-items: center;
+            margin: 0.5rem 0;
+        }
+        
+        .flow-step i {
+            color: #2196f3;
+            margin-right: 0.5rem;
+            width: 20px;
+        }
+        
+        /* Notification Styles */
+        .notification-nav-item {
+            position: relative;
+        }
+        .nav-notification-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            padding: 1rem 1.5rem;
+            border-radius: 0.25rem;
+            transition: all 0.3s ease;
+            color: #6c757d;
+            text-decoration: none;
+        }
+        .nav-notification-container:hover {
+            background-color: rgba(230, 0, 18, 0.05);
+            color: #E60012;
+            text-decoration: none;
+        }
+        .nav-notification-container.nav-notification-empty {
+            opacity: 0.6;
+            cursor: default;
+        }
+        .nav-notification-container.nav-notification-empty:hover {
+            background-color: transparent;
+            color: #6c757d;
+        }
+        .nav-notification-bell {
+            font-size: 1.1rem;
+            transition: all 0.3s ease;
+        }
+        .nav-notification-container:hover .nav-notification-bell {
+            transform: scale(1.1);
+        }
+        .nav-notification-bell.has-notifications {
+            color: #ffc107;
+            animation: navBellRing 2s infinite;
+        }
+        @keyframes navBellRing {
+            0%, 50%, 100% { transform: rotate(0deg); }
+            10%, 30% { transform: rotate(-10deg); }
+            20%, 40% { transform: rotate(10deg); }
+        }
+        .nav-notification-text {
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        .nav-notification-badge {
+            background: #dc3545;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 0.7rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            animation: navPulse 2s infinite;
+            margin-left: auto;
+        }
+        @keyframes navPulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+        .nav-notification-dropdown {
+            position: fixed !important;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 0.5rem;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+            width: 400px;
+            max-height: 500px;
+            z-index: 1000;
+            display: none;
+            transition: all 0.3s ease;
+            transform: translateY(-10px);
+        }
+        .nav-notification-dropdown.show {
+            display: block;
+            transform: translateY(0);
+            opacity: 1;
+        }
+        .nav-notification-header {
+            padding: 1rem;
+            border-bottom: 1px solid #dee2e6;
+            font-weight: bold;
+            color: #495057;
+            background: #f8f9fa;
+            border-radius: 0.5rem 0.5rem 0 0;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .nav-notification-content {
+            max-height: 350px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            transition: max-height 0.3s ease;
+            scrollbar-width: thin;
+            scrollbar-color: #cbd5e0 #f7fafc;
+            -webkit-overflow-scrolling: touch;
+            scroll-behavior: smooth;
+        }
+        .nav-notification-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        .nav-notification-content::-webkit-scrollbar-track {
+            background: #f7fafc;
+            border-radius: 4px;
+        }
+        .nav-notification-content::-webkit-scrollbar-thumb {
+            background: #cbd5e0;
+            border-radius: 4px;
+            transition: background 0.3s ease;
+        }
+        .nav-notification-content::-webkit-scrollbar-thumb:hover {
+            background: #a0aec0;
+        }
+        .nav-notification-item {
+            padding: 1rem;
+            border-bottom: 1px solid #f8f9fa;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        .nav-notification-item:hover {
+            background-color: #f8f9fa;
+        }
+        .nav-notification-item:last-child {
+            border-bottom: none;
+        }
+        .nav-notification-item.read {
+            opacity: 0.6;
+            background-color: #f1f3f4;
+        }
+        .nav-notification-item.unread {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+        .nav-notification-title {
+            font-weight: bold;
+            color: #495057;
+            margin-bottom: 0.25rem;
+        }
+        .nav-notification-risk {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-bottom: 0.25rem;
+        }
+        .nav-notification-date {
+            color: #6c757d;
+            font-size: 0.8rem;
+            margin-bottom: 0.5rem;
+        }
+        .nav-notification-actions {
+            margin-top: 0.5rem;
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .nav-notification-actions .btn {
+            font-size: 0.8rem;
+            padding: 0.25rem 0.5rem;
+        }
+        .nav-notification-footer {
+            padding: 1rem;
+            border-top: 1px solid #dee2e6;
+            background: #f8f9fa;
+            border-radius: 0 0 0.5rem 0.5rem;
+            position: sticky;
+            bottom: 0;
+            z-index: 10;
+            text-align: center;
+        }
         
         @media (max-width: 768px) {
             body {
@@ -1075,25 +1379,10 @@ function getStatusBadgeClass($status) {
                 font-size: 0.6rem;
             }
             
-            .nav-content::before,
-            .nav-content::after {
-                content: '';
-                position: absolute;
-                top: 0;
-                bottom: 0;
-                width: 20px;
-                pointer-events: none;
-                z-index: 1;
-            }
-            
-            .nav-content::before {
-                left: 0;
-                background: linear-gradient(to right, rgba(248, 249, 250, 1), rgba(248, 249, 250, 0));
-            }
-            
-            .nav-content::after {
-                right: 0;
-                background: linear-gradient(to left, rgba(248, 249, 250, 1), rgba(248, 249, 250, 0));
+            .nav-notification-dropdown {
+                width: 95vw;
+                left: 2.5vw !important;
+                right: 2.5vw !important;
             }
             
             .modal-content {
@@ -1130,342 +1419,31 @@ function getStatusBadgeClass($status) {
             .chart-container {
                 height: 250px;
             }
-        }
-        
-        @media (max-width: 1024px) and (min-width: 769px) {
-            .nav-menu {
-                flex-wrap: wrap;
-                justify-content: center;
-            }
-            
-            .nav-item a {
-                padding: 0.75rem 1rem;
-                font-size: 0.85rem;
-            }
-            
-            .dashboard-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-        }
-        
-        @media (max-width: 480px) {
-            body {
-                padding-top: 180px;
-            }
-            
-            .header {
+
+            .main-content {
                 padding: 1rem;
             }
-            
-            .main-title {
-                font-size: 1.1rem;
+            .card {
+                padding: 1rem;
             }
-            
-            .sub-title {
-                font-size: 0.8rem;
+            .card-header {
+                flex-direction: column;
+                gap: 1rem;
+                align-items: flex-start;
             }
-            
-            .nav {
-                top: 110px;
+            .department-grid {
+                grid-template-columns: 1fr;
             }
-            
-            .nav-content {
-                padding: 0 0.25rem;
-            }
-            
-            .nav-item {
-                min-width: 70px;
-            }
-            
-            .nav-item a {
-                padding: 0.5rem 0.25rem;
-                font-size: 0.65rem;
-                gap: 0.125rem;
-            }
-            
-            .nav-notification-text {
-                display: none;
-            }
-            
-            .nav-notification-container {
-                min-width: 50px;
-                padding: 0.5rem 0.25rem;
-            }
-            
-            .stat-number {
-                font-size: 1.8rem;
-            }
-            
-            .stat-label {
-                font-size: 0.8rem;
+            .procedure-section {
+                padding: 1rem;
             }
         }
-        
-        @media (max-width: 360px) {
-            body {
-                padding-top: 170px;
-            }
-            
-            .nav {
-                top: 100px;
-            }
-            
-            .nav-item {
-                min-width: 60px;
-            }
-            
-            .nav-item a {
-                padding: 0.4rem 0.2rem;
-                font-size: 0.6rem;
-                gap: 0.1rem;
-            }
-            
-            .nav-notification-container {
-                min-width: 45px;
-                padding: 0.4rem 0.2rem;
-            }
-            
-            .nav-notification-bell {
-                font-size: 0.9rem;
-            }
-            
-            .nav-notification-badge {
-                width: 14px;
-                height: 14px;
-                font-size: 0.55rem;
-            }
-        }
-        
-        @media (max-width: 768px) and (orientation: landscape) {
-            body {
-                padding-top: 140px;
-            }
-            
-            .header {
-                padding: 0.8rem 1rem;
-            }
-            
-            .nav {
-                top: 80px;
-            }
-            
-            .nav-item a {
-                padding: 0.5rem 0.4rem;
-                font-size: 0.7rem;
-            }
-        }
-        
-        .nav-content {
-            position: relative;
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-        }
-        .nav-content::-webkit-scrollbar {
-            display: none;
-        }
-        
-        .nav-menu {
-            scroll-behavior: smooth;
-        }
-        
-        @media (max-width: 768px) {
-            .nav-item a {
-                -webkit-tap-highlight-color: rgba(230, 0, 18, 0.1);
-                tap-highlight-color: rgba(230, 0, 18, 0.1);
-            }
-            
-            .nav-item a:active {
-                background-color: rgba(230, 0, 18, 0.15);
-                transform: scale(0.98);
-            }
-        }
-        
-        .notification-nav-item {
-            position: relative;
-        }
-        .nav-notification-container {
-            position: relative;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            cursor: pointer;
-            padding: 1rem 1.5rem;
-            border-radius: 0.25rem;
-            transition: all 0.3s ease;
-            color: #6c757d;
-            text-decoration: none;
-        }
-        .nav-notification-container:hover {
-            background-color: rgba(230, 0, 18, 0.05);
-            color: #E60012;
-            text-decoration: none;
-        }
-        .nav-notification-container.nav-notification-empty {
-            opacity: 0.6;
-            cursor: default;
-        }
-        .nav-notification-container.nav-notification-empty:hover {
-            background-color: transparent;
-            color: #6c757d;
-        }
-        .nav-notification-bell {
-            font-size: 1.1rem;
-            transition: all 0.3s ease;
-        }
-        .nav-notification-container:hover .nav-notification-bell {
-            transform: scale(1.1);
-        }
-        .nav-notification-bell.has-notifications {
-            color: #ffc107;
-            animation: navBellRing 2s infinite;
-        }
-        @keyframes navBellRing {
-            0%, 50%, 100% { transform: rotate(0deg); }
-            10%, 30% { transform: rotate(-10deg); }
-            20%, 40% { transform: rotate(10deg); }
-        }
-        .nav-notification-text {
-            font-size: 0.9rem;
-            font-weight: 500;
-        }
-        .nav-notification-badge {
-            background: #dc3545;
-            color: white;
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            font-size: 0.7rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            animation: navPulse 2s infinite;
-            margin-left: auto;
-        }
-        @keyframes navPulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.2); }
-            100% { transform: scale(1); }
-        }
-        .nav-notification-dropdown {
-            position: fixed !important;
-            background: white;
-            border: 1px solid #dee2e6;
-            border-radius: 0.5rem;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-            width: 400px;
-            max-height: 500px;
-            z-index: 1000;
-            display: none;
-            transition: all 0.3s ease;
-            transform: translateY(-10px);
-        }
-        .nav-notification-dropdown.show {
-            display: block;
-            transform: translateY(0);
-            opacity: 1;
-        }
-        .nav-notification-dropdown.expanded {
-            box-shadow: 0 25px 50px rgba(0,0,0,0.25) !important;
-            width: 90vw !important;
-            max-height: 90vh !important;
-            top: 5vh !important;
-            left: 5vw !important;
-            right: 5vw !important;
-            transform: none !important;
-        }
-        .nav-notification-header {
-            padding: 1rem;
-            border-bottom: 1px solid #dee2e6;
-            font-weight: bold;
-            color: #495057;
-            background: #f8f9fa;
-            border-radius: 0.5rem 0.5rem 0 0;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
-        .nav-notification-content {
-            max-height: 350px;
-            overflow-y: auto;
-            overflow-x: hidden;
-            transition: max-height 0.3s ease;
-            scrollbar-width: thin;
-            scrollbar-color: #cbd5e0 #f7fafc;
-            -webkit-overflow-scrolling: touch;
-            scroll-behavior: smooth;
-        }
-        .nav-notification-dropdown.expanded .nav-notification-content {
-            max-height: 75vh;
-        }
-        .nav-notification-content::-webkit-scrollbar {
-            width: 8px;
-        }
-        .nav-notification-content::-webkit-scrollbar-track {
-            background: #f7fafc;
-            border-radius: 4px;
-        }
-        .nav-notification-content::-webkit-scrollbar-thumb {
-            background: #cbd5e0;
-            border-radius: 4px;
-            transition: background 0.3s ease;
-        }
-        .nav-notification-content::-webkit-scrollbar-thumb:hover {
-            background: #a0aec0;
-        }
-        .nav-notification-item {
-            padding: 1rem;
-            border-bottom: 1px solid #f8f9fa;
-            transition: all 0.3s ease;
-            position: relative;
-        }
-        .nav-notification-item:hover {
-            background-color: #f8f9fa;
-        }
-        .nav-notification-item:last-child {
-            border-bottom: none;
-        }
-        .nav-notification-item.read {
-            opacity: 0.6;
-            background-color: #f1f3f4;
-        }
-        .nav-notification-item.unread {
-            background-color: #fff3cd;
-            border-left: 4px solid #ffc107;
-        }
-        .nav-notification-title {
-            font-weight: bold;
-            color: #495057;
-            margin-bottom: 0.25rem;
-        }
-        .nav-notification-risk {
-            color: #6c757d;
-            font-size: 0.9rem;
-            margin-bottom: 0.25rem;
-        }
-        .nav-notification-date {
-            color: #6c757d;
-            font-size: 0.8rem;
-            margin-bottom: 0.5rem;
-        }
-        .nav-notification-actions {
-            margin-top: 0.5rem;
-            display: flex;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-        }
-        .nav-notification-actions .btn {
-            font-size: 0.8rem;
-            padding: 0.25rem 0.5rem;
-        }
-        .nav-notification-footer {
-            padding: 1rem;
-            border-top: 1px solid #dee2e6;
-            background: #f8f9fa;
-            border-radius: 0 0 0.5rem 0.5rem;
-            position: sticky;
-            bottom: 0;
-            z-index: 10;
+
+        @media print {
+            .main-content { margin: 0; }
+            .card { box-shadow: none; }
+            .btn { display: none; }
+            nav { display: none; }
         }
     </style>
 </head>
@@ -1497,7 +1475,7 @@ function getStatusBadgeClass($status) {
             <div class="nav-content">
                 <ul class="nav-menu">
                     <li class="nav-item">
-                        <a href="risk_owner_dashboard.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'risk_owner_dashboard.php' ? 'active' : ''; ?>">
+                        <a href="javascript:void(0)" onclick="showTab('dashboard')" class="<?php echo !isset($_GET['tab']) ? 'active' : ''; ?>">
                             🏠 Dashboard
                         </a>
                     </li>
@@ -1507,12 +1485,12 @@ function getStatusBadgeClass($status) {
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a href="risk_owner_dashboard.php?tab=my-reports" class="<?php echo isset($_GET['tab']) && $_GET['tab'] == 'my-reports' ? 'active' : ''; ?>">
+                        <a href="javascript:void(0)" onclick="showTab('my-reports')" class="<?php echo isset($_GET['tab']) && $_GET['tab'] == 'my-reports' ? 'active' : ''; ?>">
                             👀 My Reports
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a href="risk-procedures.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'risk-procedures.php' ? 'active' : ''; ?>" target="_blank">
+                        <a href="javascript:void(0)" onclick="showTab('procedures')" class="<?php echo isset($_GET['tab']) && $_GET['tab'] == 'procedures' ? 'active' : ''; ?>">
                             📋 Procedures
                         </a>
                     </li>
@@ -1529,16 +1507,16 @@ function getStatusBadgeClass($status) {
                                                 FROM risk_treatments rt
                                                 INNER JOIN risk_incidents ri ON rt.risk_id = ri.id
                                                 LEFT JOIN users owner ON ri.risk_owner_id = owner.id
-                                                WHERE rt.assigned_to = :user_id 
-                                                AND rt.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+                                                WHERE rt.assigned_to = :user_id
+                                                 AND rt.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
                             
                             $assignment_query = "SELECT ri.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
                                                         reporter.full_name as reporter_name, 'assignment' as notification_type,
                                                         ri.updated_at as notification_date
                                                  FROM risk_incidents ri
                                                  LEFT JOIN users reporter ON ri.reported_by = reporter.id
-                                                 WHERE ri.risk_owner_id = :user_id 
-                                                 AND ri.updated_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+                                                 WHERE ri.risk_owner_id = :user_id
+                                                  AND ri.updated_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
                             
                             $update_query = "SELECT ri.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
                                                     updater.full_name as updater_name, 'update' as notification_type,
@@ -1586,7 +1564,7 @@ function getStatusBadgeClass($status) {
                                 <div class="nav-notification-header">
                                     <div class="flex justify-between items-center">
                                         <span><i class="fas fa-bell"></i> All Notifications</span>
-                                        <button onclick="markAllNavAsRead()" class="btn btn-sm btn-outline">Mark All Read</button>
+                                        <button onclick="clearAllNotifications()" class="btn btn-sm btn-outline">Clear All</button>
                                     </div>
                                 </div>
                                 <div class="nav-notification-content" id="navNotificationContent">
@@ -1605,7 +1583,7 @@ function getStatusBadgeClass($status) {
                                             <div class="nav-notification-actions">
                                                 <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Risk</a>
                                                 <a href="advanced-risk-management.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-warning">Manage Treatment</a>
-                                                <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary">Mark Read</button>
+                                                <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary mark-read-btn">Mark Read</button>
                                             </div>
                                         <?php elseif ($notification['notification_type'] == 'assignment'): ?>
                                             <div class="nav-notification-title">
@@ -1620,7 +1598,7 @@ function getStatusBadgeClass($status) {
                                             <div class="nav-notification-actions">
                                                 <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Details</a>
                                                 <a href="risk_assessment.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-success">Start Assessment</a>
-                                                <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary">Mark Read</button>
+                                                <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary mark-read-btn">Mark Read</button>
                                             </div>
                                         <?php elseif ($notification['notification_type'] == 'update'): ?>
                                             <div class="nav-notification-title">
@@ -1634,19 +1612,11 @@ function getStatusBadgeClass($status) {
                                             </div>
                                             <div class="nav-notification-actions">
                                                 <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Changes</a>
-                                                <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary">Mark Read</button>
+                                                <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary mark-read-btn">Mark Read</button>
                                             </div>
                                         <?php endif; ?>
                                     </div>
                                     <?php endforeach; ?>
-                                </div>
-                                <div class="nav-notification-footer">
-                                    <div class="flex justify-between items-center">
-                                        <button onclick="expandNavNotifications()" class="btn btn-sm btn-primary" id="navExpandButton">
-                                            <i class="fas fa-expand-arrows-alt"></i> Expand View
-                                        </button>
-                                        <a href="notifications.php" class="btn btn-sm btn-outline">View All</a>
-                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1655,8 +1625,8 @@ function getStatusBadgeClass($status) {
                             <i class="fas fa-bell nav-notification-bell"></i>
                             <span class="nav-notification-text">Notifications</span>
                         </div>
-                        <?php 
-                            endif;
+                        <?php
+                             endif;
                         }
                         ?>
                     </li>
@@ -1694,11 +1664,11 @@ function getStatusBadgeClass($status) {
                         <div class="stat-description">High/Critical risks assigned to you</div>
                     </div>
                     <div class="stat-card" style="transition: transform 0.3s;">
-                        <span class="stat-number"><?php 
-                        // Calculate successfully managed risks (completed status)
-                        $managed_query = "SELECT COUNT(*) as total FROM risk_incidents 
-                                         WHERE risk_owner_id = :user_id 
-                                         AND risk_status = 'completed'";
+                        <span class="stat-number"><?php
+                         // Calculate successfully managed risks (completed status)
+                        $managed_query = "SELECT COUNT(*) as total FROM risk_incidents
+                                          WHERE risk_owner_id = :user_id
+                                          AND risk_status = 'completed'";
                         $managed_stmt = $db->prepare($managed_query);
                         $managed_stmt->bindParam(':user_id', $_SESSION['user_id']);
                         $managed_stmt->execute();
@@ -2075,8 +2045,8 @@ function getStatusBadgeClass($status) {
                                             </span>
                                         </td>
                                         <td style="padding: 1rem;">
-                                            <?php 
-                                            // Use actual assessed values for risk level calculation
+                                            <?php
+                                             // Use actual assessed values for risk level calculation
                                             $probability = $risk['probability'] ?? $risk['inherent_likelihood'] ?? $risk['residual_likelihood'] ?? 0;
                                             $impact = $risk['impact'] ?? $risk['inherent_consequence'] ?? $risk['residual_consequence'] ?? 0;
                                             
@@ -2110,8 +2080,8 @@ function getStatusBadgeClass($status) {
                                             </span>
                                         </td>
                                         <td style="padding: 1rem;">
-                                            <?php 
-                                            $status = $risk['risk_status'] ?? 'pending';
+                                            <?php
+                                             $status = $risk['risk_status'] ?? 'pending';
                                             switch($status) {
                                                 case 'pending':
                                                     $statusText = 'Open';
@@ -2150,8 +2120,8 @@ function getStatusBadgeClass($status) {
                                             <?php echo date('M j, Y', strtotime($risk['created_at'])); ?>
                                         </td>
                                         <td style="padding: 1rem; color: #666; font-size: 0.9rem;">
-                                            <?php 
-                                            if ($risk['updated_at'] != $risk['created_at']) {
+                                            <?php
+                                             if ($risk['updated_at'] != $risk['created_at']) {
                                                 echo date('M j, Y', strtotime($risk['updated_at']));
                                             } else {
                                                 echo 'Not updated';
@@ -2159,8 +2129,8 @@ function getStatusBadgeClass($status) {
                                             ?>
                                         </td>
                                         <td style="padding: 1rem;">
-                                            <a href="view_risk.php?id=<?php echo $risk['id']; ?>" 
-                                               style="background: #E60012; color: white; padding: 0.5rem 1rem; border-radius: 4px; text-decoration: none; font-size: 0.9rem; font-weight: 500; display: inline-block; text-align: center; transition: all 0.3s ease;"
+                                            <a href="view_risk.php?id=<?php echo $risk['id']; ?>"
+                                                style="background: #E60012; color: white; padding: 0.5rem 1rem; border-radius: 4px; text-decoration: none; font-size: 0.9rem; font-weight: 500; display: inline-block; text-align: center; transition: all 0.3s ease;"
                                                onmouseover="this.style.background='#B8000E';"
                                                onmouseout="this.style.background='#E60012';">
                                                 View
@@ -2174,281 +2144,653 @@ function getStatusBadgeClass($status) {
                     <?php endif; ?>
                 </div>
             </div>
-            
-            <!-- Assignments Tab (Notifications) -->
-            <div id="assignments-tab" class="tab-content">
+
+            <!-- Procedures Tab -->
+            <div id="procedures-tab" class="tab-content">
                 <div class="card">
                     <div class="card-header">
-                        <h2 class="card-title">Notifications</h2>
-                        <span class="badge badge-secondary">Coming Soon</span>
+                        <h1 class="card-title">Risk Reporting Procedures</h1>
+                        <div>
+                            <button onclick="window.print()" class="btn btn-secondary">
+                                <i class="fas fa-print"></i> Print Procedures
+                            </button>
+                        </div>
                     </div>
-                    <div class="alert-info">
-                        <p><strong>Notifications feature is under development.</strong></p>
-                        <p>This section will show system notifications, assignment alerts, and important updates.</p>
+                    <div class="card-body">
+                        
+                        <!-- Table of Contents -->
+                        <div class="toc">
+                            <h3><i class="fas fa-list"></i> Table of Contents</h3>
+                            <ul>
+                                <li><a href="javascript:void(0)" onclick="scrollToProcedureSection('overview')">1. Overview</a></li>
+                                <li><a href="javascript:void(0)" onclick="scrollToProcedureSection('auto-assignment')">2. Automatic Assignment System</a></li>
+                                <li><a href="javascript:void(0)" onclick="scrollToProcedureSection('departments')">3. Department Structure & Responsibilities</a></li>
+                                <li><a href="javascript:void(0)" onclick="scrollToProcedureSection('identification')">4. Risk Identification</a></li>
+                                <li><a href="javascript:void(0)" onclick="scrollToProcedureSection('assessment')">5. Risk Assessment</a></li>
+                                <li><a href="javascript:void(0)" onclick="scrollToProcedureSection('treatment')">6. Risk Treatment</a></li>
+                                <li><a href="javascript:void(0)" onclick="scrollToProcedureSection('monitoring')">7. Monitoring & Review</a></li>
+                                <li><a href="javascript:void(0)" onclick="scrollToProcedureSection('roles')">8. Roles & Responsibilities</a></li>
+                                <li><a href="javascript:void(0)" onclick="scrollToProcedureSection('matrix')">9. Risk Assessment Matrix</a></li>
+                                <li><a href="javascript:void(0)" onclick="scrollToProcedureSection('definitions')">10. Field Definitions</a></li>
+                            </ul>
+                        </div>
+
+                        <!-- 1. Overview -->
+                        <div id="overview" class="procedure-section">
+                            <div class="procedure-title"><i class="fas fa-info-circle"></i> 1. OVERVIEW</div>
+                            <p>This document outlines the procedures for reporting, assessing, and managing risks within the Airtel Risk Management System. All staff members are required to follow these procedures when identifying and reporting risks.</p>
+                            
+                            <h4>Purpose</h4>
+                            <ul>
+                                <li>Establish a systematic approach to risk identification and reporting</li>
+                                <li>Ensure consistent risk assessment across all departments</li>
+                                <li>Provide clear guidelines for risk treatment and monitoring</li>
+                                <li>Enable effective risk communication to management and the Board</li>
+                                <li>Implement automated assignment based on department structure</li>
+                            </ul>
+                            
+                            <h4>Scope</h4>
+                            <p>These procedures apply to all risks that may impact operations, including but not limited to:</p>
+                            <ul>
+                                <li>Strategic risks</li>
+                                <li>Operational risks</li>
+                                <li>Financial risks</li>
+                                <li>Compliance and regulatory risks</li>
+                                <li>Technology and cybersecurity risks</li>
+                                <li>Reputational risks</li>
+                                <li>Human resources risks</li>
+                                <li>Environmental risks</li>
+                            </ul>
+                        </div>
+
+                        <!-- 2. Automatic Assignment System -->
+                        <div id="auto-assignment" class="procedure-section">
+                            <div class="procedure-title"><i class="fas fa-robot"></i> 2. AUTOMATIC ASSIGNMENT SYSTEM</div>
+                            
+                            <h4>2.1 How Auto-Assignment Works</h4>
+                            <p>Our system automatically assigns risks to appropriate risk owners based on the department selected during risk reporting. This ensures immediate accountability and faster response times.</p>
+                            
+                            <div class="auto-assignment-flow">
+                                <h5><i class="fas fa-cogs"></i> Assignment Flow</h5>
+                                <div class="flow-step">
+                                    <i class="fas fa-user"></i>
+                                    <span>User reports a risk and selects affected department</span>
+                                </div>
+                                <div class="flow-step">
+                                    <i class="fas fa-search"></i>
+                                    <span>System identifies department head/risk owner</span>
+                                </div>
+                                <div class="flow-step">
+                                    <i class="fas fa-bell"></i>
+                                    <span>Automatic notification sent to assigned risk owner</span>
+                                </div>
+                                <div class="flow-step">
+                                    <i class="fas fa-clipboard-check"></i>
+                                    <span>Risk owner receives dashboard notification and email alert</span>
+                                </div>
+                                <div class="flow-step">
+                                    <i class="fas fa-clock"></i>
+                                    <span>24-hour response time expectation begins</span>
+                                </div>
+                            </div>
+                            
+                            <h4>2.2 Assignment Rules</h4>
+                            <ul>
+                                <li><strong>Primary Assignment:</strong> Based on the department most affected by the risk</li>
+                                <li><strong>Secondary Assignment:</strong> Cross-functional risks may be assigned to multiple departments</li>
+                                <li><strong>Escalation:</strong> High and critical risks are automatically escalated to senior management</li>
+                                <li><strong>Backup Assignment:</strong> If primary risk owner is unavailable, assignment goes to deputy</li>
+                            </ul>
+                            
+                            <h4>2.3 Notification System</h4>
+                            <ul>
+                                <li>Immediate dashboard notification</li>
+                                <li>Email notification within 5 minutes</li>
+                                <li>SMS notification for critical risks</li>
+                                <li>Daily digest for pending actions</li>
+                            </ul>
+                        </div>
+
+                        <!-- 3. Department Structure -->
+                        <div id="departments" class="procedure-section">
+                            <div class="procedure-title"><i class="fas fa-building"></i> 3. DEPARTMENT STRUCTURE & RESPONSIBILITIES</div>
+                            
+                            <h4>3.1 Department Risk Owners</h4>
+                            <p>Each department has designated risk owners responsible for managing risks within their area:</p>
+                            
+                            <div class="department-grid">
+                                <div class="department-card">
+                                    <div class="department-title"><i class="fas fa-chart-line"></i> Finance & Accounting</div>
+                                    <ul>
+                                        <li>Financial reporting risks</li>
+                                        <li>Budget and cash flow risks</li>
+                                        <li>Audit and compliance risks</li>
+                                        <li>Investment and credit risks</li>
+                                    </ul>
+                                </div>
+                                
+                                <div class="department-card">
+                                    <div class="department-title"><i class="fas fa-cogs"></i> Operations</div>
+                                    <ul>
+                                        <li>Service delivery risks</li>
+                                        <li>Supply chain risks</li>
+                                        <li>Quality control risks</li>
+                                        <li>Process efficiency risks</li>
+                                    </ul>
+                                </div>
+                                
+                                <div class="department-card">
+                                    <div class="department-title"><i class="fas fa-laptop-code"></i> Information Technology</div>
+                                    <ul>
+                                        <li>Cybersecurity risks</li>
+                                        <li>System availability risks</li>
+                                        <li>Data integrity risks</li>
+                                        <li>Technology upgrade risks</li>
+                                    </ul>
+                                </div>
+                                
+                                <div class="department-card">
+                                    <div class="department-title"><i class="fas fa-users"></i> Human Resources</div>
+                                    <ul>
+                                        <li>Talent retention risks</li>
+                                        <li>Compliance and legal risks</li>
+                                        <li>Training and development risks</li>
+                                        <li>Employee safety risks</li>
+                                    </ul>
+                                </div>
+                                
+                                <div class="department-card">
+                                    <div class="department-title"><i class="fas fa-bullhorn"></i> Marketing & Sales</div>
+                                    <ul>
+                                        <li>Brand reputation risks</li>
+                                        <li>Customer satisfaction risks</li>
+                                        <li>Market competition risks</li>
+                                        <li>Revenue generation risks</li>
+                                    </ul>
+                                </div>
+                                
+                                <div class="department-card">
+                                    <div class="department-title"><i class="fas fa-balance-scale"></i> Legal & Compliance</div>
+                                    <ul>
+                                        <li>Regulatory compliance risks</li>
+                                        <li>Legal liability risks</li>
+                                        <li>Contract management risks</li>
+                                        <li>Intellectual property risks</li>
+                                    </ul>
+                                </div>
+                                
+                                <div class="department-card">
+                                    <div class="department-title"><i class="fas fa-handshake"></i> Customer Service</div>
+                                    <ul>
+                                        <li>Service quality risks</li>
+                                        <li>Customer complaint risks</li>
+                                        <li>Response time risks</li>
+                                        <li>Customer data risks</li>
+                                    </ul>
+                                </div>
+                                
+                                <div class="department-card">
+                                    <div class="department-title"><i class="fas fa-network-wired"></i> Network & Infrastructure</div>
+                                    <ul>
+                                        <li>Network outage risks</li>
+                                        <li>Infrastructure failure risks</li>
+                                        <li>Capacity planning risks</li>
+                                        <li>Maintenance risks</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            
+                            <h4>3.2 Cross-Departmental Risks</h4>
+                            <p>Some risks affect multiple departments and require coordinated response:</p>
+                            <ul>
+                                <li><strong>Business Continuity:</strong> All departments involved</li>
+                                <li><strong>Data Breach:</strong> IT, Legal, Customer Service, Marketing</li>
+                                <li><strong>Regulatory Changes:</strong> Legal, Finance, Operations</li>
+                                <li><strong>Major System Outage:</strong> IT, Operations, Customer Service</li>
+                            </ul>
+                        </div>
+
+                        <!-- 4. Risk Identification -->
+                        <div id="identification" class="procedure-section">
+                            <div class="procedure-title"><i class="fas fa-search"></i> 4. RISK IDENTIFICATION</div>
+                            
+                            <h4>4.1 When to Report a Risk</h4>
+                            <p>Risks should be reported when:</p>
+                            <ul>
+                                <li>A new risk is identified that could impact business objectives</li>
+                                <li>An existing risk has changed in nature or severity</li>
+                                <li>A risk event has occurred or is imminent</li>
+                                <li>Regular risk reviews identify emerging risks</li>
+                                <li>Department-specific risk indicators are triggered</li>
+                            </ul>
+                            
+                            <h4>4.2 Risk Identification Process</h4>
+                            <ol>
+                                <li><strong>Identify the Risk:</strong> Clearly describe what could go wrong</li>
+                                <li><strong>Select Department:</strong> Choose the primary affected department (triggers auto-assignment)</li>
+                                <li><strong>Determine Risk Type:</strong> Classify as "Existing" or "New" risk</li>
+                                <li><strong>Board Reporting:</strong> Determine if the risk requires Board attention</li>
+                                <li><strong>Document Details:</strong> Complete all required fields in the risk register</li>
+                            </ol>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Risk Name</div>
+                                <div class="field-description">A clear, concise title that describes the risk (e.g., "Customer Data Breach", "Regulatory Non-Compliance")</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Risk Description</div>
+                                <div class="field-description">Detailed explanation of the risk, including what could happen and potential consequences</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Cause of Risk</div>
+                                <div class="field-description">Root causes or factors that could trigger the risk event</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Department</div>
+                                <div class="field-description">Primary department affected by the risk - this determines automatic assignment to the appropriate risk owner</div>
+                            </div>
+                        </div>
+
+                        <!-- 5. Risk Assessment -->
+                        <div id="assessment" class="procedure-section">
+                            <div class="procedure-title"><i class="fas fa-calculator"></i> 5. RISK ASSESSMENT</div>
+                            
+                            <h4>5.1 Two-Stage Assessment</h4>
+                            <p>All risks must be assessed at two levels:</p>
+                            
+                            <h5>Inherent Risk (Gross Risk)</h5>
+                            <p>The risk level before considering any controls or mitigation measures currently in place.</p>
+                            
+                            <h5>Residual Risk (Net Risk)</h5>
+                            <p>The risk level after considering existing controls and mitigation measures.</p>
+                            
+                            <h4>5.2 Assessment Criteria</h4>
+                            
+                            <h5>Likelihood Scale (1-5)</h5>
+                            <ul>
+                                <li><strong>1 - Very Low:</strong> Rare occurrence, less than 5% chance</li>
+                                <li><strong>2 - Low:</strong> Unlikely to occur, 5-25% chance</li>
+                                <li><strong>3 - Medium:</strong> Possible occurrence, 25-50% chance</li>
+                                <li><strong>4 - High:</strong> Likely to occur, 50-75% chance</li>
+                                <li><strong>5 - Very High:</strong> Almost certain, more than 75% chance</li>
+                            </ul>
+                            
+                            <h5>Consequence Scale (1-5)</h5>
+                            <ul>
+                                <li><strong>1 - Very Low:</strong> Minimal impact on operations, reputation, or finances</li>
+                                <li><strong>2 - Low:</strong> Minor impact, easily manageable</li>
+                                <li><strong>3 - Medium:</strong> Moderate impact requiring management attention</li>
+                                <li><strong>4 - High:</strong> Significant impact affecting business operations</li>
+                                <li><strong>5 - Very High:</strong> Severe impact threatening business continuity</li>
+                            </ul>
+                            
+                            <h4>5.3 Risk Rating Calculation</h4>
+                            <p>Risk Rating = Likelihood × Consequence</p>
+                            <p>This produces a score from 1-25, categorized as:</p>
+                            <ul>
+                                <li><strong>Low Risk:</strong> 1-3 (Green)</li>
+                                <li><strong>Medium Risk:</strong> 4-8 (Yellow)</li>
+                                <li><strong>High Risk:</strong> 9-14 (Orange)</li>
+                                <li><strong>Critical Risk:</strong> 15-25 (Red)</li>
+                            </ul>
+                            
+                            <h4>5.4 Department-Specific Assessment Guidelines</h4>
+                            <p>Each department may have specific criteria for assessing risks within their domain. Risk owners should consider department-specific impact factors when conducting assessments.</p>
+                        </div>
+
+                        <!-- 6. Risk Treatment -->
+                        <div id="treatment" class="procedure-section">
+                            <div class="procedure-title"><i class="fas fa-shield-alt"></i> 6. RISK TREATMENT</div>
+                            
+                            <h4>6.1 Treatment Strategies</h4>
+                            <ul>
+                                <li><strong>Accept:</strong> Acknowledge the risk and take no further action</li>
+                                <li><strong>Avoid:</strong> Eliminate the risk by changing processes or activities</li>
+                                <li><strong>Mitigate:</strong> Reduce likelihood or consequence through controls</li>
+                                <li><strong>Transfer:</strong> Share or transfer risk through insurance or contracts</li>
+                            </ul>
+                            
+                            <h4>6.2 Required Documentation</h4>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Treatment Action</div>
+                                <div class="field-description">Specific actions to be taken to address the risk (Accept/Avoid/Mitigate/Transfer)</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Controls / Action Plan</div>
+                                <div class="field-description">Detailed description of controls to be implemented or actions to be taken, including timelines and resources required</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Planned Completion Date</div>
+                                <div class="field-description">Target date for completing risk treatment actions</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Risk Owner</div>
+                                <div class="field-description">Individual responsible for managing the risk and implementing treatment actions (automatically assigned based on department)</div>
+                            </div>
+                        </div>
+
+                        <!-- 7. Monitoring & Review -->
+                        <div id="monitoring" class="procedure-section">
+                            <div class="procedure-title"><i class="fas fa-chart-bar"></i> 7. MONITORING & REVIEW</div>
+                            
+                            <h4>7.1 Ongoing Monitoring</h4>
+                            <p>All risks must be regularly monitored and reviewed:</p>
+                            <ul>
+                                <li><strong>Critical Risks:</strong> Weekly review</li>
+                                <li><strong>High Risks:</strong> Monthly review</li>
+                                <li><strong>Medium Risks:</strong> Quarterly review</li>
+                                <li><strong>Low Risks:</strong> Annual review</li>
+                            </ul>
+                            
+                            <h4>7.2 Status Tracking</h4>
+                            <ul>
+                                <li><strong>Open:</strong> Risk identified, treatment not yet started</li>
+                                <li><strong>In Progress:</strong> Treatment actions are being implemented</li>
+                                <li><strong>Completed:</strong> Treatment actions completed, awaiting verification</li>
+                                <li><strong>Overdue:</strong> Treatment actions past planned completion date</li>
+                                <li><strong>Closed:</strong> Risk adequately treated or no longer relevant</li>
+                            </ul>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Progress Update / Report</div>
+                                <div class="field-description">Regular updates on the status of risk treatment actions, including any changes to risk levels or new developments</div>
+                            </div>
+                            
+                            <h4>7.3 Automated Reminders</h4>
+                            <p>The system automatically sends reminders to risk owners:</p>
+                            <ul>
+                                <li>7 days before planned completion date</li>
+                                <li>On the planned completion date</li>
+                                <li>Weekly reminders for overdue items</li>
+                                <li>Monthly summary reports to department heads</li>
+                            </ul>
+                        </div>
+
+                        <!-- 8. Roles & Responsibilities -->
+                        <div id="roles" class="procedure-section">
+                            <div class="procedure-title"><i class="fas fa-users-cog"></i> 8. ROLES & RESPONSIBILITIES</div>
+                            
+                            <h4>All Staff</h4>
+                            <ul>
+                                <li>Identify and report risks within their area of responsibility</li>
+                                <li>Select appropriate department when reporting risks</li>
+                                <li>Implement assigned risk treatment actions</li>
+                                <li>Provide updates on risk status when requested</li>
+                            </ul>
+                            
+                            <h4>Risk Owners (Department Heads)</h4>
+                            <ul>
+                                <li>Take ownership of automatically assigned risks</li>
+                                <li>Respond to risk assignments within 24 hours</li>
+                                <li>Develop and implement risk treatment plans</li>
+                                <li>Provide regular updates on risk status</li>
+                                <li>Escalate significant changes in risk levels</li>
+                                <li>Manage department-specific risk registers</li>
+                            </ul>
+                            
+                            <h4>Deputy Risk Owners</h4>
+                            <ul>
+                                <li>Act as backup when primary risk owner is unavailable</li>
+                                <li>Support risk assessment and treatment activities</li>
+                                <li>Maintain awareness of department risk profile</li>
+                            </ul>
+                            
+                            <h4>Compliance Team</h4>
+                            <ul>
+                                <li>Maintain the central risk register</li>
+                                <li>Monitor auto-assignment system performance</li>
+                                <li>Facilitate risk assessment processes</li>
+                                <li>Prepare risk reports for management</li>
+                                <li>Monitor compliance with risk procedures</li>
+                                <li>Manage system notifications and escalations</li>
+                            </ul>
+                            
+                            <h4>Management</h4>
+                            <ul>
+                                <li>Review and approve risk treatment strategies</li>
+                                <li>Allocate resources for risk management</li>
+                                <li>Escalate significant risks to the Board</li>
+                                <li>Ensure risk procedures are followed</li>
+                                <li>Review department risk performance</li>
+                            </ul>
+                        </div>
+
+                        <!-- 9. Risk Assessment Matrix -->
+                        <div id="matrix" class="procedure-section">
+                            <div class="procedure-title"><i class="fas fa-table"></i> 9. RISK ASSESSMENT MATRIX</div>
+                            
+                            <table class="risk-matrix-table">
+                                <thead>
+                                    <tr>
+                                        <th rowspan="2">Likelihood</th>
+                                        <th colspan="5">Consequence</th>
+                                    </tr>
+                                    <tr>
+                                        <th>1 - Very Low</th>
+                                        <th>2 - Low</th>
+                                        <th>3 - Medium</th>
+                                        <th>4 - High</th>
+                                        <th>5 - Very High</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <th>5 - Very High</th>
+                                        <td class="matrix-2">5</td>
+                                        <td class="matrix-3">10</td>
+                                        <td class="matrix-4">15</td>
+                                        <td class="matrix-5">20</td>
+                                        <td class="matrix-5">25</td>
+                                    </tr>
+                                    <tr>
+                                        <th>4 - High</th>
+                                        <td class="matrix-1">4</td>
+                                        <td class="matrix-2">8</td>
+                                        <td class="matrix-3">12</td>
+                                        <td class="matrix-4">16</td>
+                                        <td class="matrix-5">20</td>
+                                    </tr>
+                                    <tr>
+                                        <th>3 - Medium</th>
+                                        <td class="matrix-1">3</td>
+                                        <td class="matrix-2">6</td>
+                                        <td class="matrix-3">9</td>
+                                        <td class="matrix-3">12</td>
+                                        <td class="matrix-4">15</td>
+                                    </tr>
+                                    <tr>
+                                        <th>2 - Low</th>
+                                        <td class="matrix-1">2</td>
+                                        <td class="matrix-1">4</td>
+                                        <td class="matrix-2">6</td>
+                                        <td class="matrix-2">8</td>
+                                        <td class="matrix-3">10</td>
+                                    </tr>
+                                    <tr>
+                                        <th>1 - Very Low</th>
+                                        <td class="matrix-1">1</td>
+                                        <td class="matrix-1">2</td>
+                                        <td class="matrix-1">3</td>
+                                        <td class="matrix-1">4</td>
+                                        <td class="matrix-2">5</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                            
+                            <div style="margin-top: 1rem;">
+                                <p><strong>Risk Level Legend:</strong></p>
+                                <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                                    <span class="matrix-1" style="padding: 0.25rem 0.5rem; border-radius: 0.25rem;">Low (1-3)</span>
+                                    <span class="matrix-2" style="padding: 0.25rem 0.5rem; border-radius: 0.25rem;">Medium (4-8)</span>
+                                    <span class="matrix-3" style="padding: 0.25rem 0.5rem; border-radius: 0.25rem;">High (9-14)</span>
+                                    <span class="matrix-5" style="padding: 0.25rem 0.5rem; border-radius: 0.25rem;">Critical (15-25)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 10. Field Definitions -->
+                        <div id="definitions" class="procedure-section">
+                            <div class="procedure-title"><i class="fas fa-book"></i> 10. FIELD DEFINITIONS</div>
+                            
+                            <h4>Risk Information Fields</h4>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Risk Name</div>
+                                <div class="field-description">A clear, concise title that describes the risk. Should be specific enough to distinguish from other risks but brief enough for easy reference.</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Risk Description</div>
+                                <div class="field-description">Detailed explanation of the risk, including what could happen, when it might occur, and why it matters to the organization.</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Cause of Risk</div>
+                                <div class="field-description">The underlying factors, conditions, or events that could trigger the risk. Understanding causes helps in developing effective treatments.</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Risk Category</div>
+                                <div class="field-description">Classification of the risk type (Strategic, Operational, Financial, Compliance, Technology, Reputational, HR, Environmental).</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Department</div>
+                                <div class="field-description">The primary department affected by or responsible for managing the risk. This field triggers automatic assignment to the appropriate risk owner.</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Existing or New</div>
+                                <div class="field-description">Indicates whether this is a new risk being reported for the first time, or an existing risk that has changed or needs updating.</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">To be Reported to Board</div>
+                                <div class="field-description">Indicates whether this risk is significant enough to require Board attention and should be included in Board risk reports.</div>
+                            </div>
+                            
+                            <h4>Assessment Fields</h4>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Inherent Likelihood</div>
+                                <div class="field-description">The probability of the risk occurring without considering any existing controls or mitigation measures (scale 1-5).</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Inherent Consequence</div>
+                                <div class="field-description">The potential impact if the risk occurs without considering any existing controls or mitigation measures (scale 1-5).</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Residual Likelihood</div>
+                                <div class="field-description">The probability of the risk occurring after considering existing controls and mitigation measures (scale 1-5).</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Residual Consequence</div>
+                                <div class="field-description">The potential impact if the risk occurs after considering existing controls and mitigation measures (scale 1-5).</div>
+                            </div>
+                            
+                            <h4>Treatment Fields</h4>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Treatment Action</div>
+                                <div class="field-description">The chosen strategy for addressing the risk: Accept (take no action), Avoid (eliminate the risk), Mitigate (reduce likelihood/impact), or Transfer (share/transfer the risk).</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Controls / Action Plan</div>
+                                <div class="field-description">Detailed description of specific actions, controls, or measures to be implemented to treat the risk, including timelines and resource requirements.</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Planned Completion Date</div>
+                                <div class="field-description">The target date by which risk treatment actions should be completed. Used for tracking and automated reminders.</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Risk Owner</div>
+                                <div class="field-description">The individual responsible for managing the risk an implementing treatment actions. Automatically assigned based on the selected department.</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Progress Update / Report</div>
+                                <div class="field-description">Regular updates on the status of risk treatment implementation, including progress made, obstacles encountered, and any changes to the risk profile.</div>
+                            </div>
+                            
+                            <h4>Status Fields</h4>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Risk Status</div>
+                                <div class="field-description">Current status of risk management: Open (identified, not yet addressed), In Progress (treatment underway), Completed (treatment finished), Overdue (past planned completion), Closed (adequately managed).</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Created At</div>
+                                <div class="field-description">Date and time when the risk was first reported in the system.</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Updated At</div>
+                                <div class="field-description">Date and time of the most recent update to the risk record.</div>
+                            </div>
+                            
+                            <div class="field-definition">
+                                <div class="field-name">Reported By</div>
+                                <div class="field-description">The individual who initially identified and reported the risk to the system.</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </main>
     </div>
-
-    <!-- Risk Classification Modal -->
-    <div id="classificationModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">Risk Classification</h3>
-                <button class="close" onclick="closeModal('classificationModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <form method="POST">
-                    <input type="hidden" id="classification_risk_id" name="risk_id">
-                    
-                    <div class="classification-section">
-                        <h4>Risk Owner Decision</h4>
-                        <p style="margin-bottom: 1rem; color: #666;">As the Risk Owner, you need to classify this risk and decide if it should be reported to the board.</p>
-                        
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="class_existing_or_new">Risk Type</label>
-                                <select id="class_existing_or_new" name="existing_or_new" required>
-                                    <option value="New">New Risk</option>
-                                    <option value="Existing">Existing Risk</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="class_to_be_reported_to_board">Report to Board</label>
-                                <select id="class_to_be_reported_to_board" name="to_be_reported_to_board" required>
-                                    <option value="No">No</option>
-                                    <option value="Yes">Yes</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <button type="submit" name="update_risk_type" class="btn">Update Classification</button>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- Risk Assessment Modal -->
-    <div id="assessmentModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">Risk Assessment</h3>
-                <button class="close" onclick="closeModal('assessmentModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <form method="POST">
-                    <input type="hidden" id="assessment_risk_id" name="risk_id">
-                    
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="probability">Probability (1-5)</label>
-                            <select id="probability" name="probability" required>
-                                <option value="1">1 - Very Low</option>
-                                <option value="2">2 - Low</option>
-                                <option value="3">3 - Medium</option>
-                                <option value="4">4 - High</option>
-                                <option value="5">5 - Very High</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="impact">Impact (1-5)</label>
-                            <select id="impact" name="impact" required>
-                                <option value="1">1 - Minimal</option>
-                                <option value="2">2 - Minor</option>
-                                <option value="3">3 - Moderate</option>
-                                <option value="4">4 - Major</option>
-                                <option value="5">5 - Catastrophic</option>
-                            </select>
-                        </div>
-                    </div>
-                    
-                    <button type="submit" name="update_assessment" class="btn">Update Assessment</button>
-                </form>
-            </div>
-        </div>
-    </div>
-
+    
     <script>
-        // Risk Category Chart (NEW)
-        const categoryData = <?php echo json_encode($risk_by_category); ?>;
-        const categoryCtx = document.getElementById('categoryChart').getContext('2d');
-        if (categoryData.length > 0) {
-            const categoryColors = {
-                'Strategic Risk': '#6f42c1',
-                'Operational Risk': '#dc3545',
-                'Financial Risk': '#28a745',
-                'Compliance Risk': '#ffc107',
-                'Technology Risk': '#007bff',
-                'Reputational Risk': '#fd7e14',
-                'Human Resources Risk': '#20c997',
-                'Environmental Risk': '#6c757d'
-            };
-            new Chart(categoryCtx, {
-                type: 'doughnut',
-                data: {
-                    labels: categoryData.map(item => item.risk_category || 'Uncategorized'),
-                    datasets: [{
-                        data: categoryData.map(item => item.count),
-                        backgroundColor: categoryData.map(item => 
-                            categoryColors[item.risk_category] || '#6c757d'
-                        ),
-                        borderWidth: 2,
-                        borderColor: '#fff'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: {
-                                padding: 15,
-                                usePointStyle: true
-                            }
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    const label = context.label || '';
-                                    const value = context.parsed;
-                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                    const percentage = ((value / total) * 100).toFixed(1);
-                                    return `${label}: ${value} risks (${percentage}%)`;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        } else {
-            categoryCtx.canvas.parentNode.innerHTML = '<p style="text-align: center; color: #666; padding: 2rem;">No risk categories data available</p>';
-        }
-        
-        // Risk Level Chart
-        const riskLevels = <?php echo json_encode($risk_levels); ?>;
-        const levelCtx = document.getElementById('levelChart').getContext('2d');
-        
-        new Chart(levelCtx, {
-            type: 'bar',
-            data: {
-                labels: ['Low (1-3)', 'Medium (4-8)', 'High (9-14)', 'Critical (15+)'],
-                datasets: [{
-                    label: 'Number of Risks',
-                    data: [
-                        parseInt(riskLevels.low_risks) || 0,
-                        parseInt(riskLevels.medium_risks) || 0,
-                        parseInt(riskLevels.high_risks) || 0,
-                        parseInt(riskLevels.critical_risks) || 0
-                    ],
-                    backgroundColor: [
-                        '#28a745',
-                        '#ffc107',
-                        '#fd7e14',
-                        '#dc3545'
-                    ],
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            stepSize: 1
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: false
-                    }
-                }
-            }
-        });
-        
+        // Tab functionality
         function showTab(tabName) {
-            // Hide all tabs
-            document.querySelectorAll('.tab-content').forEach(tab => {
+            // Hide all tab contents
+            const tabContents = document.querySelectorAll('.tab-content');
+            tabContents.forEach(tab => {
                 tab.classList.remove('active');
             });
             
-            // Remove active class from all buttons
-            document.querySelectorAll('.nav-tabs button').forEach(btn => {
-                btn.classList.remove('active');
+            // Remove active class from all nav links
+            const navLinks = document.querySelectorAll('.nav-item a');
+            navLinks.forEach(link => {
+                link.classList.remove('active');
             });
             
             // Show selected tab
-            document.getElementById(tabName + '-tab').classList.add('active');
-            if (event.target) {
-                event.target.classList.add('active');
-            }
-        }
-        
-        function openClassificationModal(riskId) {
-            document.getElementById('classification_risk_id').value = riskId;
-            document.getElementById('classificationModal').classList.add('show');
-        }
-        
-        function openAssessmentModal(riskId) {
-            document.getElementById('assessment_risk_id').value = riskId;
-            document.getElementById('assessmentModal').classList.add('show');
-        }
-        
-        function closeModal(modalId) {
-            document.getElementById(modalId).classList.remove('show');
-        }
-        
-        // Close modal when clicking outside
-        window.onclick = function(event) {
-            const modals = document.querySelectorAll('.modal');
-            modals.forEach(modal => {
-                if (event.target === modal) {
-                    modal.classList.remove('show');
-                }
-            });
-        }
-        
-        // Handle highlighting updated risk row
-        <?php if (isset($_GET['updated']) && isset($_GET['risk_id'])): ?>
-        document.addEventListener('DOMContentLoaded', function() {
-            const updatedRiskId = <?php echo (int)$_GET['risk_id']; ?>;
-            
-            // Clean the URL to remove the parameters
-            if (window.history.replaceState) {
-                window.history.replaceState(null, null, 'risk_owner_dashboard.php');
+            const selectedTab = document.getElementById(tabName + '-tab');
+            if (selectedTab) {
+                selectedTab.classList.add('active');
             }
             
-            // Highlight the updated risk row
-            setTimeout(function() {
-                const riskRow = document.querySelector(`tr[data-risk-id="${updatedRiskId}"]`);
-                if (riskRow) {
-                    riskRow.style.backgroundColor = '#d4edda';
-                    riskRow.style.border = '2px solid #28a745';
-                    
-                    // Scroll to the row
-                    riskRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    
-                    // Remove highlight after 8 seconds
-                    setTimeout(() => {
-                        riskRow.style.backgroundColor = '';
-                        riskRow.style.border = '';
-                    }, 8000);
-                }
-            }, 500);
-        });
-        <?php endif; ?>
+            // Add active class to clicked nav link
+            const activeLink = document.querySelector(`[onclick="showTab('${tabName}')"]`);
+            if (activeLink) {
+                activeLink.classList.add('active');
+            }
+            
+            // Update URL without page reload
+            const url = new URL(window.location);
+            if (tabName === 'dashboard') {
+                url.searchParams.delete('tab');
+            } else {
+                url.searchParams.set('tab', tabName);
+            }
+            window.history.pushState({}, '', url);
+        }
         
-        // Auto-refresh page every 5 minutes to show updated assignments
-        setTimeout(function() {
-            location.reload();
-        }, 300000); // 5 minutes
-        
-        // Handle tab parameter from URL
+        // Initialize tab based on URL parameter
         document.addEventListener('DOMContentLoaded', function() {
             const urlParams = new URLSearchParams(window.location.search);
             const tab = urlParams.get('tab');
@@ -2457,252 +2799,212 @@ function getStatusBadgeClass($status) {
             }
         });
         
-        // IMPROVED BROWSER BACK BUTTON HANDLING
+        // Chart initialization
         document.addEventListener('DOMContentLoaded', function() {
-            // Get the referrer (where user came from)
-            const referrer = document.referrer;
+            // Risk Level Chart
+            const levelCtx = document.getElementById('levelChart');
+            if (levelCtx) {
+                new Chart(levelCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Low', 'Medium', 'High', 'Critical'],
+                        datasets: [{
+                            data: [
+                                <?php echo $risk_levels['low_risks']; ?>,
+                                <?php echo $risk_levels['medium_risks']; ?>,
+                                <?php echo $risk_levels['high_risks']; ?>,
+                                <?php echo $risk_levels['critical_risks']; ?>
+                            ],
+                            backgroundColor: ['#28a745', '#ffc107', '#fd7e14', '#dc3545']
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            }
+                        }
+                    }
+                });
+            }
             
-            // Check if user came from login page
-            const cameFromLogin = referrer.includes('login.php') || referrer.includes('logout.php') || !referrer;
+            // Risk Category Chart
+            const categoryCtx = document.getElementById('categoryChart');
+            if (categoryCtx) {
+                new Chart(categoryCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: [<?php echo implode(',', array_map(function($cat) { return '"' . htmlspecialchars($cat['risk_category'] ?? 'Uncategorized') . '"'; }, $risk_by_category)); ?>],
+                        datasets: [{
+                            label: 'Number of Risks',
+                            data: [<?php echo implode(',', array_column($risk_by_category, 'count')); ?>],
+                            backgroundColor: '#E60012',
+                            borderColor: '#B8000E',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    stepSize: 1
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        
+        // Search functionality for My Reports
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.getElementById('searchRisks');
+            const statusFilter = document.getElementById('statusFilter');
+            const tableBody = document.getElementById('reportsTableBody');
             
-            if (cameFromLogin) {
-                // If user came from login, replace the current history entry
-                // This prevents the back button from going to login
-                if (window.history.replaceState) {
-                    // Create a safe fallback page in history
-                    window.history.replaceState(
-                        { page: 'dashboard', preventBack: true }, 
-                        'Risk Owner Dashboard', 
-                        'risk_owner_dashboard.php'
-                    );
+            if (searchInput && statusFilter && tableBody) {
+                function filterReports() {
+                    const searchTerm = searchInput.value.toLowerCase();
+                    const statusFilter = document.getElementById('statusFilter').value;
+                    const rows = tableBody.querySelectorAll('.risk-report-row');
                     
-                    // Add a new entry so back button has somewhere safe to go
-                    window.history.pushState(
-                        { page: 'dashboard' }, 
-                        'Risk Owner Dashboard', 
-                        'risk_owner_dashboard.php'
-                    );
+                    rows.forEach(row => {
+                        const searchData = row.getAttribute('data-search');
+                        const statusData = row.getAttribute('data-status');
+                        
+                        const matchesSearch = searchData.includes(searchTerm);
+                        const matchesStatus = !statusFilter || statusData === statusFilter;
+                        
+                        if (matchesSearch && matchesStatus) {
+                            row.style.display = '';
+                        } else {
+                            row.style.display = 'none';
+                        }
+                    });
                 }
-            } else {
-                // User came from a valid page, store it
-                sessionStorage.setItem('validReferrer', referrer);
+                
+                searchInput.addEventListener('input', filterReports);
+                statusFilter.addEventListener('change', filterReports);
             }
         });
         
-        // Handle the browser's back button
-        window.addEventListener('popstate', function(event) {
-            // Check if this is our prevented back state
-            if (event.state && event.state.preventBack) {
-                // Don't allow going back to login, stay on dashboard
-                window.history.pushState(
-                    { page: 'dashboard' }, 
-                    'Risk Owner Dashboard', 
-                    'risk_owner_dashboard.php'
-                );
-                return;
-            }
-            
-            // Check if we have a valid referrer stored
-            const validReferrer = sessionStorage.getItem('validReferrer');
-            
-            if (validReferrer && !validReferrer.includes('login.php')) {
-                // Go to the valid referrer
-                window.location.href = validReferrer;
-            } else {
-                // No valid referrer, stay on dashboard
-                window.history.pushState(
-                    { page: 'dashboard' }, 
-                    'Risk Owner Dashboard', 
-                    'risk_owner_dashboard.php'
-                );
-            }
-        });
-        
-        // Prevent navigation to login page via back button
-        window.addEventListener('beforeunload', function() {
-            // Clear login-related referrers
-            const referrer = document.referrer;
-            if (referrer && !referrer.includes('login.php') && !referrer.includes('logout.php')) {
-                sessionStorage.setItem('lastValidPage', window.location.href);
-            }
-        });
-        
-        // Additional safety: Override history.back() if needed
-        const originalBack = window.history.back;
-        window.history.back = function() {
-            const validReferrer = sessionStorage.getItem('validReferrer');
-            
-            if (validReferrer && !validReferrer.includes('login.php')) {
-                window.location.href = validReferrer;
-            } else {
-                // Stay on current page or go to a safe default
-                console.log('Back navigation blocked - would go to login');
-            }
-        };
-        
-        // Navigation notification functionality with persistent storage
-        let navIsExpanded = false;
-        let navReadNotifications = new Set();
-        
-        // Load read notifications from localStorage
-        function loadReadNotifications() {
-            const stored = localStorage.getItem('readNotifications_<?php echo $_SESSION['user_id']; ?>');
-            if (stored) {
-                navReadNotifications = new Set(JSON.parse(stored));
-            }
-        }
-        
-        // Save read notifications to localStorage
-        function saveReadNotifications() {
-            localStorage.setItem('readNotifications_<?php echo $_SESSION['user_id']; ?>', JSON.stringify([...navReadNotifications]));
-        }
+        // Notification functionality
+        let notificationDropdownVisible = false;
+        let readNotifications = JSON.parse(localStorage.getItem('readNotifications') || '[]');
         
         function toggleNavNotifications() {
-            // Don't open if no notifications
-            const container = document.querySelector('.nav-notification-container');
-            if (container && container.classList.contains('nav-notification-empty')) {
-                return;
-            }
-            
             const dropdown = document.getElementById('navNotificationDropdown');
-            if (!dropdown) return;
-            
-            if (dropdown.classList.contains('show')) {
-                // Close dropdown
-                dropdown.classList.remove('show');
-                dropdown.style.display = 'none';
+            if (dropdown) {
+                notificationDropdownVisible = !notificationDropdownVisible;
+                dropdown.classList.toggle('show', notificationDropdownVisible);
                 
-                const bell = document.querySelector('.nav-notification-bell');
-                if (bell) {
-                    bell.classList.remove('has-notifications');
-                }
-                
-                // Reset expanded state
-                navIsExpanded = false;
-                dropdown.classList.remove('expanded');
-                updateExpandButton();
-            } else {
-                // Open dropdown
-                dropdown.style.display = 'block';
-                
-                // Position dropdown near the notification icon
-                const icon = document.querySelector('.nav-notification-container');
-                if (icon) {
-                    const iconRect = icon.getBoundingClientRect();
-                    dropdown.style.top = `${iconRect.bottom + 10}px`;
-                    dropdown.style.right = `${Math.max(20, window.innerWidth - iconRect.right)}px`;
-                }
-                
-                // Add show class for animation
-                setTimeout(() => {
-                    dropdown.classList.add('show');
-                }, 10);
-                
-                const bell = document.querySelector('.nav-notification-bell');
-                if (bell) {
-                    bell.classList.add('has-notifications');
-                }
-                
-                // Apply read states from localStorage
-                applyReadStates();
-                updateExpandButton();
-            }
-        }
-        
-        function expandNavNotifications() {
-            const dropdown = document.getElementById('navNotificationDropdown');
-            if (!dropdown) return;
-            
-            navIsExpanded = !navIsExpanded;
-            
-            if (navIsExpanded) {
-                dropdown.classList.add('expanded');
-                const content = dropdown.querySelector('.nav-notification-content');
-                if (content) {
-                    content.style.maxHeight = '75vh';
-                }
-            } else {
-                dropdown.classList.remove('expanded');
-                const icon = document.querySelector('.nav-notification-container');
-                if (icon) {
-                    const iconRect = icon.getBoundingClientRect();
-                    dropdown.style.top = `${iconRect.bottom + 10}px`;
-                    dropdown.style.right = `${Math.max(20, window.innerWidth - iconRect.right)}px`;
-                }
-                const content = dropdown.querySelector('.nav-notification-content');
-                if (content) {
-                    content.style.maxHeight = '350px';
-                }
-            }
-            
-            updateExpandButton();
-        }
-        
-        function updateExpandButton() {
-            const button = document.getElementById('navExpandButton');
-            if (!button) return;
-            
-            if (navIsExpanded) {
-                button.innerHTML = '<i class="fas fa-compress-arrows-alt"></i> Collapse View';
-                button.title = 'Collapse to normal size';
-            } else {
-                button.innerHTML = '<i class="fas fa-expand-arrows-alt"></i> Expand All Notifications';
-                button.title = 'Expand to full screen';
-            }
-        }
-        
-        function applyReadStates() {
-            const items = document.querySelectorAll('.nav-notification-item');
-            items.forEach((item, index) => {
-                if (navReadNotifications.has(index)) {
-                    item.style.background = '#f1f3f4';
-                    item.style.borderLeft = '4px solid #6c757d';
-                    item.style.opacity = '0.7';
-                    item.classList.add('read');
-                    item.classList.remove('unread');
+                if (notificationDropdownVisible) {
+                    positionNotificationDropdown();
+                    document.addEventListener('click', handleOutsideClick);
                 } else {
-                    item.style.background = '#fff3cd';
-                    item.style.borderLeft = '4px solid #ffc107';
-                    item.classList.add('unread');
-                    item.classList.remove('read');
+                    document.removeEventListener('click', handleOutsideClick);
                 }
-            });
-            updateNavNotificationBadge();
+            }
+        }
+        
+        function positionNotificationDropdown() {
+            const container = document.querySelector('.nav-notification-container');
+            const dropdown = document.getElementById('navNotificationDropdown');
+            
+            if (container && dropdown) {
+                const rect = container.getBoundingClientRect();
+                const dropdownWidth = 400;
+                
+                let left = rect.left;
+                if (left + dropdownWidth > window.innerWidth) {
+                    left = window.innerWidth - dropdownWidth - 20;
+                }
+                if (left < 20) {
+                    left = 20;
+                }
+                
+                dropdown.style.left = left + 'px';
+                dropdown.style.top = (rect.bottom + 5) + 'px';
+            }
+        }
+        
+        function handleOutsideClick(event) {
+            const container = document.querySelector('.nav-notification-container');
+            const dropdown = document.getElementById('navNotificationDropdown');
+            
+            if (container && dropdown && 
+                !container.contains(event.target) && 
+                !dropdown.contains(event.target)) {
+                notificationDropdownVisible = false;
+                dropdown.classList.remove('show');
+                document.removeEventListener('click', handleOutsideClick);
+            }
         }
         
         function markNavAsRead(notificationId) {
-            const item = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
-            if (item) {
-                item.style.background = '#f1f3f4';
-                item.style.borderLeft = '4px solid #6c757d';
-                item.style.opacity = '0.7';
-                item.classList.add('read');
-                item.classList.remove('unread');
-                navReadNotifications.add(notificationId);
-                saveReadNotifications();
-                updateNavNotificationBadge();
+            const notificationItem = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
+            if (notificationItem) {
+                notificationItem.classList.remove('unread');
+                notificationItem.classList.add('read');
+                
+                const markReadBtn = notificationItem.querySelector('.mark-read-btn');
+                if (markReadBtn) {
+                    markReadBtn.style.display = 'none';
+                }
+                
+                if (!readNotifications.includes(notificationId)) {
+                    readNotifications.push(notificationId);
+                    localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
+                }
+                
+                updateNotificationCount();
             }
         }
         
-        function markAllNavAsRead() {
-            const items = document.querySelectorAll('.nav-notification-item');
-            items.forEach((item, index) => {
-                item.style.background = '#f1f3f4';
-                item.style.borderLeft = '4px solid #6c757d';
-                item.style.opacity = '0.7';
-                item.classList.add('read');
+        function clearAllNotifications() {
+            const notificationItems = document.querySelectorAll('.nav-notification-item');
+            notificationItems.forEach((item, index) => {
                 item.classList.remove('unread');
-                navReadNotifications.add(index);
+                item.classList.add('read');
+                
+                const markReadBtn = item.querySelector('.mark-read-btn');
+                if (markReadBtn) {
+                    markReadBtn.style.display = 'none';
+                }
+                
+                if (!readNotifications.includes(index)) {
+                    readNotifications.push(index);
+                }
             });
-            saveReadNotifications();
-            updateNavNotificationBadge();
+            
+            localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
+            updateNotificationCount();
+            
+            // Close dropdown after clearing
+            notificationDropdownVisible = false;
+            const dropdown = document.getElementById('navNotificationDropdown');
+            if (dropdown) {
+                dropdown.classList.remove('show');
+            }
         }
         
-        function updateNavNotificationBadge() {
+        function updateNotificationCount() {
             const badge = document.querySelector('.nav-notification-badge');
-            const items = document.querySelectorAll('.nav-notification-item');
-            const totalNotifications = items.length;
-            const unreadCount = totalNotifications - navReadNotifications.size;
+            const bell = document.querySelector('.nav-notification-bell');
+            const container = document.querySelector('.nav-notification-container');
+            
+            const totalNotifications = document.querySelectorAll('.nav-notification-item').length;
+            const unreadCount = totalNotifications - readNotifications.length;
             
             if (badge) {
                 if (unreadCount > 0) {
@@ -2712,72 +3014,64 @@ function getStatusBadgeClass($status) {
                     badge.style.display = 'none';
                 }
             }
-        }
-        
-        // Initialize notifications on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            loadReadNotifications();
-            setTimeout(() => {
-                applyReadStates();
-                updateExpandButton();
-            }, 100);
-        });
-        
-        // Enhanced Search and Filter functionality for Reports
-        document.addEventListener('DOMContentLoaded', function() {
-            const searchInput = document.getElementById('searchRisks');
-            const statusFilter = document.getElementById('statusFilter');
             
-            function filterReports() {
-                const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
-                const selectedStatus = statusFilter ? statusFilter.value : '';
-                const tableRows = document.querySelectorAll('.risk-report-row');
-                
-                let visibleCount = 0;
-                
-                tableRows.forEach(row => {
-                    const searchData = row.getAttribute('data-search') || '';
-                    const rowStatus = row.getAttribute('data-status') || '';
-                    
-                    const matchesSearch = !searchTerm || searchData.includes(searchTerm);
-                    const matchesStatus = !selectedStatus || rowStatus === selectedStatus;
-                    
-                    if (matchesSearch && matchesStatus) {
-                        row.style.display = '';
-                        visibleCount++;
-                    } else {
-                        row.style.display = 'none';
-                    }
-                });
-                
-                // Show/hide "no results" message
-                const tableBody = document.getElementById('reportsTableBody');
-                const existingNoResults = document.getElementById('noResultsRow');
-                
-                if (visibleCount === 0 && tableRows.length > 0) {
-                    if (!existingNoResults) {
-                        const noResultsRow = document.createElement('tr');
-                        noResultsRow.id = 'noResultsRow';
-                        noResultsRow.innerHTML = `
-                            <td colspan="8" style="padding: 2rem; text-align: center; color: #666;">
-                                <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">🔍</div>
-                                <div>No risks match your current filters</div>
-                                <div style="font-size: 0.9rem; margin-top: 0.5rem;">Try adjusting your search or filter criteria</div>
-                            </td>
-                        `;
-                        tableBody.appendChild(noResultsRow);
-                    }
-                } else if (existingNoResults) {
-                    existingNoResults.remove();
+            if (bell) {
+                if (unreadCount > 0) {
+                    bell.classList.add('has-notifications');
+                } else {
+                    bell.classList.remove('has-notifications');
                 }
             }
             
-            if (searchInput) {
-                searchInput.addEventListener('input', filterReports);
+            if (container) {
+                if (unreadCount === 0) {
+                    container.classList.add('nav-notification-empty');
+                } else {
+                    container.classList.remove('nav-notification-empty');
+                }
             }
+        }
+        
+        // Initialize notification states on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Apply read states from localStorage
+            readNotifications.forEach(notificationId => {
+                const notificationItem = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
+                if (notificationItem) {
+                    notificationItem.classList.remove('unread');
+                    notificationItem.classList.add('read');
+                    
+                    const markReadBtn = notificationItem.querySelector('.mark-read-btn');
+                    if (markReadBtn) {
+                        markReadBtn.style.display = 'none';
+                    }
+                }
+            });
             
-            if (statusFilter) {
-                statusFilter.addEventListener('change', filterReports);
+            updateNotificationCount();
+        });
+        
+        // Procedure section scrolling
+        function scrollToProcedureSection(sectionId) {
+            // First ensure we're on the procedures tab
+            showTab('procedures');
+            
+            // Wait a moment for the tab to be shown, then scroll
+            setTimeout(() => {
+                const section = document.getElementById(sectionId);
+                if (section) {
+                    section.scrollIntoView({ 
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            }, 100);
+        }
+        
+        // Handle window resize for notification dropdown positioning
+        window.addEventListener('resize', function() {
+            if (notificationDropdownVisible) {
+                positionNotificationDropdown();
             }
         });
     </script>
