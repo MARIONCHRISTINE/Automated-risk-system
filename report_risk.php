@@ -2,6 +2,7 @@
 include_once 'includes/auth.php';
 requireRole('risk_owner');
 include_once 'config/database.php';
+include_once 'includes/shared_notifications.php'; // Include shared notifications
 
 // Verify session data exists
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['email'])) {
@@ -176,6 +177,9 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
         $error = 'Error: ' . $e->getMessage();
     }
 }
+
+// Get notifications using shared component
+$all_notifications = getNotifications($db, $_SESSION['user_id']);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1020,137 +1024,9 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                 </li>
                 <li class="nav-item notification-nav-item">
                     <?php
-                    // Use the same notification system as the dashboard
+                    // Use shared notifications component
                     if (isset($_SESSION['user_id'])) {
-                        $treatment_query = "SELECT rt.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
-                                                   owner.full_name as risk_owner_name, 'treatment' as notification_type,
-                                                   rt.created_at as notification_date
-                                            FROM risk_treatments rt
-                                            INNER JOIN risk_incidents ri ON rt.risk_id = ri.id
-                                            LEFT JOIN users owner ON ri.risk_owner_id = owner.id
-                                            WHERE rt.assigned_to = :user_id
-                                             AND rt.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
-                        
-                        $assignment_query = "SELECT ri.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
-                                                    reporter.full_name as reporter_name, 'assignment' as notification_type,
-                                                    ri.updated_at as notification_date
-                                             FROM risk_incidents ri
-                                             LEFT JOIN users reporter ON ri.reported_by = reporter.id
-                                             WHERE ri.risk_owner_id = :user_id
-                                              AND ri.updated_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
-                        
-                        $update_query = "SELECT ri.*, ri.risk_name, ri.id as risk_id, ri.risk_owner_id,
-                                                updater.full_name as updater_name, 'update' as notification_type,
-                                                ri.updated_at as notification_date
-                                         FROM risk_incidents ri
-                                         LEFT JOIN users updater ON ri.reported_by = updater.id
-                                         WHERE (ri.risk_owner_id = :user_id OR ri.reported_by = :user_id)
-                                         AND ri.updated_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-                                         AND ri.updated_at != ri.created_at";
-                        
-                        $all_notifications = [];
-                        
-                        $stmt = $db->prepare($treatment_query);
-                        $stmt->bindParam(':user_id', $_SESSION['user_id']);
-                        $stmt->execute();
-                        $treatment_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                        $all_notifications = array_merge($all_notifications, $treatment_notifications);
-                        
-                        $stmt = $db->prepare($assignment_query);
-                        $stmt->bindParam(':user_id', $_SESSION['user_id']);
-                        $stmt->execute();
-                        $assignment_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                        $all_notifications = array_merge($all_notifications, $assignment_notifications);
-                        
-                        $stmt = $db->prepare($update_query);
-                        $stmt->bindParam(':user_id', $_SESSION['user_id']);
-                        $stmt->execute();
-                        $update_notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                        $all_notifications = array_merge($all_notifications, $update_notifications);
-                        
-                        usort($all_notifications, function($a, $b) {
-                            return strtotime($b['notification_date']) - strtotime($a['notification_date']);
-                        });
-                        
-                        $all_notifications = array_slice($all_notifications, 0, 20);
-                        
-                        if (!empty($all_notifications)):
-                    ?>
-                    <div class="nav-notification-container" onclick="toggleNavNotifications()">
-                        <i class="fas fa-bell nav-notification-bell"></i>
-                        <span class="nav-notification-text">Notifications</span>
-                        <span class="nav-notification-badge"><?php echo count($all_notifications); ?></span>
-                        
-                        <div class="nav-notification-dropdown" id="navNotificationDropdown">
-                            <div class="nav-notification-header">
-                                <div class="flex justify-between items-center">
-                                    <span><i class="fas fa-bell"></i> All Notifications</span>
-                                    <div style="display: flex; gap: 0.5rem;">
-                                        <button onclick="readAllNotifications()" class="btn btn-sm btn-primary">Read All</button>
-                                        <button onclick="clearAllNotifications()" class="btn btn-sm btn-outline">Clear All</button>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="nav-notification-content" id="navNotificationContent">
-                                <?php foreach ($all_notifications as $index => $notification): ?>
-                                <div class="nav-notification-item" data-nav-notification-id="<?php echo $index; ?>">
-                                    <?php if ($notification['notification_type'] == 'treatment'): ?>
-                                        <div class="nav-notification-title">
-                                            🎯 Treatment Assignment: <?php echo htmlspecialchars($notification['treatment_name']); ?>
-                                        </div>
-                                        <div class="nav-notification-risk">
-                                            Risk: <?php echo htmlspecialchars($notification['risk_name']); ?>
-                                        </div>
-                                        <div class="nav-notification-date">
-                                            Assigned: <?php echo date('M j, Y g:i A', strtotime($notification['notification_date'])); ?>
-                                        </div>
-                                        <div class="nav-notification-actions">
-                                            <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Risk</a>
-                                            <a href="advanced-risk-management.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-warning">Manage Treatment</a>
-                                            <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary mark-read-btn">Mark Read</button>
-                                        </div>
-                                    <?php elseif ($notification['notification_type'] == 'assignment'): ?>
-                                        <div class="nav-notification-title">
-                                            📋 Risk Assignment: <?php echo htmlspecialchars($notification['risk_name']); ?>
-                                        </div>
-                                        <div class="nav-notification-risk">
-                                            Reported by: <?php echo htmlspecialchars($notification['reporter_name'] ?? 'System'); ?>
-                                        </div>
-                                        <div class="nav-notification-date">
-                                            Assigned: <?php echo date('M j, Y g:i A', strtotime($notification['notification_date'])); ?>
-                                        </div>
-                                        <div class="nav-notification-actions">
-                                            <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Details</a>
-                                            <a href="risk_assessment.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-success">Start Assessment</a>
-                                            <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary mark-read-btn">Mark Read</button>
-                                        </div>
-                                    <?php elseif ($notification['notification_type'] == 'update'): ?>
-                                        <div class="nav-notification-title">
-                                            🔄 Risk Update: <?php echo htmlspecialchars($notification['risk_name']); ?>
-                                        </div>
-                                        <div class="nav-notification-risk">
-                                            Updated by: <?php echo htmlspecialchars($notification['updater_name'] ?? 'System'); ?>
-                                        </div>
-                                        <div class="nav-notification-date">
-                                            Updated: <?php echo date('M j, Y g:i A', strtotime($notification['notification_date'])); ?>
-                                        </div>
-                                        <div class="nav-notification-actions">
-                                            <a href="view_risk.php?id=<?php echo $notification['risk_id']; ?>" class="btn btn-sm btn-primary">View Changes</a>
-                                            <button onclick="markNavAsRead(<?php echo $index; ?>)" class="btn btn-sm btn-secondary mark-read-btn">Mark Read</button>
-                                        </div>
-                                    <?php endif; ?>
-                                </div>
-                                <?php endforeach; ?>
-                            </div>
-                        </div>
-                    </div>
-                    <?php else: ?>
-                    <div class="nav-notification-container nav-notification-empty">
-                        <i class="fas fa-bell nav-notification-bell"></i>
-                        <span class="nav-notification-text">Notifications</span>
-                    </div>
-                    <?php 
-                        endif;
+                        renderNotificationBar($all_notifications);
                     }
                     ?>
                 </li>
@@ -1185,273 +1061,240 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
                     <div class="alert alert-danger"><?php echo $error; ?></div>
                 <?php endif; ?>
                 
-                <form method="POST" id="riskForm" enctype="multipart/form-data">
-                    
-                    <!-- RISK IDENTIFICATION Section -->
+                <form metho="POST" enctype="multipart/form-data">
+                    <!-- Section 1: Risk Identification -->
                     <div class="section-header">
-                        📋 Step 1: Risk Identification
+                        <i class="fas fa-search"></i> Section 1: Risk Identification
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Risk Name *</label>
+                        <input type="text" name="risk_name" class="form-control" required placeholder="Enter a clear, concise risk name">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Risk Description *</label>
+                        <textarea name="risk_description" class="form-control" required placeholder="Provide a detailed description of the risk"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Cause of Risk *</label>
+                        <textarea name="cause_of_risk" class="form-control" required placeholder="What causes this risk to occur?"></textarea>
                     </div>
                     
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label">
-                                Existing or New Risk *
-                            </label>
-                            <select name="existing_or_new" class="form-control" required>
-                                <option value="">Select...</option>
-                                <option value="Existing" <?php echo (isset($_POST['existing_or_new']) && $_POST['existing_or_new'] == 'Existing') ? 'selected' : ''; ?>>Existing Risk</option>
-                                <option value="New" <?php echo (isset($_POST['existing_or_new']) && $_POST['existing_or_new'] == 'New') ? 'selected' : ''; ?>>New Risk</option>
+                            <label class="form-label">Department *</label>
+                            <select name="department" class="form-control" required>
+                                <option value="">Select Department</option>
+                                <option value="Finance & Accounting" <?php echo ($user['department'] == 'Finance & Accounting') ? 'selected' : ''; ?>>Finance & Accounting</option>
+                                <option value="Operations" <?php echo ($user['department'] == 'Operations') ? 'selected' : ''; ?>>Operations</option>
+                                <option value="Technology & Security" <?php echo ($user['department'] == 'Technology & Security') ? 'selected' : ''; ?>>Technology & Security</option>
+                                <option value="Human Resources" <?php echo ($user['department'] == 'Human Resources') ? 'selected' : ''; ?>>Human Resources</option>
+                                <option value="Legal & Compliance" <?php echo ($user['department'] == 'Legal & Compliance') ? 'selected' : ''; ?>>Legal & Compliance</option>
+                                <option value="Marketing & Sales" <?php echo ($user['department'] == 'Marketing & Sales') ? 'selected' : ''; ?>>Marketing & Sales</option>
                             </select>
                         </div>
                         
                         <div class="form-group">
-                            <label class="form-label">
-                                To be Reported to Board *
-                            </label>
-                            <select name="to_be_reported_to_board" class="form-control" required>
-                                <option value="">Select...</option>
-                                <option value="Yes" <?php echo (isset($_POST['to_be_reported_to_board']) && $_POST['to_be_reported_to_board'] == 'Yes') ? 'selected' : ''; ?>>Yes - Board Attention Required</option>
-                                <option value="No" <?php echo (isset($_POST['to_be_reported_to_board']) && $_POST['to_be_reported_to_board'] == 'No') ? 'selected' : ''; ?>>No - Operational Level</option>
+                            <label class="form-label">Risk Category *</label>
+                            <select name="risk_category" class="form-control" required>
+                                <option value="">Select Category</option>
+                                <option value="Strategic">Strategic</option>
+                                <option value="Operational">Operational</option>
+                                <option value="Financial">Financial</option>
+                                <option value="Compliance">Compliance</option>
+                                <option value="Technology">Technology</option>
+                                <option value="Reputational">Reputational</option>
+                                <option value="Environmental">Environmental</option>
+                                <option value="Human Resources">Human Resources</option>
                             </select>
                         </div>
                     </div>
                     
-                    <div class="form-group">
-                        <label class="form-label">
-                            Risk Name *
-                        </label>
-                        <input type="text" name="risk_name" class="form-control" required
-                               placeholder="e.g., Customer Data Breach, Regulatory Non-Compliance, System Downtime"
-                               value="<?php echo isset($_POST['risk_name']) ? htmlspecialchars($_POST['risk_name']) : ''; ?>">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Existing or New Risk *</label>
+                            <select name="existing_or_new" class="form-control" required>
+                                <option value="">Select Type</option>
+                                <option value="New">New Risk</option>
+                                <option value="Existing">Existing Risk</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Report to Board *</label>
+                            <select name="to_be_reported_to_board" class="form-control" required>
+                                <option value="">Select Option</option>
+                                <option value="Yes">Yes</option>
+                                <option value="No">No</option>
+                            </select>
+                        </div>
                     </div>
                     
-                    <div class="form-group">
-                        <label class="form-label">
-                            Risk Description *
-                        </label>
-                        <textarea name="risk_description" class="form-control" rows="4" required
-                                   placeholder="Describe what could go wrong, the potential impact, and who/what would be affected..."><?php echo isset($_POST['risk_description']) ? htmlspecialchars($_POST['risk_description']) : ''; ?></textarea>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label class="form-label">
-                            Cause of Risk *
-                        </label>
-                        <textarea name="cause_of_risk" class="form-control" rows="3" required
-                                   placeholder="What factors or conditions could cause this risk to occur?"><?php echo isset($_POST['cause_of_risk']) ? htmlspecialchars($_POST['cause_of_risk']) : ''; ?></textarea>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label class="form-label">
-                            Risk Category
-                        </label>
-                        <select name="risk_category" class="form-control">
-                            <option value="">Select Category (Optional)</option>
-                            <option value="Strategic Risk" <?php echo (isset($_POST['risk_category']) && $_POST['risk_category'] == 'Strategic Risk') ? 'selected' : ''; ?>>Strategic Risk</option>
-                            <option value="Operational Risk" <?php echo (isset($_POST['risk_category']) && $_POST['risk_category'] == 'Operational Risk') ? 'selected' : ''; ?>>Operational Risk</option>
-                            <option value="Financial Risk" <?php echo (isset($_POST['risk_category']) && $_POST['risk_category'] == 'Financial Risk') ? 'selected' : ''; ?>>Financial Risk</option>
-                            <option value="Compliance Risk" <?php echo (isset($_POST['risk_category']) && $_POST['risk_category'] == 'Compliance Risk') ? 'selected' : ''; ?>>Compliance Risk</option>
-                            <option value="Technology Risk" <?php echo (isset($_POST['risk_category']) && $_POST['risk_category'] == 'Technology Risk') ? 'selected' : ''; ?>>Technology Risk</option>
-                            <option value="Reputational Risk" <?php echo (isset($_POST['risk_category']) && $_POST['risk_category'] == 'Reputational Risk') ? 'selected' : ''; ?>>Reputational Risk</option>
-                            <option value="Market Risk" <?php echo (isset($_POST['risk_category']) && $_POST['risk_category'] == 'Market Risk') ? 'selected' : ''; ?>>Market Risk</option>
-                            <option value="Credit Risk" <?php echo (isset($_POST['risk_category']) && $_POST['risk_category'] == 'Credit Risk') ? 'selected' : ''; ?>>Credit Risk</option>
-                            <option value="Liquidity Risk" <?php echo (isset($_POST['risk_category']) && $_POST['risk_category'] == 'Liquidity Risk') ? 'selected' : ''; ?>>Liquidity Risk</option>
-                            <option value="Other" <?php echo (isset($_POST['risk_category']) && $_POST['risk_category'] == 'Other') ? 'selected' : ''; ?>>Other</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label class="form-label">Department</label>
-                        <input type="text" name="department" class="form-control" required value="<?php echo $user['department'] ?? ''; ?>" readonly style="background: #e9ecef;">
-                    </div>
-                    
-                    <!-- RISK ASSESSMENT Section -->
+                    <!-- Section 2: Risk Assessment -->
                     <div class="section-header">
-                        📊 Step 2: Risk Assessment
+                        <i class="fas fa-calculator"></i> Section 2: Risk Assessment
                     </div>
                     
                     <div class="risk-matrix">
                         <div class="matrix-section">
-                            <div class="matrix-title">Inherent Risk (Gross Risk)</div>
+                            <div class="matrix-title">Inherent Risk (Before Controls)</div>
                             
                             <div class="form-group">
-                                <label class="form-label">
-                                    Likelihood (L) *
-                                </label>
+                                <label class="form-label">Likelihood (1-5) *</label>
                                 <select name="inherent_likelihood" class="form-control" required onchange="calculateRating('inherent')">
-                                    <option value="">Select Likelihood</option>
-                                    <option value="1" <?php echo (isset($_POST['inherent_likelihood']) && $_POST['inherent_likelihood'] == '1') ? 'selected' : ''; ?>>1 - Very Low (Rare, &lt;5% chance)</option>
-                                    <option value="2" <?php echo (isset($_POST['inherent_likelihood']) && $_POST['inherent_likelihood'] == '2') ? 'selected' : ''; ?>>2 - Low (Unlikely, 5-25% chance)</option>
-                                    <option value="3" <?php echo (isset($_POST['inherent_likelihood']) && $_POST['inherent_likelihood'] == '3') ? 'selected' : ''; ?>>3 - Medium (Possible, 25-50% chance)</option>
-                                    <option value="4" <?php echo (isset($_POST['inherent_likelihood']) && $_POST['inherent_likelihood'] == '4') ? 'selected' : ''; ?>>4 - High (Likely, 50-75% chance)</option>
-                                    <option value="5" <?php echo (isset($_POST['inherent_likelihood']) && $_POST['inherent_likelihood'] == '5') ? 'selected' : ''; ?>>5 - Very High (Almost certain, &gt;75% chance)</option>
+                                    <option value="">Select</option>
+                                    <option value="1">1 - Rare (0-5%)</option>
+                                    <option value="2">2 - Unlikely (6-25%)</option>
+                                    <option value="3">3 - Possible (26-50%)</option>
+                                    <option value="4">4 - Likely (51-75%)</option>
+                                    <option value="5">5 - Almost Certain (76-100%)</option>
                                 </select>
                             </div>
                             
                             <div class="form-group">
-                                <label class="form-label">
-                                    Consequence (C) *
-                                </label>
+                                <label class="form-label">Consequence (1-5) *</label>
                                 <select name="inherent_consequence" class="form-control" required onchange="calculateRating('inherent')">
-                                    <option value="">Select Consequence</option>
-                                    <option value="1" <?php echo (isset($_POST['inherent_consequence']) && $_POST['inherent_consequence'] == '1') ? 'selected' : ''; ?>>1 - Very Low (Minimal impact)</option>
-                                    <option value="2" <?php echo (isset($_POST['inherent_consequence']) && $_POST['inherent_consequence'] == '2') ? 'selected' : ''; ?>>2 - Low (Minor impact, easily manageable)</option>
-                                    <option value="3" <?php echo (isset($_POST['inherent_consequence']) && $_POST['inherent_consequence'] == '3') ? 'selected' : ''; ?>>3 - Medium (Moderate impact, management attention required)</option>
-                                    <option value="4" <?php echo (isset($_POST['inherent_consequence']) && $_POST['inherent_consequence'] == '4') ? 'selected' : ''; ?>>4 - High (Significant impact on operations)</option>
-                                    <option value="5" <?php echo (isset($_POST['inherent_consequence']) && $_POST['inherent_consequence'] == '5') ? 'selected' : ''; ?>>5 - Very High (Severe impact, threatens business continuity)</option>
+                                    <option value="">Select</option>
+                                    <option value="1">1 - Insignificant</option>
+                                    <option value="2">2 - Minor</option>
+                                    <option value="3">3 - Moderate</option>
+                                    <option value="4">4 - Major</option>
+                                    <option value="5">5 - Catastrophic</option>
                                 </select>
                             </div>
                             
                             <input type="hidden" name="inherent_rating" id="inherent_rating">
-                            <div id="inherent_rating_display" class="rating-display">Rating: -</div>
+                            <div id="inherent_display" class="rating-display">Rating will appear here</div>
                         </div>
                         
                         <div class="matrix-section">
-                            <div class="matrix-title">Residual Risk (Net Risk)</div>
+                            <div class="matrix-title">Residual Risk (After Controls)</div>
                             
                             <div class="form-group">
-                                <label class="form-label">
-                                    Likelihood (L) *
-                                </label>
+                                <label class="form-label">Likelihood (1-5) *</label>
                                 <select name="residual_likelihood" class="form-control" required onchange="calculateRating('residual')">
-                                    <option value="">Select Likelihood</option>
-                                    <option value="1" <?php echo (isset($_POST['residual_likelihood']) && $_POST['residual_likelihood'] == '1') ? 'selected' : ''; ?>>1 - Very Low (Rare, &lt;5% chance)</option>
-                                    <option value="2" <?php echo (isset($_POST['residual_likelihood']) && $_POST['residual_likelihood'] == '2') ? 'selected' : ''; ?>>2 - Low (Unlikely, 5-25% chance)</option>
-                                    <option value="3" <?php echo (isset($_POST['residual_likelihood']) && $_POST['residual_likelihood'] == '3') ? 'selected' : ''; ?>>3 - Medium (Possible, 25-50% chance)</option>
-                                    <option value="4" <?php echo (isset($_POST['residual_likelihood']) && $_POST['residual_likelihood'] == '4') ? 'selected' : ''; ?>>4 - High (Likely, 50-75% chance)</option>
-                                    <option value="5" <?php echo (isset($_POST['residual_likelihood']) && $_POST['residual_likelihood'] == '5') ? 'selected' : ''; ?>>5 - Very High (Almost certain, &gt;75% chance)</option>
+                                    <option value="">Select</option>
+                                    <option value="1">1 - Rare (0-5%)</option>
+                                    <option value="2">2 - Unlikely (6-25%)</option>
+                                    <option value="3">3 - Possible (26-50%)</option>
+                                    <option value="4">4 - Likely (51-75%)</option>
+                                    <option value="5">5 - Almost Certain (76-100%)</option>
                                 </select>
                             </div>
                             
                             <div class="form-group">
-                                <label class="form-label">
-                                    Consequence (C) *
-                                </label>
+                                <label class="form-label">Consequence (1-5) *</label>
                                 <select name="residual_consequence" class="form-control" required onchange="calculateRating('residual')">
-                                    <option value="">Select Consequence</option>
-                                    <option value="1" <?php echo (isset($_POST['residual_consequence']) && $_POST['residual_consequence'] == '1') ? 'selected' : ''; ?>>1 - Very Low (Minimal impact)</option>
-                                    <option value="2" <?php echo (isset($_POST['residual_consequence']) && $_POST['residual_consequence'] == '2') ? 'selected' : ''; ?>>2 - Low (Minor impact, easily manageable)</option>
-                                    <option value="3" <?php echo (isset($_POST['residual_consequence']) && $_POST['residual_consequence'] == '3') ? 'selected' : ''; ?>>3 - Medium (Moderate impact, management attention required)</option>
-                                    <option value="4" <?php echo (isset($_POST['residual_consequence']) && $_POST['residual_consequence'] == '4') ? 'selected' : ''; ?>>4 - High (Significant impact on operations)</option>
-                                    <option value="5" <?php echo (isset($_POST['residual_consequence']) && $_POST['residual_consequence'] == '5') ? 'selected' : ''; ?>>5 - Very High (Severe impact, threatens business continuity)</option>
+                                    <option value="">Select</option>
+                                    <option value="1">1 - Insignificant</option>
+                                    <option value="2">2 - Minor</option>
+                                    <option value="3">3 - Moderate</option>
+                                    <option value="4">4 - Major</option>
+                                    <option value="5">5 - Catastrophic</option>
                                 </select>
                             </div>
                             
                             <input type="hidden" name="residual_rating" id="residual_rating">
-                            <div id="residual_rating_display" class="rating-display">Rating: -</div>
+                            <div id="residual_display" class="rating-display">Rating will appear here</div>
                         </div>
                     </div>
                     
-                    <!-- RISK TREATMENT Section -->
+                    <!-- Section 3: Risk Treatment -->
                     <div class="section-header">
-                        🛡️ Step 3: Risk Treatment
+                        <i class="fas fa-tools"></i> Section 3: Risk Treatment
                     </div>
                     
                     <div class="form-group">
-                        <label class="form-label">
-                            Treatment Action
-                        </label>
-                        <textarea name="treatment_action" class="form-control" rows="3"
-                                   placeholder="Describe the treatment strategy and approach..."><?php echo isset($_POST['treatment_action']) ? htmlspecialchars($_POST['treatment_action']) : ''; ?></textarea>
+                        <label class="form-label">Treatment Action *</label>
+                        <select name="treatment_action" class="form-control" required>
+                            <option value="">Select Treatment</option>
+                            <option value="Avoid">Avoid - Eliminate the risk</option>
+                            <option value="Mitigate">Mitigate - Reduce likelihood/impact</option>
+                            <option value="Transfer">Transfer - Share or transfer risk</option>
+                            <option value="Accept">Accept - Accept the risk</option>
+                        </select>
                     </div>
                     
                     <div class="form-group">
-                        <label class="form-label">
-                            Controls / Action Plans
-                        </label>
-                        <textarea name="controls_action_plans" class="form-control" rows="4"
-                                   placeholder="List specific actions, controls, timelines, and resources required..."><?php echo isset($_POST['controls_action_plans']) ? htmlspecialchars($_POST['controls_action_plans']) : ''; ?></textarea>
+                        <label class="form-label">Controls/Action Plans *</label>
+                        <textarea name="controls_action_plans" class="form-control" required placeholder="Describe the controls and action plans to manage this risk"></textarea>
                         
-                        <!-- File Upload Section for Controls/Action Plans -->
+                        <!-- File Upload for Controls -->
                         <div class="file-upload-section">
                             <div class="file-input-wrapper">
-                                <input type="file" name="controls_documents[]" id="controls_documents" class="file-input" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png">
-                                <label for="controls_documents" class="file-input-label">
-                                    <i class="fas fa-cloud-upload-alt"></i>
-                                    <span>Click to upload or drag and drop files here</span>
+                                <input type="file" name="controls_documents[]" class="file-input" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png" onchange="handleFileSelect(this, 'controls-files')">
+                                <label class="file-input-label">
+                                    <i class="fas fa-upload"></i>
+                                    Upload Supporting Documents (Optional)
                                 </label>
                             </div>
-                            <div id="controls_file_list" class="file-list"></div>
+                            <div id="controls-files" class="file-list"></div>
                             <div class="file-types-info">
-                                Supported formats: PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT, JPG, PNG (Max 10MB per file)
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label class="form-label">
-                            Target Completion Date
-                        </label>
-                        <input type="date" name="target_completion_date" class="form-control"
-                               value="<?php echo isset($_POST['target_completion_date']) ? $_POST['target_completion_date'] : ''; ?>">
-                    </div>
-                    
-                    <div class="form-group">
-                        <label class="form-label">Risk Owner</label>
-                        <input type="text" class="form-control" value="<?php echo $_SESSION['full_name'] ?? $_SESSION['email']; ?> (You)" readonly style="background: #e9ecef;">
-                    </div>
-                    
-                    <!-- MONITORING & REVIEW Section -->
-                    <div class="section-header">
-                        📈 Step 4: Monitoring & Review
-                    </div>
-                    
-                    <div class="form-group">
-                        <label class="form-label">
-                            Progress Update
-                        </label>
-                        <textarea name="progress_update" class="form-control" rows="3"
-                                   placeholder="Provide current status, progress updates, or initial assessment..."><?php echo isset($_POST['progress_update']) ? htmlspecialchars($_POST['progress_update']) : ''; ?></textarea>
-                        
-                        <!-- File? htmlspecialchars($_POST['progress_update']) : ''; ?></textarea>
-                        
-                        <!-- File Upload Section for Progress Update -->
-                        <div class="file-upload-section">
-                            <div class="file-input-wrapper">
-                                <input type="file" name="progress_documents[]" id="progress_documents" class="file-input" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png">
-                                <label for="progress_documents" class="file-input-label">
-                                    <i class="fas fa-cloud-upload-alt"></i>
-                                    <span>Click to upload or drag and drop files here</span>
-                                </label>
-                            </div>
-                            <div id="progress_file_list" class="file-list"></div>
-                            <div class="file-types-info">
-                                Supported formats: PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT, JPG, PNG (Max 10MB per file)
+                                Supported: PDF, DOC, XLS, PPT, TXT, JPG, PNG (Max 10MB each)
                             </div>
                         </div>
                     </div>
                     
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label">
-                                Treatment Status
-                            </label>
-                            <select name="treatment_status" class="form-control">
-                                <option value="Not Started" <?php echo (!isset($_POST['treatment_status']) || $_POST['treatment_status'] == 'Not Started') ? 'selected' : ''; ?>>Not Started</option>
-                                <option value="In Progress" <?php echo (isset($_POST['treatment_status']) && $_POST['treatment_status'] == 'In Progress') ? 'selected' : ''; ?>>In Progress</option>
-                                <option value="On Hold" <?php echo (isset($_POST['treatment_status']) && $_POST['treatment_status'] == 'On Hold') ? 'selected' : ''; ?>>On Hold</option>
-                                <option value="Completed" <?php echo (isset($_POST['treatment_status']) && $_POST['treatment_status'] == 'Completed') ? 'selected' : ''; ?>>Completed</option>
-                                <option value="Cancelled" <?php echo (isset($_POST['treatment_status']) && $_POST['treatment_status'] == 'Cancelled') ? 'selected' : ''; ?>>Cancelled</option>
-                            </select>
+                            <label class="form-label">Target Completion Date</label>
+                            <input type="date" name="target_completion_date" class="form-control">
                         </div>
                         
                         <div class="form-group">
-                            <label class="form-label">
-                                Overall Risk Status
-                            </label>
-                            <select name="risk_status" class="form-control">
-                                <option value="pending" <?php echo (!isset($_POST['risk_status']) || $_POST['risk_status'] == 'pending') ? 'selected' : ''; ?>>Pending</option>
-                                <option value="in_progress" <?php echo (isset($_POST['risk_status']) && $_POST['risk_status'] == 'in_progress') ? 'selected' : ''; ?>>In Progress</option>
-                                <option value="completed" <?php echo (isset($_POST['risk_status']) && $_POST['risk_status'] == 'completed') ? 'selected' : ''; ?>>Completed</option>
-                                <option value="on_hold" <?php echo (isset($_POST['risk_status']) && $_POST['risk_status'] == 'on_hold') ? 'selected' : ''; ?>>On Hold</option>
+                            <label class="form-label">Treatment Status *</label>
+                            <select name="treatment_status" class="form-control" required>
+                                <option value="">Select Status</option>
+                                <option value="Not Started">Not Started</option>
+                                <option value="In Progress">In Progress</option>
+                                <option value="Completed">Completed</option>
+                                <option value="On Hold">On Hold</option>
                             </select>
                         </div>
                     </div>
                     
-                    <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 3rem; padding-top: 2rem; border-top: 2px solid #dee2e6;">
-                        <a href="risk_owner_dashboard.php" class="btn btn-secondary">Cancel</a>
-                        <button type="submit" name="submit_comprehensive_risk" class="btn" style="padding: 0.75rem 2rem;">
-                            📝 Add Risk to Register
+                    <!-- Section 4: Progress Update -->
+                    <div class="section-header">
+                        <i class="fas fa-chart-line"></i> Section 4: Progress Update
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Progress Update</label>
+                        <textarea name="progress_update" class="form-control" placeholder="Provide updates on the progress of risk treatment activities"></textarea>
+                        
+                        <!-- File Upload for Progress -->
+                        <div class="file-upload-section">
+                            <div class="file-input-wrapper">
+                                <input type="file" name="progress_documents[]" class="file-input" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png" onchange="handleFileSelect(this, 'progress-files')">
+                                <label class="file-input-label">
+                                    <i class="fas fa-upload"></i>
+                                    Upload Progress Documents (Optional)
+                                </label>
+                            </div>
+                            <div id="progress-files" class="file-list"></div>
+                            <div class="file-types-info">
+                                Supported: PDF, DOC, XLS, PPT, TXT, JPG, PNG (Max 10MB each)
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Risk Status *</label>
+                        <select name="risk_status" class="form-control" required>
+                            <option value="">Select Status</option>
+                            <option value="pending">Open</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="completed">Completed</option>
+                            <option value="cancelled">Cancelled</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Submit Button -->
+                    <div style="text-align: center; margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #dee2e6;">
+                        <button type="submit" name="submit_comprehensive_risk" class="btn" style="padding: 1rem 3rem; font-size: 1.1rem;">
+                            <i class="fas fa-save"></i> Submit Risk Report
                         </button>
                     </div>
                 </form>
@@ -1460,382 +1303,183 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
     </div>
     
     <script>
-        // File upload handling
-        function setupFileUpload(inputId, listId) {
-            const fileInput = document.getElementById(inputId);
-            const fileList = document.getElementById(listId);
-            const uploadSection = fileInput.closest('.file-upload-section');
-            
-            let selectedFiles = [];
-            
-            fileInput.addEventListener('change', function(e) {
-                handleFiles(e.target.files);
-            });
-            
-            // Drag and drop functionality
-            uploadSection.addEventListener('dragover', function(e) {
-                e.preventDefault();
-                uploadSection.classList.add('dragover');
-            });
-            
-            uploadSection.addEventListener('dragleave', function(e) {
-                e.preventDefault();
-                uploadSection.classList.remove('dragover');
-            });
-            
-            uploadSection.addEventListener('drop', function(e) {
-                e.preventDefault();
-                uploadSection.classList.remove('dragover');
-                handleFiles(e.dataTransfer.files);
-            });
-            
-            function handleFiles(files) {
-                for (let file of files) {
-                    if (validateFile(file)) {
-                        selectedFiles.push(file);
-                    }
-                }
-                updateFileList();
-                updateFileInput();
-            }
-            
-            function validateFile(file) {
-                const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                                     'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                                    'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                                    'text/plain', 'image/jpeg', 'image/jpg', 'image/png'];
-                const maxSize = 10 * 1024 * 1024; // 10MB
-                
-                if (!allowedTypes.includes(file.type)) {
-                    alert(`File type not allowed: ${file.name}`);
-                    return false;
-                }
-                
-                if (file.size > maxSize) {
-                    alert(`File too large: ${file.name} (max 10MB)`);
-                    return false;
-                }
-                
-                return true;
-            }
-            
-            function updateFileList() {
-                fileList.innerHTML = '';
-                selectedFiles.forEach((file, index) => {
-                    const fileItem = document.createElement('div');
-                    fileItem.className = 'file-item';
-                    fileItem.innerHTML = `
-                        <div class="file-info">
-                            <i class="fas fa-file"></i>
-                            <span class="file-name">${file.name}</span>
-                            <span class="file-size">(${formatFileSize(file.size)})</span>
-                        </div>
-                        <button type="button" class="file-remove" onclick="removeFile(${index}, '${inputId}', '${listId}')">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    `;
-                    fileList.appendChild(fileItem);
-                });
-            }
-            
-            function updateFileInput() {
-                const dt = new DataTransfer();
-                selectedFiles.forEach(file => dt.items.add(file));
-                fileInput.files = dt.files;
-            }
-            
-            // Store reference for removal function
-            window[`selectedFiles_${inputId}`] = selectedFiles;
-            window[`updateFileList_${inputId}`] = updateFileList;
-            window[`updateFileInput_${inputId}`] = updateFileInput;
-        }
-        
-        function removeFile(index, inputId, listId) {
-            const selectedFiles = window[`selectedFiles_${inputId}`];
-            const updateFileList = window[`updateFileList_${inputId}`];
-            const updateFileInput = window[`updateFileInput_${inputId}`];
-            
-            selectedFiles.splice(index, 1);
-            updateFileList();
-            updateFileInput();
-        }
-        
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-        
+        // Risk rating calculation
         function calculateRating(type) {
             const likelihood = document.querySelector(`select[name="${type}_likelihood"]`).value;
             const consequence = document.querySelector(`select[name="${type}_consequence"]`).value;
-            const display = document.getElementById(`${type}_rating_display`);
-            const hiddenInput = document.getElementById(`${type}_rating`);
             
             if (likelihood && consequence) {
                 const rating = parseInt(likelihood) * parseInt(consequence);
-                let ratingClass = 'rating-low';
-                let ratingText = 'Low';
+                document.getElementById(`${type}_rating`).value = rating;
+                
+                let ratingText = '';
+                let ratingClass = '';
                 
                 if (rating >= 15) {
+                    ratingText = `Critical (${rating})`;
                     ratingClass = 'rating-critical';
-                    ratingText = 'Critical';
                 } else if (rating >= 9) {
+                    ratingText = `High (${rating})`;
                     ratingClass = 'rating-high';
-                    ratingText = 'High';
                 } else if (rating >= 4) {
+                    ratingText = `Medium (${rating})`;
                     ratingClass = 'rating-medium';
-                    ratingText = 'Medium';
+                } else {
+                    ratingText = `Low (${rating})`;
+                    ratingClass = 'rating-low';
                 }
                 
+                const display = document.getElementById(`${type}_display`);
+                display.textContent = ratingText;
                 display.className = `rating-display ${ratingClass}`;
-                display.textContent = `Rating: ${rating} (${ratingText})`;
-                hiddenInput.value = rating;
-                
-                // Update progress indicator
-                updateProgressIndicator();
-            } else {
-                display.className = 'rating-display';
-                display.textContent = 'Rating: -';
-                hiddenInput.value = '';
             }
         }
         
-        function updateProgressIndicator() {
-            const steps = document.querySelectorAll('.progress-step');
-            const form = document.getElementById('riskForm');
+        // File handling
+        function handleFileSelect(input, containerId) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
             
-            // Check completion of each section
-            const riskName = form.querySelector('[name="risk_name"]').value;
-            const inherentL = form.querySelector('[name="inherent_likelihood"]').value;
-            const inherentC = form.querySelector('[name="inherent_consequence"]').value;
-            const residualL = form.querySelector('[name="residual_likelihood"]').value;
-            const residualC = form.querySelector('[name="residual_consequence"]').value;
-            
-            // Update step indicators
-            steps[0].className = 'progress-step ' + (riskName ? 'completed' : 'active');
-            steps[1].className = 'progress-step ' + (inherentL && inherentC && residualL && residualC ? 'completed' : (riskName ? 'active' : ''));
-            steps[2].className = 'progress-step ' + (inherentL && inherentC && residualL && residualC ? 'active' : '');
-            steps[3].className = 'progress-step';
+            if (input.files.length > 0) {
+                for (let i = 0; i < input.files.length; i++) {
+                    const file = input.files[i];
+                    const fileItem = document.createElement('div');
+                    fileItem.className = 'file-item';
+                    
+                    const fileInfo = document.createElement('div');
+                    fileInfo.className = 'file-info';
+                    
+                    const fileName = document.createElement('span');
+                    fileName.className = 'file-name';
+                    fileName.textContent = file.name;
+                    
+                    const fileSize = document.createElement('span');
+                    fileSize.className = 'file-size';
+                    fileSize.textContent = `(${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+                    
+                    const removeBtn = document.createElement('button');
+                    removeBtn.className = 'file-remove';
+                    removeBtn.textContent = '×';
+                    removeBtn.type = 'button';
+                    removeBtn.onclick = function() {
+                        // Reset the input
+                        input.value = '';
+                        container.innerHTML = '';
+                    };
+                    
+                    fileInfo.appendChild(fileName);
+                    fileInfo.appendChild(fileSize);
+                    fileItem.appendChild(fileInfo);
+                    fileItem.appendChild(removeBtn);
+                    container.appendChild(fileItem);
+                }
+            }
         }
         
-        // Notification functionality - Synchronized with dashboard
-        let notificationDropdownVisible = false;
-        let readNotifications = JSON.parse(localStorage.getItem('readNotifications') || '[]');
+        // Drag and drop functionality
+        document.querySelectorAll('.file-upload-section').forEach(section => {
+            section.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                this.classList.add('dragover');
+            });
+            
+            section.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                this.classList.remove('dragover');
+            });
+            
+            section.addEventListener('drop', function(e) {
+                e.preventDefault();
+                this.classList.remove('dragover');
+                
+                const input = this.querySelector('.file-input');
+                const files = e.dataTransfer.files;
+                
+                // Create a new FileList-like object
+                const dt = new DataTransfer();
+                for (let i = 0; i < files.length; i++) {
+                    dt.items.add(files[i]);
+                }
+                input.files = dt.files;
+                
+                // Trigger the change event
+                const containerId = input.getAttribute('onchange').match(/'([^']+)'/)[1];
+                handleFileSelect(input, containerId);
+            });
+        });
         
+        // Notification functions
         function toggleNavNotifications() {
             const dropdown = document.getElementById('navNotificationDropdown');
             if (dropdown) {
-                notificationDropdownVisible = !notificationDropdownVisible;
-                dropdown.classList.toggle('show', notificationDropdownVisible);
+                dropdown.classList.toggle('show');
                 
-                if (notificationDropdownVisible) {
-                    positionNotificationDropdown();
-                    document.addEventListener('click', handleOutsideClick);
-                } else {
-                    document.removeEventListener('click', handleOutsideClick);
-                }
-            }
-        }
-        
-        function positionNotificationDropdown() {
-            const container = document.querySelector('.nav-notification-container');
-            const dropdown = document.getElementById('navNotificationDropdown');
-            
-            if (container && dropdown) {
+                // Position the dropdown
+                const container = dropdown.parentElement;
                 const rect = container.getBoundingClientRect();
-                const dropdownWidth = 400;
-                
-                let left = rect.left;
-                if (left + dropdownWidth > window.innerWidth) {
-                    left = window.innerWidth - dropdownWidth - 20;
-                }
-                if (left < 20) {
-                    left = 20;
-                }
-                
-                dropdown.style.left = left + 'px';
                 dropdown.style.top = (rect.bottom + 5) + 'px';
-            }
-        }
-        
-        function handleOutsideClick(event) {
-            const container = document.querySelector('.nav-notification-container');
-            const dropdown = document.getElementById('navNotificationDropdown');
-            
-            if (container && dropdown && 
-                !container.contains(event.target) && 
-                !dropdown.contains(event.target)) {
-                notificationDropdownVisible = false;
-                dropdown.classList.remove('show');
-                document.removeEventListener('click', handleOutsideClick);
+                dropdown.style.left = Math.max(10, rect.left - 200) + 'px';
             }
         }
         
         function markNavAsRead(notificationId) {
-            const notificationItem = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
-            if (notificationItem) {
-                notificationItem.classList.remove('unread');
-                notificationItem.classList.add('read');
+            const notification = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
+            if (notification) {
+                notification.classList.add('read');
+                notification.style.display = 'none';
                 
-                const markReadBtn = notificationItem.querySelector('.mark-read-btn');
-                if (markReadBtn) {
-                    markReadBtn.style.display = 'none';
+                // Update badge count
+                const badge = document.querySelector('.nav-notification-badge');
+                if (badge) {
+                    const currentCount = parseInt(badge.textContent);
+                    const newCount = Math.max(0, currentCount - 1);
+                    badge.textContent = newCount;
+                    
+                    if (newCount === 0) {
+                        badge.style.display = 'none';
+                        const bell = document.querySelector('.nav-notification-bell');
+                        if (bell) {
+                            bell.classList.remove('has-notifications');
+                        }
+                    }
                 }
-                
-                if (!readNotifications.includes(notificationId)) {
-                    readNotifications.push(notificationId);
-                    localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
-                }
-                
-                updateNotificationCount();
             }
         }
         
         function readAllNotifications() {
-            const notificationItems = document.querySelectorAll('.nav-notification-item');
-            notificationItems.forEach((item, index) => {
-                item.classList.remove('unread');
-                item.classList.add('read');
-                
-                const markReadBtn = item.querySelector('.mark-read-btn');
-                if (markReadBtn) {
-                    markReadBtn.style.display = 'none';
-                }
-                
-                if (!readNotifications.includes(index)) {
-                    readNotifications.push(index);
-                }
+            const notifications = document.querySelectorAll('.nav-notification-item');
+            notifications.forEach(notification => {
+                notification.classList.add('read');
+                notification.style.display = 'none';
             });
             
-            localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
-            updateNotificationCount();
+            // Hide badge
+            const badge = document.querySelector('.nav-notification-badge');
+            if (badge) {
+                badge.style.display = 'none';
+            }
+            
+            const bell = document.querySelector('.nav-notification-bell');
+            if (bell) {
+                bell.classList.remove('has-notifications');
+            }
         }
         
         function clearAllNotifications() {
-            const notificationItems = document.querySelectorAll('.nav-notification-item');
-            notificationItems.forEach((item, index) => {
-                item.style.display = 'none';
-                
-                if (!readNotifications.includes(index)) {
-                    readNotifications.push(index);
-                }
-            });
-            
-            localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
-            updateNotificationCount();
-            
-            // Close dropdown after clearing
-            notificationDropdownVisible = false;
             const dropdown = document.getElementById('navNotificationDropdown');
             if (dropdown) {
                 dropdown.classList.remove('show');
             }
-            
-            // Show empty state
-            const container = document.querySelector('.nav-notification-container');
-            if (container) {
-                container.classList.add('nav-notification-empty');
-            }
+            readAllNotifications();
         }
         
-        function updateNotificationCount() {
-            const badge = document.querySelector('.nav-notification-badge');
-            const bell = document.querySelector('.nav-notification-bell');
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(event) {
+            const dropdown = document.getElementById('navNotificationDropdown');
             const container = document.querySelector('.nav-notification-container');
             
-            const totalNotifications = document.querySelectorAll('.nav-notification-item').length;
-            const unreadCount = totalNotifications - readNotifications.length;
-            
-            if (badge) {
-                if (unreadCount > 0) {
-                    badge.textContent = unreadCount;
-                    badge.style.display = 'flex';
-                } else {
-                    badge.style.display = 'none';
-                }
-            }
-            
-            if (bell) {
-                if (unreadCount > 0) {
-                    bell.classList.add('has-notifications');
-                } else {
-                    bell.classList.remove('has-notifications');
-                }
-            }
-            
-            if (container) {
-                if (unreadCount === 0) {
-                    container.classList.add('nav-notification-empty');
-                } else {
-                    container.classList.remove('nav-notification-empty');
-                }
-            }
-        }
-        
-        // Initialize notification states on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            // Apply read states from localStorage
-            readNotifications.forEach(notificationId => {
-                const notificationItem = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
-                if (notificationItem) {
-                    notificationItem.classList.remove('unread');
-                    notificationItem.classList.add('read');
-                    
-                    const markReadBtn = notificationItem.querySelector('.mark-read-btn');
-                    if (markReadBtn) {
-                        markReadBtn.style.display = 'none';
-                    }
-                }
-            });
-            
-            updateNotificationCount();
-        });
-        
-        // Handle window resize for notification dropdown positioning
-        window.addEventListener('resize', function() {
-            if (notificationDropdownVisible) {
-                positionNotificationDropdown();
-            }
-        });
-        
-        // Initialize everything on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            // Setup file uploads
-            setupFileUpload('controls_documents', 'controls_file_list');
-            setupFileUpload('progress_documents', 'progress_file_list');
-            
-            // Calculate ratings on page load if values exist
-            calculateRating('inherent');
-            calculateRating('residual');
-            updateProgressIndicator();
-            
-            // Add event listeners for progress tracking
-            const inputs = document.querySelectorAll('input, select, textarea');
-            inputs.forEach(input => {
-                input.addEventListener('change', updateProgressIndicator);
-                input.addEventListener('input', updateProgressIndicator);
-            });
-        });
-        
-        // Form validation before submit
-        document.getElementById('riskForm').addEventListener('submit', function(e) {
-            const requiredFields = ['risk_name', 'risk_description', 'cause_of_risk', 'inherent_likelihood', 'inherent_consequence', 'residual_likelihood', 'residual_consequence'];
-            let missingFields = [];
-            
-            requiredFields.forEach(field => {
-                const input = document.querySelector(`[name="${field}"]`);
-                if (!input.value.trim()) {
-                    missingFields.push(input.previousElementSibling.textContent.replace(' *', ''));
-                }
-            });
-            
-            if (missingFields.length > 0) {
-                e.preventDefault();
-                alert('Please complete the following required fields:\n\n• ' + missingFields.join('\n• '));
-                return false;
+            if (dropdown && container && !container.contains(event.target)) {
+                dropdown.classList.remove('show');
             }
         });
     </script>
