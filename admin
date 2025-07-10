@@ -1,0 +1,349 @@
+<?php
+// session_start(); if(!isset($_SESSION['user_id'])) header("Location: login.php");
+
+// Database config - adjust credentials as needed
+$db_host = 'localhost';
+$db_user = 'root';
+$db_pass = '';
+$db_name = 'risk_management_system';
+
+// Connect to the database
+$mysqli = new mysqli($db_host, $db_user, $db_pass, $db_name);
+if ($mysqli->connect_errno) {
+    die("Failed to connect to MySQL: " . $mysqli->connect_error);
+}
+
+// Count Active Users
+$result = $mysqli->query("SELECT COUNT(*) as count FROM users WHERE status='active'");
+$active_users = ($row = $result->fetch_assoc()) ? $row['count'] : 0;
+
+// Count Locked Accounts
+$result = $mysqli->query("SELECT COUNT(*) as count FROM users WHERE status='locked'");
+$locked_accounts = ($row = $result->fetch_assoc()) ? $row['count'] : 0;
+
+// Count Pending Invites
+$result = $mysqli->query("SELECT COUNT(*) as count FROM invites WHERE status='pending'");
+$pending_invites = ($row = $result->fetch_assoc()) ? $row['count'] : 0;
+
+// Count Recent Logins (last 24h)
+$result = $mysqli->query("SELECT COUNT(*) as count FROM users WHERE last_login >= (NOW() - INTERVAL 1 DAY)");
+$recent_logins = ($row = $result->fetch_assoc()) ? $row['count'] : 0;
+
+// Login trends for past 7 days
+$login_trends = [];
+$result = $mysqli->query("
+    SELECT DATE(last_login) as day, COUNT(*) as count 
+    FROM users 
+    WHERE last_login >= (CURDATE() - INTERVAL 6 DAY)
+    GROUP BY day
+    ORDER BY day ASC
+");
+$trend_labels = [];
+$trend_data = [];
+// Fill with 0 for missing days
+for ($i = 6; $i >= 0; $i--) {
+    $date = date('Y-m-d', strtotime("-$i days"));
+    $trend_labels[$date] = 0;
+}
+while ($row = $result->fetch_assoc()) {
+    $trend_labels[$row['day']] = (int)$row['count'];
+}
+$labels_json = json_encode(array_keys($trend_labels));
+$data_json = json_encode(array_values($trend_labels));
+
+// User info for navbar (replace with session user if available)
+$user = ['name'=>'Admin'];
+
+// Close DB
+$mysqli->close();
+?>
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Dashboard | Risk Management System</title>
+  <meta charset="utf-8">
+  <style>
+    :root {
+      --company-red: #d32f2f;
+      --company-red-dark: #b71c1c;
+      --company-red-light: #ff6659;
+      --company-red-xlight: #ffd6d6;
+      --company-red-bg: #fff3f3;
+      --white: #ffffff;
+      --gray-bg: #f6f6f6;
+      --gray-card: #f9f9f9;
+      --font-main: 'Segoe UI', 'Arial', sans-serif;
+      --radius: 16px;
+      --shadow: 0 4px 24px #d32f2f22;
+    }
+    body {
+      background: linear-gradient(135deg, var(--company-red-bg) 65%, var(--company-red-xlight) 100%);
+      color: var(--company-red-dark);
+      font-family: var(--font-main);
+      margin: 0;
+      min-height: 100vh;
+    }
+    .navbar {
+      background: var(--white);
+      color: var(--company-red-dark);
+      padding: 1.1rem 2rem 1.1rem 232px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: var(--shadow);
+      border-bottom: 3px solid var(--company-red);
+      position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    }
+    .navbar h1 {
+      font-size: 1.45rem;
+      font-weight: bold;
+      margin: 0;
+      color: var(--company-red);
+      letter-spacing: 1.5px;
+      text-shadow: 0 1px 8px #d32f2f11;
+    }
+    .navbar .user {
+      font-size: 1.08rem;
+      color: var(--company-red-light);
+      font-weight: 500;
+      letter-spacing: 0.5px;
+    }
+    .navbar a.logout-btn {
+      color: #fff;
+      background: var(--company-red);
+      border-radius: 5px;
+      padding: 0.45em 1.3em;
+      margin-left: 1.4em;
+      border: none;
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 1em;
+      transition: background 0.16s;
+      box-shadow: 0 2px 8px var(--company-red)20;
+      cursor: pointer;
+    }
+    .navbar a.logout-btn:hover {
+      background: var(--company-red-dark);
+    }
+    .sidebar {
+      width: 230px;
+      background: var(--white);
+      height: 100vh;
+      position: fixed;
+      top: 0; left: 0;
+      padding-top: 85px;
+      box-shadow: 2px 0 24px #d32f2f11;
+      border-right: 2px solid var(--company-red);
+      z-index: 4;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .sidebar a {
+      display: block;
+      color: var(--company-red-dark);
+      padding: 1.15rem 2rem;
+      text-decoration: none;
+      font-size: 1.13rem;
+      font-weight: 500;
+      border-left: 5px solid transparent;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      margin-right: 0.8rem;
+      transition: background 0.13s, color 0.13s, border-color 0.18s;
+      letter-spacing: 0.3px;
+      margin-bottom: 0.18em;
+    }
+    .sidebar a.active,
+    .sidebar a:hover {
+      background: linear-gradient(90deg, var(--company-red-xlight) 0 65%, transparent 100%);
+      color: var(--company-red);
+      border-color: var(--company-red-light);
+      text-shadow: 0 1px 8px #d32f2f22;
+    }
+    .container {
+      margin-left: 230px;
+      padding: 3.7rem 2.7rem 2.5rem;
+      min-height: 100vh;
+      background: linear-gradient(120deg, var(--company-red-bg) 0%, var(--white) 100%);
+    }
+    h2 {
+      margin-top: 0;
+      letter-spacing: 0.6px;
+      color: var(--company-red-dark);
+      text-shadow: 0 1px 12px #d32f2f11;
+      font-weight: 700;
+    }
+    .cards {
+      display: flex;
+      gap: 2.2rem;
+      flex-wrap: wrap;
+      margin-bottom: 2.6rem;
+    }
+    .card {
+      background: linear-gradient(120deg, var(--gray-card) 80%, var(--company-red-xlight) 100%);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1.7rem 2.3rem 1.2rem 2.3rem;
+      min-width: 230px;
+      min-height: 120px;
+      flex: 1 1 240px;
+      max-width: 340px;
+      margin-bottom: 1.6rem;
+      border: 2px solid var(--company-red);
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.13s, box-shadow 0.14s, border-color 0.13s;
+    }
+    .card:hover {
+      transform: translateY(-3px) scale(1.027);
+      box-shadow: 0 8px 28px 0 var(--company-red)22;
+      border-color: var(--company-red-dark);
+    }
+    .card h3 {
+      margin: 0 0 0.7rem;
+      font-weight: 700;
+      color: var(--company-red-dark);
+      font-size: 1.15em;
+    }
+    .card .number {
+      font-size: 2.2rem;
+      font-weight: bold;
+      color: var(--company-red);
+      text-shadow: 0 1px 10px var(--company-red-xlight)22;
+      margin-bottom: 0.6em;
+      margin-top: 0.05em;
+      letter-spacing: 2px;
+    }
+    .card .icon-bg {
+      position: absolute;
+      right: 14px; top: 10px;
+      font-size: 3.1em;
+      opacity: 0.09;
+      color: var(--company-red);
+    }
+    .chart-section {
+      background: var(--white);
+      border: 2px solid var(--company-red-light);
+      border-radius: var(--radius);
+      box-shadow: 0 2px 12px #d32f2f13;
+      padding: 2.3rem 2.6rem 2.6rem 2.6rem;
+      margin-top: 2.3rem;
+      margin-bottom: 2.6rem;
+      max-width: 900px;
+    }
+    .chart-section h2 {
+      color: var(--company-red-dark);
+      font-weight: 600;
+      font-size: 1.18em;
+      margin-bottom: 1.5rem;
+      margin-top: 0;
+      text-shadow: 0 1px 6px #d32f2f15;
+    }
+    @media (max-width:1100px) {
+      .container { padding: 2.4rem 1.2rem 2.5rem 1.2rem;}
+      .cards { flex-direction: column; gap: 1.2rem;}
+      .chart-section { padding: 1rem;}
+      .navbar { padding-left: 0; }
+    }
+    @media (max-width:700px) {
+      .sidebar, .container {margin-left: 0; padding: 1rem;}
+      .sidebar {position: static; width:100%; height:auto; border-right: none;}
+      .cards {flex-direction: column;}
+    }
+  </style>
+</head>
+<body>
+  <div class="navbar">
+    <h1>Risk Management Admin Dashboard</h1>
+    <div class="user">
+      👤 <?= htmlspecialchars($user['name']) ?>
+      <a href="logout.php" class="logout-btn">Logout</a>
+    </div>
+  </div>
+  <div class="sidebar">
+    <a href="dashboard.php" class="active">Dashboard</a>
+    <a href="users.php">User Management</a>
+    <a href="invite_user.php">Invite User</a>
+    <a href="audit_logs.php">Audit Logs</a>
+    <a href="backup.php">Backup</a>
+  </div>
+  <div class="container">
+    <h2>Overview</h2>
+    <div class="cards">
+      <div class="card">
+        <span class="icon-bg">👤</span>
+        <h3>Active Users</h3>
+        <div class="number"><?= $active_users ?></div>
+      </div>
+      <div class="card">
+        <span class="icon-bg">🔒</span>
+        <h3>Locked Accounts</h3>
+        <div class="number"><?= $locked_accounts ?></div>
+      </div>
+      <div class="card">
+        <span class="icon-bg">✉️</span>
+        <h3>Pending Invites</h3>
+        <div class="number"><?= $pending_invites ?></div>
+      </div>
+      <div class="card">
+        <span class="icon-bg">⏰</span>
+        <h3>Recent Logins</h3>
+        <div class="number"><?= $recent_logins ?></div>
+      </div>
+    </div>
+    <div class="chart-section">
+      <h2>Login Trends (Past 7 Days)</h2>
+      <canvas id="loginChart" height="85"></canvas>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    // Login trends from PHP
+    const trendLabels = <?= $labels_json ?>;
+    const trendData = <?= $data_json ?>;
+    new Chart(document.getElementById('loginChart'), {
+      type: 'line',
+      data: {
+        labels: trendLabels.map(date => {
+          // Format as short day name, e.g., Mon, Tue
+          const d = new Date(date);
+          return d.toLocaleDateString('en-US', { weekday:'short' });
+        }),
+        datasets: [{
+          label: 'Logins',
+          data: trendData,
+          borderColor: '#d32f2f',
+          backgroundColor: 'rgba(211,47,47,0.10)',
+          pointBackgroundColor: '#fff',
+          pointBorderColor: '#d32f2f',
+          pointRadius: 6,
+          pointHoverRadius: 8,
+          tension: 0.38,
+          fill: true,
+        }]
+      },
+      options: {
+        plugins:{
+          legend:{display:false},
+          tooltip: {
+            backgroundColor: '#fff',
+            titleColor: '#d32f2f',
+            bodyColor: '#d32f2f',
+            borderColor: '#d32f2f',
+            borderWidth: 1.3,
+            cornerRadius: 6,
+            padding: 12
+          }
+        },
+        scales:{
+          y: { beginAtZero: true, grid: { color: "#d32f2f22" }, ticks: { color: "#b71c1c", font: { weight: 600 }} },
+          x: { grid: { color: "#d32f2f11" }, ticks: { color: "#b71c1c", font: { weight: 600 }} }
+        }
+      }
+    });
+    // Inactivity logout
+    let timer; function reset() {clearTimeout(timer);timer=setTimeout(()=>{window.location='logout.php?timeout=1'},60000);}
+    window.onload=reset;document.onmousemove=reset;document.onkeypress=reset;
+  </script>
+</body>
+</html>
