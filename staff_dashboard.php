@@ -31,8 +31,8 @@ if ($_POST && isset($_POST['submit_risk'])) {
     } else {
         try {
             // First, insert the risk
-            $query = "INSERT INTO risk_incidents (risk_name, risk_description, cause_of_risk, department, reported_by, created_at, updated_at) 
-              VALUES (:risk_name, :risk_description, :cause_of_risk, :department, :reported_by, NOW(), NOW())";
+            $query = "INSERT INTO risk_incidents (risk_name, risk_description, cause_of_risk, department, reported_by, created_at, updated_at)
+               VALUES (:risk_name, :risk_description, :cause_of_risk, :department, :reported_by, NOW(), NOW())";
             $stmt = $db->prepare($query);
             $stmt->bindParam(':risk_name', $risk_name);
             $stmt->bindParam(':risk_description', $risk_description);
@@ -58,6 +58,20 @@ if ($_POST && isset($_POST['submit_risk'])) {
                     $assign_stmt->bindParam(':risk_id', $risk_id);
                     
                     if ($assign_stmt->execute()) {
+                        // NEW: Create risk assignment record for notifications
+                        try {
+                            $assignment_query = "INSERT INTO risk_assignments (risk_id, assigned_to, assigned_by, status, assignment_date)
+                                                VALUES (:risk_id, :assigned_to, :assigned_by, 'Pending', NOW())";
+                            $assignment_stmt = $db->prepare($assignment_query);
+                            $assignment_stmt->bindParam(':risk_id', $risk_id);
+                            $assignment_stmt->bindParam(':assigned_to', $risk_owner['id']);
+                            $assignment_stmt->bindParam(':assigned_by', $_SESSION['user_id']); // Staff who reported the risk
+                            $assignment_stmt->execute();
+                        } catch (PDOException $e) {
+                            // Assignment table might not exist, but risk assignment still works
+                            error_log("Could not create assignment record: " . $e->getMessage());
+                        }
+                        
                         // Redirect to prevent resubmission on page reload
                         header("Location: staff_dashboard.php?success=assigned");
                         exit();
@@ -121,7 +135,6 @@ if (empty($user['department']) || $user['department'] === null) {
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -753,6 +766,7 @@ if (empty($user['department']) || $user['department'] === null) {
                 </div>
             </div>
         </header>
+
         <!-- Main Content -->
         <main class="main-content">
             <?php if (isset($success_message)): ?>
@@ -778,6 +792,7 @@ if (empty($user['department']) || $user['department'] === null) {
         </button>
     </div>
 </section>
+
                 <!-- Stats Card -->
                 <div class="stat-card" id="statsCard" onclick="scrollToReports()">
                     <div class="stat-number"><?php echo count($user_risks); ?></div>
@@ -790,10 +805,11 @@ if (empty($user['department']) || $user['department'] === null) {
                     </div>
                 </div>
             </div>
+
             <!-- Workflow Explanation Section -->
             <!-- Info Section -->
             <!-- Reports Section -->
-            <section class="reports-section show" id="reportsSection">
+            <section class="reports-section" id="reportsSection">
                 <div class="reports-header">
                     <h2 class="reports-title">
                         <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -844,7 +860,7 @@ if (empty($user['department']) || $user['department'] === null) {
             </section>
         </main>
     </div>
-    
+
     <!-- Risk Report Modal -->
     <div id="reportModal" class="modal">
         <div class="modal-content">
@@ -879,7 +895,7 @@ if (empty($user['department']) || $user['department'] === null) {
             </div>
         </div>
     </div>
-    
+
     <!-- Risk Details Modal -->
     <div id="riskModal" class="modal">
         <div class="modal-content">
@@ -911,18 +927,18 @@ if (empty($user['department']) || $user['department'] === null) {
             </div>
         </div>
     </div>
-    
+
     <div class="chatbot" onclick="openChatbot()" title="Need help? Click to chat">💬</div>
-    
+
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const statsCard = document.getElementById('statsCard');
             const reportsSection = document.getElementById('reportsSection');
             
-            // Show reports section by default
-            if (reportsSection && <?php echo count($user_risks); ?> > 0) {
-                reportsSection.style.display = 'block';
-                reportsSection.classList.add('show');
+            // Hide reports section by default - user must click to view
+            if (reportsSection) {
+                reportsSection.style.display = 'none';
+                reportsSection.classList.remove('show');
             }
             
             if (statsCard && <?php echo count($user_risks); ?> > 0) {
@@ -931,6 +947,7 @@ if (empty($user['department']) || $user['department'] === null) {
                 });
             }
         });
+
         function toggleReports() {
             const reportsSection = document.getElementById('reportsSection');
             if (reportsSection.classList.contains('show')) {
@@ -939,11 +956,13 @@ if (empty($user['department']) || $user['department'] === null) {
                 showReports();
             }
         }
+
         function showReports() {
             const reportsSection = document.getElementById('reportsSection');
             reportsSection.style.display = 'block';
             setTimeout(() => reportsSection.classList.add('show'), 10);
         }
+
         function closeReports() {
             const reportsSection = document.getElementById('reportsSection');
             reportsSection.classList.remove('show');
@@ -1012,6 +1031,7 @@ if (empty($user['department']) || $user['department'] === null) {
                 }
             });
         }
+
         function scrollToReports() {
             const reportsSection = document.getElementById('reportsSection');
             if (reportsSection) {
@@ -1022,10 +1042,10 @@ if (empty($user['department']) || $user['department'] === null) {
                 
                 // Smooth scroll to reports section
                 setTimeout(() => {
-                    reportsSection.scrollIntoView({ 
-                        behavior: 'smooth', 
-                        block: 'start' 
-                    });
+                    reportsSection.scrollIntoView({
+                         behavior: 'smooth',
+                         block: 'start'
+                     });
                 }, 100);
             }
         }

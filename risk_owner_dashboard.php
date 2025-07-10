@@ -31,14 +31,6 @@ if ($_POST && isset($_POST['action'])) {
             $stmt->bindParam(':risk_id', $risk_id);
             $stmt->execute();
             $success_message = "Risk successfully assigned to you!";
-        } elseif ($_POST['action'] === 'unassign_from_me') {
-            $risk_id = (int)$_POST['risk_id'];
-            $query = "UPDATE risk_incidents SET risk_owner_id = NULL, updated_at = NOW() WHERE id = :risk_id AND risk_owner_id = :owner_id";
-            $stmt = $db->prepare($query);
-            $stmt->bindParam(':owner_id', $_SESSION['user_id']);
-            $stmt->bindParam(':risk_id', $risk_id);
-            $stmt->execute();
-            $success_message = "Risk successfully unassigned from you!";
         }
     } catch (Exception $e) {
         $error_message = "Error: " . $e->getMessage();
@@ -1372,6 +1364,15 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             font-size: 0.9rem;
             margin-bottom: 0.25rem;
         }
+        .nav-notification-message {
+            color: #495057;
+            font-size: 0.85rem;
+            margin-bottom: 0.25rem;
+            background: #f8f9fa;
+            padding: 0.5rem;
+            border-radius: 0.25rem;
+            border-left: 3px solid #007bff;
+        }
         .nav-notification-date {
             color: #6c757d;
             font-size: 0.8rem;
@@ -1697,7 +1698,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             <div class="nav-content">
                 <ul class="nav-menu">
                     <li class="nav-item">
-                        <a href="javascript:void(0)" onclick="showTab('dashboard')" class="<?php echo !isset($_GET['tab']) ? 'active' : ''; ?>">
+                        <a href="risk_owner_dashboard.php" class="<?php echo !isset($_GET['tab']) ? 'active' : ''; ?>">
                             🏠 Dashboard
                         </a>
                     </li>
@@ -1707,12 +1708,12 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a href="javascript:void(0)" onclick="showTab('my-reports')" class="<?php echo isset($_GET['tab']) && $_GET['tab'] == 'my-reports' ? 'active' : ''; ?>">
+                        <a href="risk_owner_dashboard.php?tab=my-reports" class="<?php echo isset($_GET['tab']) && $_GET['tab'] == 'my-reports' ? 'active' : ''; ?>">
                             👀 My Reports
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a href="javascript:void(0)" onclick="showTab('procedures')" class="<?php echo isset($_GET['tab']) && $_GET['tab'] == 'procedures' ? 'active' : ''; ?>">
+                        <a href="risk_owner_dashboard.php?tab=procedures" class="<?php echo isset($_GET['tab']) && $_GET['tab'] == 'procedures' ? 'active' : ''; ?>">
                             📋 Procedures
                         </a>
                     </li>
@@ -2050,13 +2051,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                                         <a href="view_risk.php?id=<?php echo $risk['id']; ?>" style="background: #E60012; color: white; border: none; padding: 0.4rem 0.8rem; border-radius: 4px; font-size: 0.8rem; cursor: pointer; text-decoration: none;">
                                                             Manage
                                                         </a>
-                                                        <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to unassign this risk from yourself?')">
-                                                            <input type="hidden" name="action" value="unassign_from_me">
-                                                            <input type="hidden" name="risk_id" value="<?php echo $risk['id']; ?>">
-                                                            <button type="submit" style="background: transparent; color: #6c757d; border: 1px solid #6c757d; padding: 0.4rem 0.8rem; border-radius: 4px; font-size: 0.8rem; cursor: pointer;">
-                                                                Unassign
-                                                            </button>
-                                                        </form>
                                                     </div>
                                                 </td>
                                             </tr>
@@ -2217,11 +2211,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                     <td>
                                         <div class="assignment-actions">
                                             <a href="view_risk.php?id=<?php echo $risk['id']; ?>" class="btn btn-sm btn-primary">View Details</a>
-                                            <form method="POST" class="quick-assign-form" onsubmit="return confirm('Are you sure you want to unassign this risk from yourself?')">
-                                                <input type="hidden" name="action" value="unassign_from_me">
-                                                <input type="hidden" name="risk_id" value="<?php echo $risk['id']; ?>">
-                                                <button type="submit" class="btn btn-sm btn-outline">Unassign</button>
-                                            </form>
                                         </div>
                                     </td>
                                 </tr>
@@ -2291,15 +2280,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                     <td>
                                         <div class="assignment-actions">
                                             <a href="view_risk.php?id=<?php echo $risk['id']; ?>" class="btn btn-sm btn-primary">View Details</a>
-                                            <?php if ($risk['risk_owner_id'] != $_SESSION['user_id'] && $risk['risk_owner_id']): ?>
-                                                <form method="POST" class="quick-assign-form" onsubmit="return confirm('Are you sure you want to take over this risk?')">
-                                                    <input type="hidden" name="action" value="assign_to_me">
-                                                    <input type="hidden" name="risk_id" value="<?php echo $risk['id']; ?>">
-                                                    <button type="submit" class="btn btn-sm btn-outline">Take Over</button>
-                                                </form>
-                                            <?php elseif ($risk['risk_owner_id'] == $_SESSION['user_id']): ?>
-                                                <span class="badge badge-success">Mine</span>
-                                            <?php endif; ?>
                                         </div>
                                     </td>
                                 </tr>
@@ -2458,27 +2438,33 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                             </span>
                                         </td>
                                         <td style="padding: 1rem;">
-                                            <span style="color: #28a745; font-weight: 600; font-size: 0.9rem;">Me</span>
+                                            <?php if ($risk['risk_owner_name']): ?>
+                                                <span style="background: #d4edda; color: #155724; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 500;">
+                                                    <?php echo htmlspecialchars($risk['risk_owner_name']); ?>
+                                                </span>
+                                            <?php else: ?>
+                                                <span style="background: #fff3e0; color: #ef6c00; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 500;">
+                                                    Auto-Assigning...
+                                                </span>
+                                            <?php endif; ?>
                                         </td>
                                         <td style="padding: 1rem; color: #666; font-size: 0.9rem;">
-                                            <?php echo date('M j, Y', strtotime($risk['created_at'])); ?>
+                                            <?php echo date('M j, Y g:i A', strtotime($risk['created_at'])); ?>
                                         </td>
                                         <td style="padding: 1rem; color: #666; font-size: 0.9rem;">
-                                            <?php
-                                             if ($risk['updated_at'] != $risk['created_at']) {
-                                                echo date('M j, Y', strtotime($risk['updated_at']));
-                                            } else {
-                                                echo 'Not updated';
-                                            }
-                                        ?>
+                                            <?php echo date('M j, Y g:i A', strtotime($risk['updated_at'])); ?>
                                         </td>
                                         <td style="padding: 1rem;">
-                                            <a href="view_risk.php?id=<?php echo $risk['id']; ?>"
-                                               style="background: #E60012; color: white; padding: 0.5rem 1rem; border-radius: 4px; text-decoration: none; font-size: 0.9rem; font-weight: 500; display: inline-block; text-align: center; transition: all 0.3s ease;"
-                                               onmouseover="this.style.background='#B8000E';"
-                                               onmouseout="this.style.background='#E60012';">
-                                                View
-                                            </a>
+                                            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                                <a href="view_risk.php?id=<?php echo $risk['id']; ?>" style="background: #E60012; color: white; border: none; padding: 0.4rem 0.8rem; border-radius: 4px; font-size: 0.8rem; cursor: pointer; text-decoration: none;">
+                                                    View
+                                                </a>
+                                                <?php if ($risk['risk_status'] == 'pending'): ?>
+                                                    <a href="edit_risk.php?id=<?php echo $risk['id']; ?>" style="background: #ffc107; color: #212529; border: none; padding: 0.4rem 0.8rem; border-radius: 4px; font-size: 0.8rem; cursor: pointer; text-decoration: none;">
+                                                        Edit
+                                                    </a>
+                                                <?php endif; ?>
+                                            </div>
                                         </td>
                                     </tr>
                                     <?php endforeach; ?>
@@ -2494,328 +2480,246 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                 <div class="card">
                     <div class="card-header">
                         <h2 class="card-title">📋 Risk Management Procedures</h2>
-                        <p style="margin: 0; color: #666;">Guidelines and procedures for effective risk management</p>
+                        <p style="margin: 0; color: #666;">Complete guide for risk owners in the Airtel Risk Management System</p>
                     </div>
                     
                     <!-- Table of Contents -->
                     <div class="toc">
-                        <h4 style="margin-bottom: 1rem; color: #E60012;">📑 Table of Contents</h4>
+                        <h3>📑 Table of Contents</h3>
                         <ul>
-                            <li><a href="#risk-owner-role">1. Risk Owner Role & Responsibilities</a></li>
+                            <li><a href="#role-overview">1. Risk Owner Role Overview</a></li>
                             <li><a href="#risk-assessment">2. Risk Assessment Process</a></li>
-                            <li><a href="#risk-matrix">3. Risk Rating Matrix</a></li>
-                            <li><a href="#treatment-strategies">4. Risk Treatment Strategies</a></li>
-                            <li><a href="#monitoring-reporting">5. Monitoring & Reporting</a></li>
-                            <li><a href="#escalation">6. Escalation Procedures</a></li>
-                            <li><a href="#auto-assignment">7. Auto-Assignment System</a></li>
+                            <li><a href="#risk-matrix">3. Risk Assessment Matrix</a></li>
+                            <li><a href="#department-management">4. Department Risk Management</a></li>
+                            <li><a href="#auto-assignment">5. Automatic Risk Assignment</a></li>
+                            <li><a href="#best-practices">6. Best Practices</a></li>
                         </ul>
                     </div>
                     
-                    <!-- Risk Owner Role & Responsibilities -->
-                    <div id="risk-owner-role" class="procedure-section">
-                        <h3 class="procedure-title">1. Risk Owner Role & Responsibilities</h3>
+                    <!-- Role Overview -->
+                    <div class="procedure-section" id="role-overview">
+                        <h3 class="procedure-title">1. Risk Owner Role Overview</h3>
+                        <p>As a Risk Owner in the Airtel Risk Management System, you are responsible for managing risks within your department and ensuring proper risk assessment and treatment.</p>
                         
-                        <div class="field-definition">
-                            <div class="field-name">Primary Responsibilities</div>
-                            <div class="field-description">
-                                <ul>
-                                    <li><strong>Risk Identification:</strong> Identify and report risks within your department</li>
-                                    <li><strong>Risk Assessment:</strong> Evaluate likelihood and impact of assigned risks</li>
-                                    <li><strong>Treatment Planning:</strong> Develop and implement risk treatment strategies</li>
-                                    <li><strong>Monitoring:</strong> Regularly monitor and update risk status</li>
-                                    <li><strong>Reporting:</strong> Provide timely updates to risk management team</li>
-                                </ul>
-                            </div>
-                        </div>
-                        
-                        <div class="field-definition">
-                            <div class="field-name">Department-Specific Access</div>
-                            <div class="field-description">
-                                As a Risk Owner for <strong><?php echo $user['department']; ?></strong>, you have:
-                                <ul>
-                                    <li>Full access to all risks within your department</li>
-                                    <li>Ability to take ownership of unassigned departmental risks</li>
-                                    <li>Authority to assess and treat risks in your area of expertise</li>
-                                    <li>Responsibility for departmental risk reporting and compliance</li>
-                                </ul>
-                            </div>
-                        </div>
+                        <h4>Key Responsibilities:</h4>
+                        <ul>
+                            <li><strong>Risk Assessment:</strong> Evaluate and rate risks assigned to you</li>
+                            <li><strong>Risk Treatment:</strong> Develop and implement risk mitigation strategies</li>
+                            <li><strong>Department Oversight:</strong> Monitor all risks within your department</li>
+                            <li><strong>Reporting:</strong> Report new risks discovered in your area</li>
+                            <li><strong>Status Updates:</strong> Keep risk statuses current and accurate</li>
+                        </ul>
                     </div>
                     
                     <!-- Risk Assessment Process -->
-                    <div id="risk-assessment" class="procedure-section">
+                    <div class="procedure-section" id="risk-assessment">
                         <h3 class="procedure-title">2. Risk Assessment Process</h3>
+                        <p>The risk assessment process involves evaluating both the likelihood and impact of identified risks.</p>
                         
+                        <h4>Assessment Fields:</h4>
                         <div class="field-definition">
-                            <div class="field-name">Step 1: Risk Identification</div>
+                            <div class="field-name">Inherent Risk (Before Controls)</div>
                             <div class="field-description">
-                                <ul>
-                                    <li>Clearly define the risk event or condition</li>
-                                    <li>Identify the source or cause of the risk</li>
-                                    <li>Determine the area or process affected</li>
-                                    <li>Categorize the risk type (Operational, Financial, Strategic, etc.)</li>
-                                </ul>
+                                <strong>Inherent Likelihood:</strong> Probability of the risk occurring without any controls (1-5 scale)<br>
+                                <strong>Inherent Consequence:</strong> Impact if the risk occurs without controls (1-5 scale)
                             </div>
                         </div>
                         
                         <div class="field-definition">
-                            <div class="field-name">Step 2: Likelihood Assessment</div>
+                            <div class="field-name">Residual Risk (After Controls)</div>
                             <div class="field-description">
-                                Rate the probability of the risk occurring on a scale of 1-5:
-                                <ul>
-                                    <li><strong>1 - Very Low:</strong> Highly unlikely to occur (0-5% chance)</li>
-                                    <li><strong>2 - Low:</strong> Unlikely to occur (6-25% chance)</li>
-                                    <li><strong>3 - Medium:</strong> Possible to occur (26-50% chance)</li>
-                                    <li><strong>4 - High:</strong> Likely to occur (51-75% chance)</li>
-                                    <li><strong>5 - Very High:</strong> Almost certain to occur (76-100% chance)</li>
-                                </ul>
+                                <strong>Residual Likelihood:</strong> Probability after implementing controls (1-5 scale)<br>
+                                <strong>Residual Consequence:</strong> Impact after implementing controls (1-5 scale)
                             </div>
                         </div>
                         
                         <div class="field-definition">
-                            <div class="field-name">Step 3: Impact Assessment</div>
+                            <div class="field-name">Current Risk Assessment</div>
                             <div class="field-description">
-                                Rate the potential impact if the risk occurs on a scale of 1-5:
-                                <ul>
-                                    <li><strong>1 - Very Low:</strong> Minimal impact on operations/objectives</li>
-                                    <li><strong>2 - Low:</strong> Minor impact, easily manageable</li>
-                                    <li><strong>3 - Medium:</strong> Moderate impact, requires attention</li>
-                                    <li><strong>4 - High:</strong> Significant impact on operations/objectives</li>
-                                    <li><strong>5 - Very High:</strong> Severe impact, major disruption</li>
-                                </ul>
+                                <strong>Probability:</strong> Current likelihood of occurrence (1-5 scale)<br>
+                                <strong>Impact:</strong> Current potential impact (1-5 scale)
                             </div>
                         </div>
                     </div>
                     
-                    <!-- Risk Rating Matrix -->
-                    <div id="risk-matrix" class="procedure-section">
-                        <h3 class="procedure-title">3. Risk Rating Matrix</h3>
-                        
-                        <div class="field-definition">
-                            <div class="field-name">Risk Score Calculation</div>
-                            <div class="field-description">
-                                Risk Score = Likelihood × Impact
-                            </div>
-                        </div>
+                    <!-- Risk Matrix -->
+                    <div class="procedure-section" id="risk-matrix">
+                        <h3 class="procedure-title">3. Risk Assessment Matrix</h3>
+                        <p>Use this matrix to determine risk levels based on likelihood and impact ratings:</p>
                         
                         <table class="risk-matrix-table">
                             <thead>
                                 <tr>
-                                    <th rowspan="2">Likelihood</th>
-                                    <th colspan="5">Impact</th>
-                                </tr>
-                                <tr>
-                                    <th>1</th>
-                                    <th>2</th>
-                                    <th>3</th>
-                                    <th>4</th>
-                                    <th>5</th>
+                                    <th>Impact →<br>Likelihood ↓</th>
+                                    <th>1 (Very Low)</th>
+                                    <th>2 (Low)</th>
+                                    <th>3 (Medium)</th>
+                                    <th>4 (High)</th>
+                                    <th>5 (Very High)</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr>
-                                    <th>5</th>
-                                    <td class="matrix-2">5</td>
-                                    <td class="matrix-3">10</td>
-                                    <td class="matrix-4">15</td>
-                                    <td class="matrix-5">20</td>
-                                    <td class="matrix-5">25</td>
+                                    <th>5 (Very Likely)</th>
+                                    <td class="matrix-2">5 - Medium</td>
+                                    <td class="matrix-3">10 - High</td>
+                                    <td class="matrix-4">15 - Critical</td>
+                                    <td class="matrix-5">20 - Critical</td>
+                                    <td class="matrix-5">25 - Critical</td>
                                 </tr>
                                 <tr>
-                                    <th>4</th>
-                                    <td class="matrix-2">4</td>
-                                    <td class="matrix-2">8</td>
-                                    <td class="matrix-3">12</td>
-                                    <td class="matrix-4">16</td>
-                                    <td class="matrix-5">20</td>
+                                    <th>4 (Likely)</th>
+                                    <td class="matrix-2">4 - Medium</td>
+                                    <td class="matrix-2">8 - Medium</td>
+                                    <td class="matrix-3">12 - High</td>
+                                    <td class="matrix-4">16 - Critical</td>
+                                    <td class="matrix-5">20 - Critical</td>
                                 </tr>
                                 <tr>
-                                    <th>3</th>
-                                    <td class="matrix-1">3</td>
-                                    <td class="matrix-2">6</td>
-                                    <td class="matrix-2">9</td>
-                                    <td class="matrix-3">12</td>
-                                    <td class="matrix-4">15</td>
+                                    <th>3 (Possible)</th>
+                                    <td class="matrix-1">3 - Low</td>
+                                    <td class="matrix-2">6 - Medium</td>
+                                    <td class="matrix-3">9 - High</td>
+                                    <td class="matrix-3">12 - High</td>
+                                    <td class="matrix-4">15 - Critical</td>
                                 </tr>
                                 <tr>
-                                    <th>2</th>
-                                    <td class="matrix-1">2</td>
-                                    <td class="matrix-1">4</td>
-                                    <td class="matrix-2">6</td>
-                                    <td class="matrix-2">8</td>
-                                    <td class="matrix-3">10</td>
+                                    <th>2 (Unlikely)</th>
+                                    <td class="matrix-1">2 - Low</td>
+                                    <td class="matrix-2">4 - Medium</td>
+                                    <td class="matrix-2">6 - Medium</td>
+                                    <td class="matrix-2">8 - Medium</td>
+                                    <td class="matrix-3">10 - High</td>
                                 </tr>
                                 <tr>
-                                    <th>1</th>
-                                    <td class="matrix-1">1</td>
-                                    <td class="matrix-1">2</td>
-                                    <td class="matrix-1">3</td>
-                                    <td class="matrix-2">4</td>
-                                    <td class="matrix-2">5</td>
+                                    <th>1 (Very Unlikely)</th>
+                                    <td class="matrix-1">1 - Low</td>
+                                    <td class="matrix-1">2 - Low</td>
+                                    <td class="matrix-1">3 - Low</td>
+                                    <td class="matrix-2">4 - Medium</td>
+                                    <td class="matrix-2">5 - Medium</td>
                                 </tr>
                             </tbody>
                         </table>
                         
-                        <div class="field-definition">
-                            <div class="field-name">Risk Level Classification</div>
-                            <div class="field-description">
-                                <ul>
-                                    <li><strong>Low Risk (1-3):</strong> <span class="matrix-1">Monitor and review periodically</span></li>
-                                    <li><strong>Medium Risk (4-8):</strong> <span class="matrix-2">Implement basic controls and monitor</span></li>
-                                    <li><strong>High Risk (9-14):</strong> <span class="matrix-3">Immediate attention and treatment required</span></li>
-                                    <li><strong>Critical Risk (15-25):</strong> <span class="matrix-5">Urgent action required, escalate immediately</span></li>
-                                </ul>
-                            </div>
-                        </div>
+                        <h4>Risk Level Definitions:</h4>
+                        <ul>
+                            <li><strong>Low (1-3):</strong> Acceptable risk, monitor regularly</li>
+                            <li><strong>Medium (4-8):</strong> Manageable risk, implement controls</li>
+                            <li><strong>High (9-14):</strong> Significant risk, immediate action required</li>
+                            <li><strong>Critical (15-25):</strong> Unacceptable risk, urgent action required</li>
+                        </ul>
                     </div>
                     
-                    <!-- Treatment Strategies -->
-                    <div id="treatment-strategies" class="procedure-section">
-                        <h3 class="procedure-title">4. Risk Treatment Strategies</h3>
+                    <!-- Department Management -->
+                    <div class="procedure-section" id="department-management">
+                        <h3 class="procedure-title">4. Department Risk Management</h3>
+                        <p>As a risk owner, you have access to manage risks within your specific department:</p>
                         
                         <div class="department-grid">
-                            <div class="department-card">
-                                <div class="department-title">🛡️ Risk Avoidance</div>
-                                <p>Eliminate the risk by avoiding the activity or changing the process entirely.</p>
-                                <strong>When to use:</strong> High-impact risks that can be eliminated without significant business impact.
-                            </div>
+                            <?php
+                            $departments = [
+                                'IT' => 'Information Technology risks including cybersecurity, system failures, and data breaches',
+                                'Finance' => 'Financial risks including fraud, compliance, and budget overruns',
+                                'Operations' => 'Operational risks including process failures and service disruptions',
+                                'HR' => 'Human resources risks including compliance and employee-related issues',
+                                'Legal' => 'Legal and regulatory compliance risks',
+                                'Marketing' => 'Marketing and brand reputation risks'
+                            ];
                             
-                            <div class="department-card">
-                                <div class="department-title">🔄 Risk Mitigation</div>
-                                <p>Reduce the likelihood or impact of the risk through controls and preventive measures.</p>
-                                <strong>When to use:</strong> Most common approach for medium to high risks.
-                            </div>
-                            
-                            <div class="department-card">
-                                <div class="department-title">🤝 Risk Transfer</div>
-                                <p>Transfer the risk to a third party through insurance, contracts, or outsourcing.</p>
-                                <strong>When to use:</strong> Risks that can be more effectively managed by others.
-                            </div>
-                            
-                            <div class="department-card">
-                                <div class="department-title">✅ Risk Acceptance</div>
-                                <p>Accept the risk and its potential consequences, usually with monitoring.</p>
-                                <strong>When to use:</strong> Low-impact risks or when treatment cost exceeds benefit.
-                            </div>
+                            foreach ($departments as $dept => $description) {
+                                if ($dept == $user['department']) {
+                                    echo "<div class='department-card' style='border-left-color: #E60012; background: #fff5f5;'>";
+                                    echo "<div class='department-title' style='color: #E60012;'>🏢 {$dept} (Your Department)</div>";
+                                    echo "<p style='margin: 0; color: #666;'>{$description}</p>";
+                                    echo "</div>";
+                                    break;
+                                }
+                            }
+                            ?>
                         </div>
+                        
+                        <h4>Department Access Levels:</h4>
+                        <ul>
+                            <li><strong>View All Department Risks:</strong> See all risks reported within your department</li>
+                            <li><strong>Take Ownership:</strong> Assign unowned risks to yourself</li>
+                            <li><strong>Transfer Ownership:</strong> Reassign risks to other department members</li>
+                            <li><strong>Update Status:</strong> Change risk status and add progress notes</li>
+                        </ul>
                     </div>
                     
-                    <!-- Monitoring & Reporting -->
-                    <div id="monitoring-reporting" class="procedure-section">
-                        <h3 class="procedure-title">5. Monitoring & Reporting</h3>
-                        
-                        <div class="field-definition">
-                            <div class="field-name">Regular Review Schedule</div>
-                            <div class="field-description">
-                                <ul>
-                                    <li><strong>Critical Risks:</strong> Weekly review and updates</li>
-                                    <li><strong>High Risks:</strong> Bi-weekly review and updates</li>
-                                    <li><strong>Medium Risks:</strong> Monthly review and updates</li>
-                                    <li><strong>Low Risks:</strong> Quarterly review and updates</li>
-                                </ul>
-                            </div>
-                        </div>
-                        
-                        <div class="field-definition">
-                            <div class="field-name">Status Updates Required</div>
-                            <div class="field-description">
-                                <ul>
-                                    <li>Progress on treatment actions</li>
-                                    <li>Changes in risk level or status</li>
-                                    <li>New risks identified</li>
-                                    <li>Completion of treatment measures</li>
-                                    <li>Escalation of unresolved issues</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Escalation Procedures -->
-                    <div id="escalation" class="procedure-section">
-                        <h3 class="procedure-title">6. Escalation Procedures</h3>
-                        
-                        <div class="field-definition">
-                            <div class="field-name">When to Escalate</div>
-                            <div class="field-description">
-                                <ul>
-                                    <li>Risk level increases to Critical (15-25)</li>
-                                    <li>Treatment measures are not effective</li>
-                                    <li>Risk requires resources beyond your authority</li>
-                                    <li>Risk affects multiple departments</li>
-                                    <li>Regulatory or compliance implications</li>
-                                </ul>
-                            </div>
-                        </div>
-                        
-                        <div class="field-definition">
-                            <div class="field-name">Escalation Hierarchy</div>
-                            <div class="field-description">
-                                <ol>
-                                    <li><strong>Department Head:</strong> For departmental risks requiring additional resources</li>
-                                    <li><strong>Risk Management Team:</strong> For cross-departmental or complex risks</li>
-                                    <li><strong>Executive Management:</strong> For strategic or critical business risks</li>
-                                    <li><strong>Board Level:</strong> For risks affecting company reputation or viability</li>
-                                </ol>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Auto-Assignment System -->
-                    <div id="auto-assignment" class="procedure-section">
-                        <h3 class="procedure-title">7. Auto-Assignment System</h3>
+                    <!-- Auto Assignment -->
+                    <div class="procedure-section" id="auto-assignment">
+                        <h3 class="procedure-title">5. Automatic Risk Assignment</h3>
+                        <p>The system automatically assigns risks to appropriate risk owners based on department and expertise:</p>
                         
                         <div class="auto-assignment-flow">
-                            <h4 style="color: #2196f3; margin-bottom: 1rem;">🤖 How Auto-Assignment Works</h4>
-                            
+                            <h4>🔄 Auto-Assignment Process:</h4>
                             <div class="flow-step">
                                 <i class="fas fa-upload"></i>
-                                <span><strong>Step 1:</strong> Risk is reported in the system</span>
+                                <span>Risk is reported by any user</span>
                             </div>
-                            
                             <div class="flow-step">
                                 <i class="fas fa-search"></i>
-                                <span><strong>Step 2:</strong> System identifies the department affected</span>
+                                <span>System identifies the risk category and department</span>
                             </div>
-                            
                             <div class="flow-step">
                                 <i class="fas fa-users"></i>
-                                <span><strong>Step 3:</strong> System finds available Risk Owners in that department</span>
+                                <span>System finds available risk owners in that department</span>
                             </div>
-                            
                             <div class="flow-step">
-                                <i class="fas fa-balance-scale"></i>
-                                <span><strong>Step 4:</strong> Assignment based on workload and expertise</span>
+                                <i class="fas fa-user-check"></i>
+                                <span>Risk is automatically assigned to the most suitable risk owner</span>
                             </div>
-                            
                             <div class="flow-step">
                                 <i class="fas fa-bell"></i>
-                                <span><strong>Step 5:</strong> Risk Owner receives notification</span>
-                            </div>
-                            
-                            <div class="flow-step">
-                                <i class="fas fa-check-circle"></i>
-                                <span><strong>Step 6:</strong> Risk Owner can accept or reassign</span>
+                                <span>Risk owner receives notification of new assignment</span>
                             </div>
                         </div>
                         
-                        <div class="field-definition">
-                            <div class="field-name">Manual Override Options</div>
-                            <div class="field-description">
-                                <ul>
-                                    <li><strong>Take Ownership:</strong> Assign unassigned departmental risks to yourself</li>
-                                    <li><strong>Transfer Ownership:</strong> Reassign risks to other qualified Risk Owners</li>
-                                    <li><strong>Escalate:</strong> Move risks requiring higher authority or expertise</li>
-                                </ul>
-                            </div>
-                        </div>
+                        <h4>Manual Override Options:</h4>
+                        <ul>
+                            <li><strong>Self-Assignment:</strong> Take ownership of unassigned risks in your department</li>
+                            <li><strong>Transfer:</strong> Reassign risks to other qualified team members</li>
+                            <li><strong>Escalation:</strong> Escalate complex risks to senior management</li>
+                            <li><strong>Regulatory Issues:</strong> Involve legal and compliance teams</li>
+                        </ul>
+                    </div>
+                    
+                    <!-- Best Practices -->
+                    <div class="procedure-section" id="best-practices">
+                        <h3 class="procedure-title">6. Best Practices</h3>
+                        
+                        <h4>🎯 Risk Assessment Best Practices:</h4>
+                        <ul>
+                            <li><strong>Be Objective:</strong> Base assessments on facts and data, not assumptions</li>
+                            <li><strong>Consider Context:</strong> Evaluate risks within the current business environment</li>
+                            <li><strong>Document Rationale:</strong> Explain your reasoning for risk ratings</li>
+                            <li><strong>Regular Reviews:</strong> Reassess risks periodically as conditions change</li>
+                            <li><strong>Stakeholder Input:</strong> Consult with relevant team members and experts</li>
+                        </ul>
+                        
+                        <h4>📊 Risk Management Best Practices:</h4>
+                        <ul>
+                            <li><strong>Prioritize by Impact:</strong> Focus on high and critical risks first</li>
+                            <li><strong>Develop Action Plans:</strong> Create specific, measurable mitigation strategies</li>
+                            <li><strong>Monitor Progress:</strong> Track implementation of risk treatments</li>
+                            <li><strong>Communicate Effectively:</strong> Keep stakeholders informed of risk status</li>
+                            <li><strong>Learn from Experience:</strong> Use past incidents to improve risk management</li>
+                        </ul>
+                        
+                        <h4>🚨 Escalation Guidelines:</h4>
+                        <ul>
+                            <li><strong>Critical Risks:</strong> Immediately escalate to senior management</li>
+                            <li><strong>Cross-Department Risks:</strong> Coordinate with other department risk owners</li>
+                            <li><strong>Resource Constraints:</strong> Escalate when additional resources are needed</li>
+                            <li><strong>Regulatory Issues:</strong> Involve legal and compliance teams</li>
+                        </ul>
                     </div>
                 </div>
             </div>
         </main>
     </div>
-    
-    <!-- Include shared notification JavaScript -->
-    <?php renderNotificationJavaScript(); ?>
     
     <script>
         // Tab switching functionality
@@ -2839,10 +2743,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             }
             
             // Add active class to clicked nav link
-            const clickedLink = event ? event.target : document.querySelector(`[onclick="showTab('${tabName}')"]`);
-            if (clickedLink) {
-                clickedLink.classList.add('active');
-            }
+            event.target.classList.add('active');
         }
         
         // Risk management tabs functionality
@@ -2866,9 +2767,9 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             }
             
             // Add active class to clicked risk tab button
-            const clickedRiskBtn = document.getElementById(tabName + '-tab');
-            if (clickedRiskBtn) {
-                clickedRiskBtn.classList.add('active');
+            const clickedBtn = document.getElementById(tabName + '-tab');
+            if (clickedBtn) {
+                clickedBtn.classList.add('active');
             }
         }
         
@@ -2878,26 +2779,34 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             const statusFilter = document.getElementById('statusFilter');
             const tableRows = document.querySelectorAll('.risk-report-row');
             
-            function filterReports() {
-                const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
-                const statusFilter_value = statusFilter ? statusFilter.value : '';
-                
-                if (tableRows) {
-                    tableRows.forEach(row => {
-                        const searchData = row.getAttribute('data-search') || '';
-                        const statusData = row.getAttribute('data-status') || '';
-                        
-                        const matchesSearch = searchData.includes(searchTerm);
-                        const matchesStatus = !statusFilter_value || statusData === statusFilter_value;
-                        
-                        if (matchesSearch && matchesStatus) {
-                            row.style.display = '';
-                        } else {
-                            row.style.display = 'none';
-                        }
-                    });
-                }
+            
+function filterReports() {
+    const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+    const selectedStatus = statusFilter ? statusFilter.value : '';
+    
+    console.log('Filter - Selected Status:', selectedStatus); // Debug log
+    
+    if (tableRows) {
+        let visibleCount = 0;
+        tableRows.forEach(row => {
+            const searchData = row.getAttribute('data-search') || '';
+            const rowStatus = row.getAttribute('data-status') || '';
+            
+            console.log('Row Status:', rowStatus, 'Search Data:', searchData); // Debug log
+            
+            const matchesSearch = searchData.includes(searchTerm);
+            const matchesStatus = !selectedStatus || rowStatus === selectedStatus;
+            
+            if (matchesSearch && matchesStatus) {
+                row.style.display = '';
+                visibleCount++;
+            } else {
+                row.style.display = 'none';
             }
+        });
+        console.log('Visible rows:', visibleCount); // Debug log
+    }
+}
             
             if (searchInput) {
                 searchInput.addEventListener('input', filterReports);
@@ -2910,19 +2819,22 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
         
         // Chart initialization
         document.addEventListener('DOMContentLoaded', function() {
-            // Risk Category Chart with unique colors
-            const categoryCtx = document.getElementById('categoryChart');
-            if (categoryCtx) {
-                const categoryData = <?php echo json_encode($risk_by_category); ?>;
-                const categoryColors = <?php echo json_encode(array_slice($category_colors, 0, count($risk_by_category))); ?>;
-                
-                new Chart(categoryCtx, {
+            // Risk Level Distribution Chart
+            const levelCtx = document.getElementById('levelChart');
+            if (levelCtx) {
+                new Chart(levelCtx, {
                     type: 'doughnut',
                     data: {
-                        labels: categoryData.map(item => item.risk_category || 'Uncategorized'),
+                        labels: ['Low Risk', 'Medium Risk', 'High Risk', 'Critical Risk'],
                         datasets: [{
-                            data: categoryData.map(item => item.count),
-                            backgroundColor: categoryColors,
+                            data: [
+                                <?php echo $risk_levels['low_risks']; ?>,
+                                <?php echo $risk_levels['medium_risks']; ?>,
+                                <?php echo $risk_levels['high_risks']; ?>,
+                                <?php echo $risk_levels['high_risks']; ?>,
+                                <?php echo $risk_levels['critical_risks']; ?>
+                            ],
+                            backgroundColor: ['#28a745', '#ffc107', '#fd7e14', '#dc3545'],
                             borderWidth: 2,
                             borderColor: '#fff'
                         }]
@@ -2943,30 +2855,26 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                 });
             }
             
-            // Risk Level Chart
-            const levelCtx = document.getElementById('levelChart');
-            if (levelCtx) {
-                const levelData = <?php echo json_encode($risk_levels); ?>;
-                
-                new Chart(levelCtx, {
+            // Risk Category Distribution Chart (UPDATED with unique colors)
+            const categoryCtx = document.getElementById('categoryChart');
+            if (categoryCtx) {
+                new Chart(categoryCtx, {
                     type: 'bar',
                     data: {
-                        labels: ['Low', 'Medium', 'High', 'Critical'],
+                        labels: [<?php echo implode(',', array_map(function($cat) { return '"' . htmlspecialchars($cat['risk_category']) . '"'; }, $risk_by_category)); ?>],
                         datasets: [{
                             label: 'Number of Risks',
-                            data: [
-                                levelData.low_risks,
-                                levelData.medium_risks,
-                                levelData.high_risks,
-                                levelData.critical_risks
-                            ],
+                            data: [<?php echo implode(',', array_column($risk_by_category, 'count')); ?>],
                             backgroundColor: [
-                                '#28a745',
-                                '#ffc107',
-                                '#fd7e14',
-                                '#dc3545'
+                                <?php 
+                                for ($i = 0; $i < count($risk_by_category); $i++) {
+                                    echo '"' . $category_colors[$i % count($category_colors)] . '"';
+                                    if ($i < count($risk_by_category) - 1) echo ',';
+                                }
+                                ?>
                             ],
-                            borderWidth: 1
+                            borderWidth: 1,
+                            borderColor: '#fff'
                         }]
                     },
                     options: {
@@ -2990,23 +2898,60 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             }
         });
         
-        // Placeholder functions for quick actions
+        // Functions for quick actions
         function openTeamChat() {
-            alert('Team Chat feature coming soon! This will allow you to collaborate with your team members on risk management activities.');
+            window.location.href = "teamchat.php"
         }
-        
+       
         function openChatBot() {
-            alert('AI Assistant feature coming soon! This will provide intelligent assistance for risk assessment, treatment recommendations, and compliance guidance.');
+            alert('AI Assistant feature coming soon! This will provide intelligent help with risk assessment and management procedures.');
         }
+
+// Handle URL parameters for tab switching
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const tab = urlParams.get('tab');
+    
+    if (tab) {
+        showTab(tab);
         
-        // Initialize page
-        document.addEventListener('DOMContentLoaded', function() {
-            // Show dashboard tab by default
-            showTab('dashboard');
-            
-            // Show department overview risk tab by default
-            showRiskTab('department-overview');
+        // Update active nav link
+        document.querySelectorAll('.nav-item a').forEach(link => {
+            link.classList.remove('active');
         });
+        
+        const activeLink = document.querySelector(`a[href*="tab=${tab}"]`);
+        if (activeLink) {
+            activeLink.classList.add('active');
+        }
+    }
+});
+
+// Update the showTab function to handle URL updates
+function showTab(tabName) {
+    // Hide all tab contents
+    const tabContents = document.querySelectorAll('.tab-content');
+    tabContents.forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    // Show selected tab content
+    const selectedTab = document.getElementById(tabName + '-tab');
+    if (selectedTab) {
+        selectedTab.classList.add('active');
+    }
+    
+    // Update URL without page reload
+    if (tabName !== 'dashboard') {
+        const newUrl = new URL(window.location);
+        newUrl.searchParams.set('tab', tabName);
+        window.history.pushState({}, '', newUrl);
+    } else {
+        const newUrl = new URL(window.location);
+        newUrl.searchParams.delete('tab');
+        window.history.pushState({}, '', newUrl);
+    }
+}
     </script>
 </body>
 </html>

@@ -249,3 +249,155 @@ CREATE TABLE IF NOT EXISTS risk_assignments (
 
 -- Show the table was created
 DESCRIBE risk_assignments;
+
+
+
+
+-- Safe SQL script to add missing columns only if they don't exist
+
+-- Check and add columns to chat_rooms
+SET @sql = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE table_name = 'chat_rooms' 
+     AND column_name = 'is_archived' 
+     AND table_schema = DATABASE()) > 0,
+    'SELECT ''Column is_archived already exists in chat_rooms''',
+    'ALTER TABLE chat_rooms ADD COLUMN is_archived TINYINT DEFAULT 0'
+));
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE table_name = 'chat_rooms' 
+     AND column_name = 'archived_at' 
+     AND table_schema = DATABASE()) > 0,
+    'SELECT ''Column archived_at already exists in chat_rooms''',
+    'ALTER TABLE chat_rooms ADD COLUMN archived_at TIMESTAMP NULL'
+));
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Check and add columns to chat_participants
+SET @sql = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE table_name = 'chat_participants' 
+     AND column_name = 'last_message_read' 
+     AND table_schema = DATABASE()) > 0,
+    'SELECT ''Column last_message_read already exists in chat_participants''',
+    'ALTER TABLE chat_participants ADD COLUMN last_message_read INT DEFAULT 0'
+));
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE table_name = 'chat_participants' 
+     AND column_name = 'is_archived' 
+     AND table_schema = DATABASE()) > 0,
+    'SELECT ''Column is_archived already exists in chat_participants''',
+    'ALTER TABLE chat_participants ADD COLUMN is_archived TINYINT DEFAULT 0'
+));
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE table_name = 'chat_participants' 
+     AND column_name = 'last_seen' 
+     AND table_schema = DATABASE()) > 0,
+    'SELECT ''Column last_seen already exists in chat_participants''',
+    'ALTER TABLE chat_participants ADD COLUMN last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP'
+));
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Check and add columns to chat_messages
+SET @sql = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE table_name = 'chat_messages' 
+     AND column_name = 'is_deleted' 
+     AND table_schema = DATABASE()) > 0,
+    'SELECT ''Column is_deleted already exists in chat_messages''',
+    'ALTER TABLE chat_messages ADD COLUMN is_deleted TINYINT DEFAULT 0'
+));
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE table_name = 'chat_messages' 
+     AND column_name = 'message_type' 
+     AND table_schema = DATABASE()) > 0,
+    'SELECT ''Column message_type already exists in chat_messages''',
+    'ALTER TABLE chat_messages ADD COLUMN message_type ENUM(''text'', ''file'', ''system'') DEFAULT ''text'''
+));
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE table_name = 'chat_messages' 
+     AND column_name = 'file_name' 
+     AND table_schema = DATABASE()) > 0,
+    'SELECT ''Column file_name already exists in chat_messages''',
+    'ALTER TABLE chat_messages ADD COLUMN file_name VARCHAR(255) NULL'
+));
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE table_name = 'chat_messages' 
+     AND column_name = 'file_path' 
+     AND table_schema = DATABASE()) > 0,
+    'SELECT ''Column file_path already exists in chat_messages''',
+    'ALTER TABLE chat_messages ADD COLUMN file_path VARCHAR(500) NULL'
+));
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE table_name = 'chat_messages' 
+     AND column_name = 'file_size' 
+     AND table_schema = DATABASE()) > 0,
+    'SELECT ''Column file_size already exists in chat_messages''',
+    'ALTER TABLE chat_messages ADD COLUMN file_size INT NULL'
+));
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE table_name = 'chat_messages' 
+     AND column_name = 'file_type' 
+     AND table_schema = DATABASE()) > 0,
+    'SELECT ''Column file_type already exists in chat_messages''',
+    'ALTER TABLE chat_messages ADD COLUMN file_type VARCHAR(100) NULL'
+));
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Create indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_chat_messages_room_id ON chat_messages(room_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_sender_id ON chat_messages(sender_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_participants_room_user ON chat_participants(room_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_participants_user_id ON chat_participants(user_id);
+
+-- Insert default chat rooms if they don't exist
+INSERT IGNORE INTO chat_rooms (name, type, description, created_by) VALUES 
+('All Risk Owners', 'group', 'General discussion for all risk owners across departments', 1),
+('Risk Owners + Compliance', 'group', 'Communication channel with compliance team', 1);

@@ -516,6 +516,15 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             font-size: 0.9rem;
             margin-bottom: 0.25rem;
         }
+        .nav-notification-message {
+            color: #495057;
+            font-size: 0.85rem;
+            margin-bottom: 0.25rem;
+            background: #f8f9fa;
+            padding: 0.5rem;
+            border-radius: 0.25rem;
+            border-left: 3px solid #007bff;
+        }
         .nav-notification-date {
             color: #6c757d;
             font-size: 0.8rem;
@@ -1061,7 +1070,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                     <div class="alert alert-danger"><?php echo $error; ?></div>
                 <?php endif; ?>
                 
-                <form metho="POST" enctype="multipart/form-data">
+                <form method="POST" enctype="multipart/form-data">
                     <!-- Section 1: Risk Identification -->
                     <div class="section-header">
                         <i class="fas fa-search"></i> Section 1: Risk Identification
@@ -1406,81 +1415,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                 const containerId = input.getAttribute('onchange').match(/'([^']+)'/)[1];
                 handleFileSelect(input, containerId);
             });
-        });
-        
-        // Notification functions
-        function toggleNavNotifications() {
-            const dropdown = document.getElementById('navNotificationDropdown');
-            if (dropdown) {
-                dropdown.classList.toggle('show');
-                
-                // Position the dropdown
-                const container = dropdown.parentElement;
-                const rect = container.getBoundingClientRect();
-                dropdown.style.top = (rect.bottom + 5) + 'px';
-                dropdown.style.left = Math.max(10, rect.left - 200) + 'px';
-            }
-        }
-        
-        function markNavAsRead(notificationId) {
-            const notification = document.querySelector(`[data-nav-notification-id="${notificationId}"]`);
-            if (notification) {
-                notification.classList.add('read');
-                notification.style.display = 'none';
-                
-                // Update badge count
-                const badge = document.querySelector('.nav-notification-badge');
-                if (badge) {
-                    const currentCount = parseInt(badge.textContent);
-                    const newCount = Math.max(0, currentCount - 1);
-                    badge.textContent = newCount;
-                    
-                    if (newCount === 0) {
-                        badge.style.display = 'none';
-                        const bell = document.querySelector('.nav-notification-bell');
-                        if (bell) {
-                            bell.classList.remove('has-notifications');
-                        }
-                    }
-                }
-            }
-        }
-        
-        function readAllNotifications() {
-            const notifications = document.querySelectorAll('.nav-notification-item');
-            notifications.forEach(notification => {
-                notification.classList.add('read');
-                notification.style.display = 'none';
-            });
-            
-            // Hide badge
-            const badge = document.querySelector('.nav-notification-badge');
-            if (badge) {
-                badge.style.display = 'none';
-            }
-            
-            const bell = document.querySelector('.nav-notification-bell');
-            if (bell) {
-                bell.classList.remove('has-notifications');
-            }
-        }
-        
-        function clearAllNotifications() {
-            const dropdown = document.getElementById('navNotificationDropdown');
-            if (dropdown) {
-                dropdown.classList.remove('show');
-            }
-            readAllNotifications();
-        }
-        
-        // Close dropdown when clicking outside
-        document.addEventListener('click', function(event) {
-            const dropdown = document.getElementById('navNotificationDropdown');
-            const container = document.querySelector('.nav-notification-container');
-            
-            if (dropdown && container && !container.contains(event.target)) {
-                dropdown.classList.remove('show');
-            }
         });
     </script>
 </body>
