@@ -63,203 +63,178 @@ $mysqli->close();
   <title>Dashboard | Risk Management System</title>
   <meta charset="utf-8">
   <style>
-    :root {
-      --company-red: #d32f2f;
-      --company-red-dark: #b71c1c;
-      --company-red-light: #ff6659;
-      --company-red-xlight: #ffd6d6;
-      --company-red-bg: #fff3f3;
-      --white: #ffffff;
-      --gray-bg: #f6f6f6;
-      --gray-card: #f9f9f9;
-      --font-main: 'Segoe UI', 'Arial', sans-serif;
-      --radius: 16px;
-      --shadow: 0 4px 24px #d32f2f22;
-    }
+    /* Red Theme CSS */
     body {
-      background: linear-gradient(135deg, var(--company-red-bg) 65%, var(--company-red-xlight) 100%);
-      color: var(--company-red-dark);
-      font-family: var(--font-main);
+      font-family: 'Segoe UI', Arial, sans-serif;
       margin: 0;
-      min-height: 100vh;
+      padding: 0;
+      background-color: #fff5f5;
+      color: #333;
     }
+    
+    /* Header/Navbar */
     .navbar {
-      background: var(--white);
-      color: var(--company-red-dark);
-      padding: 1.1rem 2rem 1.1rem 232px;
+      background-color: #fff;
+      padding: 15px 30px;
+      box-shadow: 0 2px 10px rgba(211, 47, 47, 0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 3px solid #d32f2f;
+    }
+    
+    .navbar h1 {
+      color: #d32f2f;
+      margin: 0;
+      font-size: 1.5em;
+    }
+    
+    .user-info {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      box-shadow: var(--shadow);
-      border-bottom: 3px solid var(--company-red);
-      position: fixed; top: 0; left: 0; right: 0; z-index: 10;
     }
-    .navbar h1 {
-      font-size: 1.45rem;
-      font-weight: bold;
-      margin: 0;
-      color: var(--company-red);
-      letter-spacing: 1.5px;
-      text-shadow: 0 1px 8px #d32f2f11;
+    
+    .user-info span {
+      color: #d32f2f;
+      margin-right: 15px;
     }
-    .navbar .user {
-      font-size: 1.08rem;
-      color: var(--company-red-light);
-      font-weight: 500;
-      letter-spacing: 0.5px;
-    }
-    .navbar a.logout-btn {
-      color: #fff;
-      background: var(--company-red);
-      border-radius: 5px;
-      padding: 0.45em 1.3em;
-      margin-left: 1.4em;
-      border: none;
+    
+    .logout-btn {
+      background-color: #d32f2f;
+      color: white;
+      padding: 8px 15px;
+      border-radius: 4px;
       text-decoration: none;
       font-weight: 500;
-      font-size: 1em;
-      transition: background 0.16s;
-      box-shadow: 0 2px 8px var(--company-red)20;
-      cursor: pointer;
+      transition: background-color 0.3s;
     }
-    .navbar a.logout-btn:hover {
-      background: var(--company-red-dark);
+    
+    .logout-btn:hover {
+      background-color: #b71c1c;
     }
+    
+    /* Sidebar */
     .sidebar {
-      width: 230px;
-      background: var(--white);
+      width: 220px;
+      background-color: #fff;
       height: 100vh;
       position: fixed;
-      top: 0; left: 0;
-      padding-top: 85px;
-      box-shadow: 2px 0 24px #d32f2f11;
-      border-right: 2px solid var(--company-red);
-      z-index: 4;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
+      left: 0;
+      top: 0;
+      padding-top: 80px;
+      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+      border-right: 2px solid #d32f2f;
     }
+    
     .sidebar a {
       display: block;
-      color: var(--company-red-dark);
-      padding: 1.15rem 2rem;
+      padding: 12px 20px;
+      color: #333;
       text-decoration: none;
-      font-size: 1.13rem;
-      font-weight: 500;
-      border-left: 5px solid transparent;
-      border-radius: 0 var(--radius) var(--radius) 0;
-      margin-right: 0.8rem;
-      transition: background 0.13s, color 0.13s, border-color 0.18s;
-      letter-spacing: 0.3px;
-      margin-bottom: 0.18em;
+      border-left: 4px solid transparent;
+      transition: all 0.3s;
     }
-    .sidebar a.active,
-    .sidebar a:hover {
-      background: linear-gradient(90deg, var(--company-red-xlight) 0 65%, transparent 100%);
-      color: var(--company-red);
-      border-color: var(--company-red-light);
-      text-shadow: 0 1px 8px #d32f2f22;
+    
+    .sidebar a:hover, .sidebar a.active {
+      background-color: #ffebee;
+      color: #d32f2f;
+      border-left: 4px solid #d32f2f;
     }
+    
+    /* Main Content */
     .container {
-      margin-left: 230px;
-      padding: 3.7rem 2.7rem 2.5rem;
-      min-height: 100vh;
-      background: linear-gradient(120deg, var(--company-red-bg) 0%, var(--white) 100%);
+      margin-left: 220px;
+      padding: 30px;
     }
+    
     h2 {
+      color: #d32f2f;
       margin-top: 0;
-      letter-spacing: 0.6px;
-      color: var(--company-red-dark);
-      text-shadow: 0 1px 12px #d32f2f11;
-      font-weight: 700;
     }
+    
+    /* Cards */
     .cards {
       display: flex;
-      gap: 2.2rem;
       flex-wrap: wrap;
-      margin-bottom: 2.6rem;
+      gap: 20px;
+      margin-bottom: 30px;
     }
+    
     .card {
-      background: linear-gradient(120deg, var(--gray-card) 80%, var(--company-red-xlight) 100%);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      padding: 1.7rem 2.3rem 1.2rem 2.3rem;
-      min-width: 230px;
-      min-height: 120px;
-      flex: 1 1 240px;
-      max-width: 340px;
-      margin-bottom: 1.6rem;
-      border: 2px solid var(--company-red);
+      background-color: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+      flex: 1 1 200px;
+      min-width: 200px;
+      border-top: 4px solid #d32f2f;
       position: relative;
       overflow: hidden;
-      transition: transform 0.13s, box-shadow 0.14s, border-color 0.13s;
     }
-    .card:hover {
-      transform: translateY(-3px) scale(1.027);
-      box-shadow: 0 8px 28px 0 var(--company-red)22;
-      border-color: var(--company-red-dark);
-    }
+    
     .card h3 {
-      margin: 0 0 0.7rem;
-      font-weight: 700;
-      color: var(--company-red-dark);
-      font-size: 1.15em;
-    }
-    .card .number {
-      font-size: 2.2rem;
-      font-weight: bold;
-      color: var(--company-red);
-      text-shadow: 0 1px 10px var(--company-red-xlight)22;
-      margin-bottom: 0.6em;
-      margin-top: 0.05em;
-      letter-spacing: 2px;
-    }
-    .card .icon-bg {
-      position: absolute;
-      right: 14px; top: 10px;
-      font-size: 3.1em;
-      opacity: 0.09;
-      color: var(--company-red);
-    }
-    .chart-section {
-      background: var(--white);
-      border: 2px solid var(--company-red-light);
-      border-radius: var(--radius);
-      box-shadow: 0 2px 12px #d32f2f13;
-      padding: 2.3rem 2.6rem 2.6rem 2.6rem;
-      margin-top: 2.3rem;
-      margin-bottom: 2.6rem;
-      max-width: 900px;
-    }
-    .chart-section h2 {
-      color: var(--company-red-dark);
-      font-weight: 600;
-      font-size: 1.18em;
-      margin-bottom: 1.5rem;
       margin-top: 0;
-      text-shadow: 0 1px 6px #d32f2f15;
+      color: #d32f2f;
     }
-    @media (max-width:1100px) {
-      .container { padding: 2.4rem 1.2rem 2.5rem 1.2rem;}
-      .cards { flex-direction: column; gap: 1.2rem;}
-      .chart-section { padding: 1rem;}
-      .navbar { padding-left: 0; }
+    
+    .card .number {
+      font-size: 2.5em;
+      font-weight: bold;
+      color: #d32f2f;
     }
-    @media (max-width:700px) {
-      .sidebar, .container {margin-left: 0; padding: 1rem;}
-      .sidebar {position: static; width:100%; height:auto; border-right: none;}
-      .cards {flex-direction: column;}
+    
+    .card .icon {
+      position: absolute;
+      right: 15px;
+      top: 15px;
+      font-size: 2em;
+      opacity: 0.2;
+      color: #d32f2f;
+    }
+    
+    /* Chart Section */
+    .chart-section {
+      background-color: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+      margin-top: 20px;
+      border: 1px solid #ffcdd2;
+    }
+    
+    .chart-section h2 {
+      margin-top: 0;
+      font-size: 1.2em;
+    }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar {
+        width: 100%;
+        height: auto;
+        position: relative;
+        padding-top: 0;
+      }
+      
+      .container {
+        margin-left: 0;
+      }
+      
+      .cards {
+        flex-direction: column;
+      }
     }
   </style>
 </head>
 <body>
   <div class="navbar">
-    <h1>Risk Management Admin Dashboard</h1>
-    <div class="user">
-      👤 <?= htmlspecialchars($user['name']) ?>
+    <h1>Risk Management System</h1>
+    <div class="user-info">
+      <span>👤 <?= htmlspecialchars($user['name']) ?></span>
       <a href="logout.php" class="logout-btn">Logout</a>
     </div>
   </div>
+  
   <div class="sidebar">
     <a href="dashboard.php" class="active">Dashboard</a>
     <a href="users.php">User Management</a>
@@ -267,83 +242,107 @@ $mysqli->close();
     <a href="audit_logs.php">Audit Logs</a>
     <a href="backup.php">Backup</a>
   </div>
+  
   <div class="container">
     <h2>Overview</h2>
+    
     <div class="cards">
       <div class="card">
-        <span class="icon-bg">👤</span>
+        <div class="icon">👤</div>
         <h3>Active Users</h3>
         <div class="number"><?= $active_users ?></div>
       </div>
+      
       <div class="card">
-        <span class="icon-bg">🔒</span>
+        <div class="icon">🔒</div>
         <h3>Locked Accounts</h3>
         <div class="number"><?= $locked_accounts ?></div>
       </div>
+      
       <div class="card">
-        <span class="icon-bg">✉️</span>
+        <div class="icon">✉️</div>
         <h3>Pending Invites</h3>
         <div class="number"><?= $pending_invites ?></div>
       </div>
+      
       <div class="card">
-        <span class="icon-bg">⏰</span>
+        <div class="icon">⏰</div>
         <h3>Recent Logins</h3>
         <div class="number"><?= $recent_logins ?></div>
       </div>
     </div>
+    
     <div class="chart-section">
       <h2>Login Trends (Past 7 Days)</h2>
-      <canvas id="loginChart" height="85"></canvas>
+      <canvas id="loginChart" height="100"></canvas>
     </div>
   </div>
+  
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
-    // Login trends from PHP
-    const trendLabels = <?= $labels_json ?>;
-    const trendData = <?= $data_json ?>;
-    new Chart(document.getElementById('loginChart'), {
+    // Login trends chart
+    const ctx = document.getElementById('loginChart').getContext('2d');
+    const chart = new Chart(ctx, {
       type: 'line',
       data: {
-        labels: trendLabels.map(date => {
-          // Format as short day name, e.g., Mon, Tue
-          const d = new Date(date);
-          return d.toLocaleDateString('en-US', { weekday:'short' });
-        }),
+        labels: <?= $labels_json ?>,
         datasets: [{
           label: 'Logins',
-          data: trendData,
-          borderColor: '#d32f2f',
-          backgroundColor: 'rgba(211,47,47,0.10)',
-          pointBackgroundColor: '#fff',
-          pointBorderColor: '#d32f2f',
-          pointRadius: 6,
-          pointHoverRadius: 8,
-          tension: 0.38,
-          fill: true,
+          data: <?= $data_json ?>,
+          backgroundColor: 'rgba(211, 47, 47, 0.2)',
+          borderColor: 'rgba(211, 47, 47, 1)',
+          borderWidth: 2,
+          tension: 0.4,
+          fill: true
         }]
       },
       options: {
-        plugins:{
-          legend:{display:false},
-          tooltip: {
-            backgroundColor: '#fff',
-            titleColor: '#d32f2f',
-            bodyColor: '#d32f2f',
-            borderColor: '#d32f2f',
-            borderWidth: 1.3,
-            cornerRadius: 6,
-            padding: 12
+        responsive: true,
+        plugins: {
+          legend: {
+            display: false
           }
         },
-        scales:{
-          y: { beginAtZero: true, grid: { color: "#d32f2f22" }, ticks: { color: "#b71c1c", font: { weight: 600 }} },
-          x: { grid: { color: "#d32f2f11" }, ticks: { color: "#b71c1c", font: { weight: 600 }} }
+        scales: {
+          y: {
+            beginAtZero: true,
+            grid: {
+              color: 'rgba(211, 47, 47, 0.1)'
+            },
+            ticks: {
+              color: '#d32f2f'
+            }
+          },
+          x: {
+            grid: {
+              color: 'rgba(211, 47, 47, 0.1)'
+            },
+            ticks: {
+              color: '#d32f2f'
+            }
+          }
         }
       }
     });
-    // Inactivity logout
-    let timer; function reset() {clearTimeout(timer);timer=setTimeout(()=>{window.location='logout.php?timeout=1'},60000);}
-    window.onload=reset;document.onmousemove=reset;document.onkeypress=reset;
+    
+    // Inactivity timer
+    let inactivityTime = function () {
+      let time;
+      window.onload = resetTimer;
+      document.onmousemove = resetTimer;
+      document.onkeypress = resetTimer;
+      
+      function logout() {
+        window.location.href = 'logout.php?inactive=1';
+      }
+      
+      function resetTimer() {
+        clearTimeout(time);
+        time = setTimeout(logout, 1800000); // 30 minutes
+      }
+    };
+    
+    inactivityTime();
   </script>
 </body>
 </html>
