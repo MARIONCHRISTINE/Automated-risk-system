@@ -15,6 +15,21 @@ $db = $database->getConnection();
 // Get current user info
 $user = getCurrentUser();
 
+// Ensure department is available
+if (empty($user['department']) && isset($_SESSION['department'])) {
+    $user['department'] = $_SESSION['department'];
+} elseif (empty($user['department'])) {
+    // Get department from database
+    $dept_query = "SELECT department FROM users WHERE id = ?";
+    $dept_stmt = $db->prepare($dept_query);
+    $dept_stmt->execute([$_SESSION['user_id']]);
+    $dept_result = $dept_stmt->fetch(PDO::FETCH_ASSOC);
+    if ($dept_result && $dept_result['department']) {
+        $user['department'] = $dept_result['department'];
+        $_SESSION['department'] = $dept_result['department']; // Cache it
+    }
+}
+
 // Create enhanced chat tables
 try {
     // Chat rooms table (enhanced)
@@ -25,11 +40,21 @@ try {
         description TEXT,
         created_by INT,
         is_archived TINYINT DEFAULT 0,
+        is_permanent TINYINT DEFAULT 0,
         archived_at TIMESTAMP NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (created_by) REFERENCES users(id)
     )";
     $db->exec($createRoomsTable);
+
+    // Add is_permanent column if it doesn't exist
+    $checkPermanentColumn = "SHOW COLUMNS FROM chat_rooms LIKE 'is_permanent'";
+    $stmt = $db->prepare($checkPermanentColumn);
+    $stmt->execute();
+    if (!$stmt->fetch()) {
+        $addPermanentColumn = "ALTER TABLE chat_rooms ADD COLUMN is_permanent TINYINT DEFAULT 0";
+        $db->exec($addPermanentColumn);
+    }
 
     // Chat messages table (enhanced with file support)
     $createMessagesTable = "CREATE TABLE IF NOT EXISTS chat_messages (
@@ -70,22 +95,46 @@ try {
         mkdir($uploadDir, 0755, true);
     }
 
-    // Insert default chat rooms if they don't exist
-    $checkRooms = "SELECT COUNT(*) as count FROM chat_rooms WHERE is_archived = 0";
-    $stmt = $db->prepare($checkRooms);
-    $stmt->execute();
-    $roomCount = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
+    // Ensure only ONE of each permanent group chat exists
+    $permanentChats = [
+        'All Risk Owners' => 'General discussion for all risk owners across departments',
+        'Risk Owners + Compliance' => 'Communication channel with compliance team'
+    ];
 
-    if ($roomCount == 0) {
-        $defaultRooms = [
-            ['name' => 'All Risk Owners', 'type' => 'group', 'description' => 'General discussion for all risk owners across departments'],
-            ['name' => 'Risk Owners + Compliance', 'type' => 'group', 'description' => 'Communication channel with compliance team']
-        ];
+    foreach ($permanentChats as $chatName => $description) {
+        // Check if this permanent chat exists
+        $checkChat = "SELECT id FROM chat_rooms WHERE name = ? AND type = 'group' LIMIT 1";
+        $stmt = $db->prepare($checkChat);
+        $stmt->execute([$chatName]);
+        $existingChat = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        foreach ($defaultRooms as $room) {
-            $insertRoom = "INSERT INTO chat_rooms (name, type, description, created_by) VALUES (?, ?, ?, ?)";
+        if (!$existingChat) {
+            // Create the permanent chat
+            $insertRoom = "INSERT INTO chat_rooms (name, type, description, created_by, is_permanent) VALUES (?, 'group', ?, ?, 1)";
             $stmt = $db->prepare($insertRoom);
-            $stmt->execute([$room['name'], $room['type'], $room['description'], $_SESSION['user_id']]);
+            $stmt->execute([$chatName, $description, $_SESSION['user_id']]);
+        } else {
+            // Make sure existing chat is marked as permanent
+            $updatePermanent = "UPDATE chat_rooms SET is_permanent = 1 WHERE id = ?";
+            $stmt = $db->prepare($updatePermanent);
+            $stmt->execute([$existingChat['id']]);
+        }
+    }
+
+    // Remove any duplicate permanent chats (keep only the first one of each)
+    foreach (array_keys($permanentChats) as $chatName) {
+        $getDuplicates = "SELECT id FROM chat_rooms WHERE name = ? AND type = 'group' ORDER BY id ASC";
+        $stmt = $db->prepare($getDuplicates);
+        $stmt->execute([$chatName]);
+        $allChats = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if (count($allChats) > 1) {
+            // Keep the first one, delete the rest
+            for ($i = 1; $i < count($allChats); $i++) {
+                $deleteChat = "DELETE FROM chat_rooms WHERE id = ?";
+                $stmt = $db->prepare($deleteChat);
+                $stmt->execute([$allChats[$i]['id']]);
+            }
         }
     }
 
@@ -103,6 +152,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $message = trim($_POST['message']);
             $message_type = 'text';
             $file_info = null;
+            
+            // Process mentions in the message
+            $message = processMentions($message, $db);
             
             // Handle file upload
             if (isset($_FILES['file']) && $_FILES['file']['error'] === UPLOAD_ERR_OK) {
@@ -180,17 +232,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $hasDeletedColumn = $stmt->fetch() !== false;
             
             if ($hasDeletedColumn) {
-                $query = "SELECT cm.*, u.full_name, u.email 
-                         FROM chat_messages cm 
-                         JOIN users u ON cm.sender_id = u.id 
-                         WHERE cm.room_id = ? AND cm.id > ? AND cm.is_deleted = 0
-                         ORDER BY cm.created_at ASC";
+                $query = "SELECT cm.*, u.full_name, u.email, u.department, u.role
+                 FROM chat_messages cm 
+                 JOIN users u ON cm.sender_id = u.id 
+                 WHERE cm.room_id = ? AND cm.id > ?
+                 ORDER BY cm.created_at ASC";
             } else {
-                $query = "SELECT cm.*, u.full_name, u.email 
-                         FROM chat_messages cm 
-                         JOIN users u ON cm.sender_id = u.id 
-                         WHERE cm.room_id = ? AND cm.id > ?
-                         ORDER BY cm.created_at ASC";
+                $query = "SELECT cm.*, u.full_name, u.email, u.department, u.role
+                 FROM chat_messages cm 
+                 JOIN users u ON cm.sender_id = u.id 
+                 WHERE cm.room_id = ? AND cm.id > ?
+                 ORDER BY cm.created_at ASC";
             }
             
             $stmt = $db->prepare($query);
@@ -233,7 +285,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 
                 // Create new private chat
                 $chatName = 'Private Chat with ' . $otherUser['full_name'];
-                $insertRoom = "INSERT INTO chat_rooms (name, type, description, created_by) VALUES (?, 'private', ?, ?)";
+                $insertRoom = "INSERT INTO chat_rooms (name, type, description, created_by, is_permanent) VALUES (?, 'private', ?, ?, 0)";
                 $stmt = $db->prepare($insertRoom);
                 $stmt->execute([$chatName, 'Private conversation', $_SESSION['user_id']]);
                 $room_id = $db->lastInsertId();
@@ -249,34 +301,94 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             exit();
             
         case 'get_users':
-            // Get all users except staff
+            $search = isset($_POST['search']) ? trim($_POST['search']) : '';
+            $filter = isset($_POST['filter']) ? $_POST['filter'] : 'all';
+            
+            // Build query based on filter
+            $whereClause = "WHERE role != 'staff' AND id != ?";
+            $params = [$_SESSION['user_id']];
+            
+            if ($filter === 'risk_owners') {
+                $whereClause .= " AND role = 'risk_owner'";
+            } elseif ($filter === 'compliance') {
+                $whereClause .= " AND role = 'compliance_officer'";
+            } elseif ($filter === 'department') {
+                $whereClause .= " AND department = ?";
+                $params[] = $user['department'];
+            }
+            
+            if (!empty($search)) {
+                $whereClause .= " AND (full_name LIKE ? OR email LIKE ? OR department LIKE ?)";
+                $searchTerm = "%{$search}%";
+                $params[] = $searchTerm;
+                $params[] = $searchTerm;
+                $params[] = $searchTerm;
+            }
+            
             $query = "SELECT id, full_name, email, role, department 
                      FROM users 
-                     WHERE role != 'staff' AND id != ? 
+                     {$whereClause}
                      ORDER BY full_name";
             $stmt = $db->prepare($query);
-            $stmt->execute([$_SESSION['user_id']]);
+            $stmt->execute($params);
             $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
             echo json_encode(['success' => true, 'users' => $users]);
             exit();
             
-        case 'archive_chat':
+        case 'get_mention_users':
             $room_id = (int)$_POST['room_id'];
+            $search = isset($_POST['search']) ? trim($_POST['search']) : '';
             
-            // Archive for current user only (private chats) or mark as archived (group chats)
-            if ($_POST['chat_type'] === 'private') {
-                $archiveParticipant = "UPDATE chat_participants SET is_archived = 1 WHERE room_id = ? AND user_id = ?";
-                $stmt = $db->prepare($archiveParticipant);
-                $stmt->execute([$room_id, $_SESSION['user_id']]);
-            } else {
-                // For group chats, just hide for this user
-                $archiveParticipant = "UPDATE chat_participants SET is_archived = 1 WHERE room_id = ? AND user_id = ?";
-                $stmt = $db->prepare($archiveParticipant);
-                $stmt->execute([$room_id, $_SESSION['user_id']]);
+            // Get users who can be mentioned in this room
+            $query = "SELECT DISTINCT u.id, u.full_name, u.role, u.department
+                     FROM users u
+                     WHERE u.role != 'staff' AND u.id != ?";
+            $params = [$_SESSION['user_id']];
+            
+            if (!empty($search)) {
+                $query .= " AND u.full_name LIKE ?";
+                $params[] = "%{$search}%";
             }
             
-            echo json_encode(['success' => true]);
+            $query .= " ORDER BY u.full_name LIMIT 10";
+            
+            $stmt = $db->prepare($query);
+            $stmt->execute($params);
+            $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            echo json_encode(['success' => true, 'users' => $users]);
+            exit();
+            
+        case 'clear_chat':
+            $room_id = (int)$_POST['room_id'];
+            
+            // Check if this is a permanent chat
+            $checkPermanent = "SELECT is_permanent FROM chat_rooms WHERE id = ?";
+            $stmt = $db->prepare($checkPermanent);
+            $stmt->execute([$room_id]);
+            $room = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($room && $room['is_permanent']) {
+                // For permanent chats, only clear messages
+                $clearMessages = "DELETE FROM chat_messages WHERE room_id = ?";
+                $stmt = $db->prepare($clearMessages);
+                $stmt->execute([$room_id]);
+                
+                // Reset read status for all participants
+                $resetRead = "UPDATE chat_participants SET last_message_read = 0 WHERE room_id = ?";
+                $stmt = $db->prepare($resetRead);
+                $stmt->execute([$room_id]);
+                
+                echo json_encode(['success' => true, 'action' => 'cleared']);
+            } else {
+                // For private chats, archive for current user only
+                $archiveParticipant = "UPDATE chat_participants SET is_archived = 1 WHERE room_id = ? AND user_id = ?";
+                $stmt = $db->prepare($archiveParticipant);
+                $stmt->execute([$room_id, $_SESSION['user_id']]);
+                
+                echo json_encode(['success' => true, 'action' => 'archived']);
+            }
             exit();
             
         case 'get_unread_counts':
@@ -295,7 +407,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             
             echo json_encode(['success' => true, 'counts' => $counts]);
             exit();
+
+        case 'delete_message':
+            $message_id = (int)$_POST['message_id'];
+            
+            // Check if user owns the message or is admin
+            $checkOwnership = "SELECT sender_id FROM chat_messages WHERE id = ?";
+            $stmt = $db->prepare($checkOwnership);
+            $stmt->execute([$message_id]);
+            $message = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($message && ($message['sender_id'] == $_SESSION['user_id'] || $_SESSION['role'] == 'admin')) {
+                // Soft delete - mark as deleted but keep in database
+                $deleteMessage = "UPDATE chat_messages SET is_deleted = 1, message = '[Message deleted]' WHERE id = ?";
+                $stmt = $db->prepare($deleteMessage);
+                $stmt->execute([$message_id]);
+                
+                echo json_encode(['success' => true]);
+            } else {
+                echo json_encode(['success' => false, 'error' => 'Not authorized to delete this message']);
+            }
+            exit();
     }
+}
+
+// Function to process mentions in messages
+function processMentions($message, $db) {
+    // Find @mentions in the message
+    preg_match_all('/@([A-Za-z\s]+?)(?=\s|$|[^\w\s])/', $message, $matches);
+    
+    if (!empty($matches[1])) {
+        foreach ($matches[1] as $mention) {
+            $mention = trim($mention);
+            // Try to find user by name
+            $query = "SELECT id, full_name FROM users WHERE full_name LIKE ? LIMIT 1";
+            $stmt = $db->prepare($query);
+            $stmt->execute(["%{$mention}%"]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($user) {
+                // Replace the mention with a formatted version (no HTML tags, just mark it)
+                $message = str_replace("@{$mention}", "[@{$user['full_name']}]", $message);
+            }
+        }
+    }
+    
+    return $message;
 }
 
 // Get chat rooms for current user (excluding archived)
@@ -312,7 +469,7 @@ $getRooms = "SELECT DISTINCT cr.*,
              WHERE (cr.type = 'group' OR cp.user_id = ?) 
              AND cr.is_archived = 0 
              AND (cp.is_archived = 0 OR cp.is_archived IS NULL)
-             ORDER BY last_message_time DESC, cr.created_at DESC";
+             ORDER BY cr.is_permanent DESC, last_message_time DESC, cr.created_at DESC";
 $stmt = $db->prepare($getRooms);
 $stmt->execute([$_SESSION['user_id'], $_SESSION['user_id'], $_SESSION['user_id']]);
 $chat_rooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -607,6 +764,16 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             border-left: 4px solid #E60012;
         }
 
+        .chat-item.permanent {
+            background: #f8f9fa;
+            border-left: 3px solid #28a745;
+        }
+
+        .chat-item.permanent.active {
+            background: #e3f2fd;
+            border-left: 4px solid #E60012;
+        }
+
         .chat-icon {
             width: 40px;
             height: 40px;
@@ -832,6 +999,19 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             line-height: 1.4;
         }
 
+        .mention {
+            background: rgba(230, 0, 18, 0.1);
+            color: #E60012;
+            padding: 0.1rem 0.3rem;
+            border-radius: 3px;
+            font-weight: 600;
+        }
+
+        .message.own .mention {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+
         .message-file {
             background: rgba(0,0,0,0.1);
             padding: 0.5rem;
@@ -1006,7 +1186,7 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             background: white;
             border-radius: 10px;
             width: 90%;
-            max-width: 500px;
+            max-width: 600px;
             max-height: 80vh;
             overflow-y: auto;
         }
@@ -1038,6 +1218,28 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         .modal-body {
             padding: 1.5rem;
+        }
+
+        .search-filters {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .search-input {
+            flex: 1;
+            min-width: 200px;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .filter-select {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
         }
 
         .user-list {
@@ -1130,6 +1332,67 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             font-size: 0.8rem;
         }
 
+        /* Mention dropdown */
+        .mention-dropdown {
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+            z-index: 1000;
+        }
+
+        .mention-dropdown.show {
+            display: block;
+        }
+
+        .mention-item {
+            padding: 0.5rem 0.75rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: background 0.3s;
+        }
+
+        .mention-item:hover,
+        .mention-item.selected {
+            background: #f8f9fa;
+        }
+
+        .mention-avatar {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #E60012;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .mention-info {
+            flex: 1;
+        }
+
+        .mention-name {
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        .mention-role {
+            font-size: 0.75rem;
+            color: #666;
+        }
+
         @media (max-width: 768px) {
             body {
                 padding-top: 200px;
@@ -1200,6 +1463,14 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             .chat-main {
                 width: 100%;
             }
+
+            .search-filters {
+                flex-direction: column;
+            }
+
+            .search-input {
+                min-width: auto;
+            }
         }
 
         .loading {
@@ -1214,6 +1485,44 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             color: #666;
             font-style: italic;
             font-size: 0.85rem;
+        }
+
+        .message.deleted .message-content {
+            opacity: 0.6;
+            font-style: italic;
+        }
+
+        .message.deleted .message-text {
+            color: #999;
+        }
+
+        .message-delete-btn {
+            background: none;
+            border: none;
+            color: #dc3545;
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            opacity: 0;
+            transition: all 0.3s;
+            margin-left: 0.5rem;
+            flex-shrink: 0;
+        }
+
+        .message:hover .message-delete-btn {
+            opacity: 1;
+        }
+
+        .message.own:hover .message-delete-btn {
+            opacity: 1;
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.25rem;
         }
     </style>
 </head>
@@ -1232,8 +1541,8 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <div class="header-right">
                 <div class="user-avatar"><?php echo isset($_SESSION['full_name']) ? strtoupper(substr($_SESSION['full_name'], 0, 1)) : 'R'; ?></div>
                 <div class="user-details">
-                    <div class="user-email"><?php echo isset($_SESSION['email']) ? $_SESSION['email'] : 'No Email'; ?></div>
-                    <div class="user-role">Risk_owner • <?php echo htmlspecialchars($user['department'] ?? 'No Department'); ?></div>
+                    <div class="user-email"><?php echo isset($_SESSION['full_name']) ? $_SESSION['full_name'] : 'No Name'; ?></div>
+                    <div class="user-role">Risk Owner • <?php echo htmlspecialchars($user['department'] ?? $_SESSION['department'] ?? 'No Department'); ?></div>
                 </div>
                 <a href="logout.php" class="logout-btn">Logout</a>
             </div>
@@ -1285,7 +1594,7 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <!-- Group Chats -->
                 <?php foreach ($chat_rooms as $room): ?>
                     <?php if ($room['type'] === 'group'): ?>
-                    <div class="chat-item" onclick="selectChat(<?php echo $room['id']; ?>, 'group', '<?php echo htmlspecialchars($room['name']); ?>', '<?php echo htmlspecialchars($room['description'] ?? ''); ?>')">
+                    <div class="chat-item <?php echo $room['is_permanent'] ? 'permanent' : ''; ?>" onclick="selectChat(<?php echo $room['id']; ?>, 'group', '<?php echo htmlspecialchars($room['name']); ?>', '<?php echo htmlspecialchars($room['description'] ?? ''); ?>', <?php echo $room['is_permanent']; ?>)">
                         <div class="chat-icon group">
                             <i class="fas fa-users"></i>
                         </div>
@@ -1299,8 +1608,8 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <div class="unread-badge"><?php echo $room['unread_count']; ?></div>
                         <?php endif; ?>
                         <div class="chat-actions">
-                            <button class="chat-action-btn" onclick="event.stopPropagation(); archiveChat(<?php echo $room['id']; ?>, 'group')" title="Clear Chat">
-                                <i class="fas fa-trash"></i>
+                            <button class="chat-action-btn" onclick="event.stopPropagation(); clearChat(<?php echo $room['id']; ?>, <?php echo $room['is_permanent'] ? 'true' : 'false'; ?>)" title="<?php echo $room['is_permanent'] ? 'Clear Messages' : 'Clear Chat'; ?>">
+                                <i class="fas fa-<?php echo $room['is_permanent'] ? 'broom' : 'trash'; ?>"></i>
                             </button>
                         </div>
                     </div>
@@ -1313,7 +1622,7 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         Private Messages
                     </div>
                     <?php foreach ($private_chats as $chat): ?>
-                    <div class="chat-item" onclick="selectChat(<?php echo $chat['id']; ?>, 'private', '<?php echo htmlspecialchars($chat['other_user_name']); ?>', 'Private conversation')">
+                    <div class="chat-item" onclick="selectChat(<?php echo $chat['id']; ?>, 'private', '<?php echo htmlspecialchars($chat['other_user_name']); ?>', 'Private conversation', false)">
                         <div class="chat-icon private">
                             <i class="fas fa-user"></i>
                         </div>
@@ -1327,7 +1636,7 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <div class="unread-badge"><?php echo $chat['unread_count']; ?></div>
                         <?php endif; ?>
                         <div class="chat-actions">
-                            <button class="chat-action-btn" onclick="event.stopPropagation(); archiveChat(<?php echo $chat['id']; ?>, 'private')" title="Clear Chat">
+                            <button class="chat-action-btn" onclick="event.stopPropagation(); clearChat(<?php echo $chat['id']; ?>, false)" title="Clear Chat">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -1343,7 +1652,7 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <h3>Welcome to Team Chat</h3>
                 <p>Select a conversation to start chatting with your colleagues</p>
                 <p style="font-size: 0.9rem; color: #999; margin-top: 1rem;">
-                    💡 You can now message anyone in the system and attach files to your messages
+                    💡 You can message anyone in the system, attach files, and mention colleagues with @username
                 </p>
             </div>
 
@@ -1370,24 +1679,31 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         </button>
                     </div>
                     
-                    <form class="message-input-form" id="messageForm" enctype="multipart/form-data">
-                        <div class="file-input-container">
-                            <input type="file" id="fileInput" class="file-input" accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip" onchange="handleFileSelect(event)">
-                            <label for="fileInput" class="file-input-btn" title="Attach File">
-                                <i class="fas fa-paperclip"></i>
-                            </label>
+                    <div style="position: relative;">
+                        <div class="mention-dropdown" id="mentionDropdown">
+                            <!-- Mention suggestions will appear here -->
                         </div>
-                        <textarea 
-                            class="message-input" 
-                            id="messageInput" 
-                            placeholder="Type your message..." 
-                            rows="1"
-                            onkeydown="handleKeyDown(event)"
-                        ></textarea>
-                        <button type="submit" class="send-btn" id="sendBtn">
-                            <i class="fas fa-paper-plane"></i>
-                        </button>
-                    </form>
+                        
+                        <form class="message-input-form" id="messageForm" enctype="multipart/form-data">
+                            <div class="file-input-container">
+                                <input type="file" id="fileInput" class="file-input" accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip" onchange="handleFileSelect(event)">
+                                <label for="fileInput" class="file-input-btn" title="Attach File">
+                                    <i class="fas fa-paperclip"></i>
+                                </label>
+                            </div>
+                            <textarea 
+                                class="message-input" 
+                                id="messageInput" 
+                                placeholder="Type your message... (use @ to mention someone)" 
+                                rows="1"
+                                onkeydown="handleKeyDown(event)"
+                                oninput="handleMentionInput(event)"
+                            ></textarea>
+                            <button type="submit" class="send-btn" id="sendBtn">
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1401,8 +1717,14 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <button class="close" onclick="closeNewChatModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <div style="margin-bottom: 1rem;">
-                    <input type="text" id="userSearch" placeholder="Search users..." style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+                <div class="search-filters">
+                    <input type="text" id="userSearch" class="search-input" placeholder="Search by name, email, or department...">
+                    <select id="userFilter" class="filter-select">
+                        <option value="all">All Users</option>
+                        <option value="risk_owners">Risk Owners</option>
+                        <option value="compliance">Compliance Team</option>
+                        <option value="department">My Department</option>
+                    </select>
                 </div>
                 <div class="loading" id="usersLoading">Loading users...</div>
                 <div class="user-list" id="usersList" style="display: none;">
@@ -1415,23 +1737,22 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <script>
         let currentRoomId = null;
         let currentRoomType = null;
+        let currentRoomPermanent = false;
         let lastMessageId = 0;
         let messagePolling = null;
         let selectedFile = null;
+        let mentionUsers = [];
+        let selectedMentionIndex = -1;
 
         // Initialize chat
         document.addEventListener('DOMContentLoaded', function() {
-            // Auto-select first group chat if available
-            const firstGroupChat = document.querySelector('.chat-item');
-            if (firstGroupChat) {
-                firstGroupChat.click();
-            }
-
+            // Don't auto-select any chat - let user choose
+            
             // Update unread counts periodically
             setInterval(updateUnreadCounts, 5000);
         });
 
-        function selectChat(roomId, type, name, description) {
+        function selectChat(roomId, type, name, description, isPermanent) {
             // Update active chat item
             document.querySelectorAll('.chat-item').forEach(item => {
                 item.classList.remove('active');
@@ -1441,12 +1762,15 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             // Set current room
             currentRoomId = roomId;
             currentRoomType = type;
+            currentRoomPermanent = isPermanent;
             lastMessageId = 0;
 
             // Update chat header
             const chatHeader = document.getElementById('chatHeader');
             const iconClass = type === 'group' ? 'fas fa-users' : 'fas fa-user';
             const iconBg = type === 'group' ? 'background: #e3f2fd; color: #1976d2;' : 'background: #f3e5f5; color: #7b1fa2;';
+            const actionText = isPermanent ? 'Clear Messages' : 'Clear Chat';
+            const actionIcon = isPermanent ? 'broom' : 'trash';
             
             chatHeader.innerHTML = `
                 <div class="chat-header-icon" style="${iconBg}">
@@ -1457,8 +1781,8 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <p>${description}</p>
                 </div>
                 <div class="chat-header-actions">
-                    <button class="header-action-btn" onclick="archiveChat(${roomId}, '${type}')" title="Clear Chat">
-                        <i class="fas fa-trash"></i>
+                    <button class="header-action-btn" onclick="clearChat(${roomId}, ${isPermanent})" title="${actionText}">
+                        <i class="fas fa-${actionIcon}"></i>
                     </button>
                 </div>
             `;
@@ -1516,46 +1840,93 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             });
         }
 
-        function createMessageElement(message) {
-            const messageDiv = document.createElement('div');
-            const isOwn = message.sender_id == <?php echo $_SESSION['user_id']; ?>;
-            messageDiv.className = `message ${isOwn ? 'own' : ''}`;
+function createMessageElement(message) {
+    const messageDiv = document.createElement('div');
+    const isOwn = message.sender_id == <?php echo $_SESSION['user_id']; ?>;
+    const isDeleted = message.is_deleted == 1;
+    messageDiv.className = `message ${isOwn ? 'own' : ''} ${isDeleted ? 'deleted' : ''}`;
 
-            const senderInitial = message.full_name ? message.full_name.charAt(0).toUpperCase() : 'U';
-            const messageTime = new Date(message.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    const senderInitial = message.full_name ? message.full_name.charAt(0).toUpperCase() : 'U';
+    const messageTime = new Date(message.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    const senderDepartment = message.department ? ` • ${message.department}` : '';
 
-            let fileContent = '';
-            if (message.message_type === 'file' && message.file_name) {
-                const fileIcon = getFileIcon(message.file_name);
-                const fileSize = formatFileSize(message.file_size);
-                fileContent = `
-                    <div class="message-file">
-                        <div class="file-icon">${fileIcon}</div>
-                        <div class="file-info">
-                            <div class="file-name">${escapeHtml(message.file_name)}</div>
-                            <div class="file-size">${fileSize}</div>
-                        </div>
-                        <button class="file-download" onclick="downloadFile('${message.file_path}', '${message.file_name}')" title="Download">
-                            <i class="fas fa-download"></i>
-                        </button>
-                    </div>
-                `;
-            }
-
-            messageDiv.innerHTML = `
-                <div class="message-avatar">${senderInitial}</div>
-                <div class="message-content">
-                    <div class="message-header">
-                        <span class="message-sender">${message.full_name}</span>
-                        <span class="message-time">${messageTime}</span>
-                    </div>
-                    <div class="message-text">${escapeHtml(message.message)}</div>
-                    ${fileContent}
+    let fileContent = '';
+    if (message.message_type === 'file' && message.file_name && !isDeleted) {
+        const fileIcon = getFileIcon(message.file_name);
+        const fileSize = formatFileSize(message.file_size);
+        fileContent = `
+            <div class="message-file">
+                <div class="file-icon">${fileIcon}</div>
+                <div class="file-info">
+                    <div class="file-name">${escapeHtml(message.file_name)}</div>
+                    <div class="file-size">${fileSize}</div>
                 </div>
-            `;
+                <button class="file-download" onclick="downloadFile('${message.file_path}', '${message.file_name}')" title="Download">
+                    <i class="fas fa-download"></i>
+                </button>
+            </div>
+        `;
+    }
 
-            return messageDiv;
+    // Process mentions in the message text
+    let processedMessage = message.message;
+    if (!isDeleted) {
+        processedMessage = processedMessage.replace(/\[@([^\]]+)\]/g, '<span class="mention">@$1</span>');
+    }
+
+    // Add delete button for own messages or if user is admin
+    let deleteButton = '';
+    if ((isOwn || <?php echo $_SESSION['role'] == 'admin' ? 'true' : 'false'; ?>) && !isDeleted) {
+    deleteButton = `
+        <button class="message-delete-btn" onclick="event.stopPropagation(); deleteMessage(${message.id})" title="Delete Message">
+            <i class="fas fa-trash"></i>
+        </button>
+    `;
+}
+
+    messageDiv.innerHTML = `
+        <div class="message-avatar">${senderInitial}</div>
+        <div class="message-content">
+            <div class="message-header">
+                <span class="message-sender">${message.full_name}${senderDepartment}</span>
+                <span class="message-time">${messageTime}</span>
+                ${deleteButton}
+            </div>
+            <div class="message-text">${processedMessage}</div>
+            ${fileContent}
+        </div>
+    `;
+
+    return messageDiv;
+}
+
+function deleteMessage(messageId) {
+    if (!confirm('Are you sure you want to delete this message?')) {
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('action', 'delete_message');
+    formData.append('message_id', messageId);
+
+    fetch('teamchat.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Reload messages to show the deleted message
+            loadMessages();
+        } else {
+            alert('Error deleting message: ' + (data.error || 'Unknown error'));
         }
+    })
+    .catch(error => {
+        console.error('Error deleting message:', error);
+        alert('Error deleting message');
+    });
+}
 
         function sendMessage() {
             if (!currentRoomId) return;
@@ -1588,6 +1959,7 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 if (data.success) {
                     messageInput.value = '';
                     removeFilePreview();
+                    hideMentionDropdown();
                     loadMessages(); // Reload messages immediately
                 } else {
                     alert('Error sending message: ' + (data.error || 'Unknown error'));
@@ -1604,10 +1976,140 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
 
         function handleKeyDown(event) {
-            if (event.key === 'Enter' && !event.shiftKey) {
+            const mentionDropdown = document.getElementById('mentionDropdown');
+            const isDropdownVisible = mentionDropdown.classList.contains('show');
+
+            if (isDropdownVisible) {
+                if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    selectedMentionIndex = Math.min(selectedMentionIndex + 1, mentionUsers.length - 1);
+                    updateMentionSelection();
+                } else if (event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    selectedMentionIndex = Math.max(selectedMentionIndex - 1, 0);
+                    updateMentionSelection();
+                } else if (event.key === 'Enter') {
+                    event.preventDefault();
+                    if (selectedMentionIndex >= 0 && mentionUsers[selectedMentionIndex]) {
+                        selectMention(mentionUsers[selectedMentionIndex]);
+                    }
+                    return;
+                } else if (event.key === 'Escape') {
+                    hideMentionDropdown();
+                    return;
+                }
+            }
+
+            if (event.key === 'Enter' && !event.shiftKey && !isDropdownVisible) {
                 event.preventDefault();
                 sendMessage();
             }
+        }
+
+        function handleMentionInput(event) {
+            const input = event.target;
+            const value = input.value;
+            const cursorPos = input.selectionStart;
+            
+            // Find @ symbol before cursor
+            const textBeforeCursor = value.substring(0, cursorPos);
+            const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+            
+            if (mentionMatch) {
+                const searchTerm = mentionMatch[1];
+                loadMentionUsers(searchTerm);
+            } else {
+                hideMentionDropdown();
+            }
+        }
+
+        function loadMentionUsers(searchTerm) {
+            if (!currentRoomId) return;
+
+            const formData = new FormData();
+            formData.append('action', 'get_mention_users');
+            formData.append('room_id', currentRoomId);
+            formData.append('search', searchTerm);
+
+            fetch('teamchat.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    mentionUsers = data.users;
+                    selectedMentionIndex = 0;
+                    displayMentionDropdown();
+                }
+            })
+            .catch(error => {
+                console.error('Error loading mention users:', error);
+            });
+        }
+
+        function displayMentionDropdown() {
+            const dropdown = document.getElementById('mentionDropdown');
+            dropdown.innerHTML = '';
+
+            mentionUsers.forEach((user, index) => {
+                const item = document.createElement('div');
+                item.className = `mention-item ${index === selectedMentionIndex ? 'selected' : ''}`;
+                item.onclick = () => selectMention(user);
+
+                const initial = user.full_name ? user.full_name.charAt(0).toUpperCase() : 'U';
+                const roleText = getRoleDisplayName(user.role);
+                const departmentText = user.department ? ` • ${user.department}` : '';
+
+                item.innerHTML = `
+                    <div class="mention-avatar">${initial}</div>
+                    <div class="mention-info">
+                        <div class="mention-name">${user.full_name}</div>
+                        <div class="mention-role">${roleText}${departmentText}</div>
+                    </div>
+                `;
+
+                dropdown.appendChild(item);
+            });
+
+            dropdown.classList.add('show');
+        }
+
+        function updateMentionSelection() {
+            const items = document.querySelectorAll('.mention-item');
+            items.forEach((item, index) => {
+                item.classList.toggle('selected', index === selectedMentionIndex);
+            });
+        }
+
+        function selectMention(user) {
+            const input = document.getElementById('messageInput');
+            const value = input.value;
+            const cursorPos = input.selectionStart;
+            
+            // Find @ symbol before cursor
+            const textBeforeCursor = value.substring(0, cursorPos);
+            const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+            
+            if (mentionMatch) {
+                const beforeMention = textBeforeCursor.substring(0, mentionMatch.index);
+                const afterCursor = value.substring(cursorPos);
+                const newValue = beforeMention + `@${user.full_name} ` + afterCursor;
+                
+                input.value = newValue;
+                const newCursorPos = beforeMention.length + user.full_name.length + 2;
+                input.setSelectionRange(newCursorPos, newCursorPos);
+            }
+
+            hideMentionDropdown();
+            input.focus();
+        }
+
+        function hideMentionDropdown() {
+            const dropdown = document.getElementById('mentionDropdown');
+            dropdown.classList.remove('show');
+            mentionUsers = [];
+            selectedMentionIndex = -1;
         }
 
         function handleFileSelect(event) {
@@ -1688,8 +2190,13 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
 
         function loadUsers() {
+            const search = document.getElementById('userSearch').value;
+            const filter = document.getElementById('userFilter').value;
+
             const formData = new FormData();
             formData.append('action', 'get_users');
+            formData.append('search', search);
+            formData.append('filter', filter);
 
             fetch('teamchat.php', {
                 method: 'POST',
@@ -1705,7 +2212,6 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     usersList.style.display = 'block';
                     usersList.innerHTML = '';
 
-                    window.allUsers = data.users; // Store for search
                     displayUsers(data.users);
                 }
             })
@@ -1717,6 +2223,11 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
         function displayUsers(users) {
             const usersList = document.getElementById('usersList');
             usersList.innerHTML = '';
+
+            if (users.length === 0) {
+                usersList.innerHTML = '<div style="text-align: center; padding: 2rem; color: #666;">No users found</div>';
+                return;
+            }
 
             users.forEach(user => {
                 const userDiv = document.createElement('div');
@@ -1749,18 +2260,9 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             }
         }
 
-        // User search functionality
-        document.getElementById('userSearch').addEventListener('input', function(e) {
-            const searchTerm = e.target.value.toLowerCase();
-            if (window.allUsers) {
-                const filteredUsers = window.allUsers.filter(user => 
-                    user.full_name.toLowerCase().includes(searchTerm) ||
-                    user.email.toLowerCase().includes(searchTerm) ||
-                    (user.department && user.department.toLowerCase().includes(searchTerm))
-                );
-                displayUsers(filteredUsers);
-            }
-        });
+        // User search and filter functionality
+        document.getElementById('userSearch').addEventListener('input', loadUsers);
+        document.getElementById('userFilter').addEventListener('change', loadUsers);
 
         function startPrivateChat(userId, userName) {
             const formData = new FormData();
@@ -1784,15 +2286,18 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             });
         }
 
-        function archiveChat(roomId, chatType) {
-            if (!confirm('Are you sure you want to clear this chat? It will be moved to the system bin.')) {
+        function clearChat(roomId, isPermanent) {
+            const confirmMessage = isPermanent ? 
+                'Are you sure you want to clear all messages in this chat? The chat room will remain but all messages will be deleted.' :
+                'Are you sure you want to clear this chat? It will be moved to the system bin.';
+                
+            if (!confirm(confirmMessage)) {
                 return;
             }
 
             const formData = new FormData();
-            formData.append('action', 'archive_chat');
+            formData.append('action', 'clear_chat');
             formData.append('room_id', roomId);
-            formData.append('chat_type', chatType);
 
             fetch('teamchat.php', {
                 method: 'POST',
@@ -1801,14 +2306,31 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    // Refresh the page to update the chat list
-                    location.reload();
+                    if (data.action === 'cleared') {
+                        // For permanent chats, just reload messages
+                        if (currentRoomId === roomId) {
+                            document.getElementById('messagesContainer').innerHTML = '';
+                            lastMessageId = 0;
+                            loadMessages();
+                        }
+                        // Update last message display in sidebar
+                        const chatItem = document.querySelector(`[onclick*="selectChat(${roomId}"]`);
+                        if (chatItem) {
+                            const lastMessageEl = chatItem.querySelector('.chat-last-message');
+                            if (lastMessageEl) {
+                                lastMessageEl.textContent = 'No messages yet';
+                            }
+                        }
+                    } else {
+                        // For private chats, refresh the page
+                        location.reload();
+                    }
                 } else {
                     alert('Error clearing chat');
                 }
             })
             .catch(error => {
-                console.error('Error archiving chat:', error);
+                console.error('Error clearing chat:', error);
                 alert('Error clearing chat');
             });
         }
@@ -1869,6 +2391,15 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             const modal = document.getElementById('newChatModal');
             if (event.target === modal) {
                 closeNewChatModal();
+            }
+        });
+
+        // Close mention dropdown when clicking outside
+        document.addEventListener('click', function(event) {
+            const dropdown = document.getElementById('mentionDropdown');
+            const input = document.getElementById('messageInput');
+            if (!dropdown.contains(event.target) && event.target !== input) {
+                hideMentionDropdown();
             }
         });
 

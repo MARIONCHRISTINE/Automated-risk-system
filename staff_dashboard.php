@@ -2,6 +2,7 @@
 include_once 'includes/auth.php';
 requireRole('staff');
 include_once 'config/database.php';
+include_once 'includes/auto_assignment.php'; // Ensure this is included
 
 $database = new Database();
 $db = $database->getConnection();
@@ -11,78 +12,81 @@ if ($_POST && isset($_POST['submit_risk'])) {
     $risk_name = $_POST['risk_name'];
     $risk_description = $_POST['risk_description'];
     $cause_of_risk = $_POST['cause_of_risk'];
-    $department = $_POST['department'];
     
+    // Get department from user session/database instead of form
+    $user = getCurrentUser();
+    if (empty($user['department']) || $user['department'] === null) {
+        $dept_query = "SELECT department FROM users WHERE id = :user_id";
+        $dept_stmt = $db->prepare($dept_query);
+        $dept_stmt->bindParam(':user_id', $_SESSION['user_id']);
+        $dept_stmt->execute();
+        $dept_result = $dept_stmt->fetch(PDO::FETCH_ASSOC);
+        if ($dept_result && !empty($dept_result['department'])) {
+            $user['department'] = $dept_result['department'];
+            $_SESSION['department'] = $dept_result['department'];
+        }
+    }
+    $department = $user['department'] ?? 'General';
+
+    // Handle file upload (optional)
+    $uploaded_file_path = null;
+    if (isset($_FILES['risk_document']) && $_FILES['risk_document']['error'] === UPLOAD_ERR_OK) {
+        $upload_dir = 'uploads/risk_documents/';
+        // Create directory if it doesn't exist
+        if (!is_dir($upload_dir)) {
+            mkdir($upload_dir, 0755, true);
+        }
+        $file_extension = strtolower(pathinfo($_FILES['risk_document']['name'], PATHINFO_EXTENSION));
+        $allowed_extensions = ['pdf', 'doc', 'docx', 'txt', 'jpg', 'jpeg', 'png'];
+        if (in_array($file_extension, $allowed_extensions)) {
+            $file_name = uniqid() . '_' . time() . '.' . $file_extension;
+            $upload_path = $upload_dir . $file_name;
+            if (move_uploaded_file($_FILES['risk_document']['tmp_name'], $upload_path)) {
+                $uploaded_file_path = $upload_path;
+            }
+        }
+    }
+
     // Debug: Check if user session is valid
     if (!isset($_SESSION['user_id']) || empty($_SESSION['user_id'])) {
         $error_message = "Session expired. Please log in again.";
         header("Location: login.php");
         exit();
     }
-    
+
     // Verify the user exists in the database
     $user_check_query = "SELECT id FROM users WHERE id = :user_id";
     $user_check_stmt = $db->prepare($user_check_query);
     $user_check_stmt->bindParam(':user_id', $_SESSION['user_id']);
     $user_check_stmt->execute();
-    
     if ($user_check_stmt->rowCount() == 0) {
         $error_message = "User account not found. Please contact administrator.";
     } else {
         try {
             // First, insert the risk
-            $query = "INSERT INTO risk_incidents (risk_name, risk_description, cause_of_risk, department, reported_by, created_at, updated_at)
-               VALUES (:risk_name, :risk_description, :cause_of_risk, :department, :reported_by, NOW(), NOW())";
+            $query = "INSERT INTO risk_incidents (risk_name, risk_description, cause_of_risk, department, reported_by, document_path, created_at, updated_at)
+                      VALUES (:risk_name, :risk_description, :cause_of_risk, :department, :reported_by, :document_path, NOW(), NOW())";
             $stmt = $db->prepare($query);
             $stmt->bindParam(':risk_name', $risk_name);
             $stmt->bindParam(':risk_description', $risk_description);
             $stmt->bindParam(':cause_of_risk', $cause_of_risk);
             $stmt->bindParam(':department', $department);
             $stmt->bindParam(':reported_by', $_SESSION['user_id']);
-            
+            $stmt->bindParam(':document_path', $uploaded_file_path);
+
             if ($stmt->execute()) {
                 $risk_id = $db->lastInsertId();
                 
-                // Immediate auto-assignment to a risk owner in the same department
-                $owner_query = "SELECT id FROM users WHERE role = 'risk_owner' AND department = :department ORDER BY RAND() LIMIT 1";
-                $owner_stmt = $db->prepare($owner_query);
-                $owner_stmt->bindParam(':department', $department);
-                $owner_stmt->execute();
-                $risk_owner = $owner_stmt->fetch(PDO::FETCH_ASSOC);
-                
-                if ($risk_owner) {
-                    // Immediately assign the risk to the selected risk owner
-                    $assign_query = "UPDATE risk_incidents SET risk_owner_id = :owner_id, updated_at = NOW() WHERE id = :risk_id";
-                    $assign_stmt = $db->prepare($assign_query);
-                    $assign_stmt->bindParam(':owner_id', $risk_owner['id']);
-                    $assign_stmt->bindParam(':risk_id', $risk_id);
-                    
-                    if ($assign_stmt->execute()) {
-                        // NEW: Create risk assignment record for notifications
-                        try {
-                            $assignment_query = "INSERT INTO risk_assignments (risk_id, assigned_to, assigned_by, status, assignment_date)
-                                                VALUES (:risk_id, :assigned_to, :assigned_by, 'Pending', NOW())";
-                            $assignment_stmt = $db->prepare($assignment_query);
-                            $assignment_stmt->bindParam(':risk_id', $risk_id);
-                            $assignment_stmt->bindParam(':assigned_to', $risk_owner['id']);
-                            $assignment_stmt->bindParam(':assigned_by', $_SESSION['user_id']); // Staff who reported the risk
-                            $assignment_stmt->execute();
-                        } catch (PDOException $e) {
-                            // Assignment table might not exist, but risk assignment still works
-                            error_log("Could not create assignment record: " . $e->getMessage());
-                        }
-                        
-                        // Redirect to prevent resubmission on page reload
-                        header("Location: staff_dashboard.php?success=assigned");
-                        exit();
-                    } else {
-                        // Redirect to prevent resubmission on page reload
-                        header("Location: staff_dashboard.php?success=reported");
-                        exit();
-                    }
+                // NEW: Call the updated auto-assignment function
+                $assignment_result = assignRiskAutomatically($risk_id, $_SESSION['user_id'], $db);
+
+                if ($assignment_result['success']) {
+                    // Risk assigned successfully
+                    header("Location: staff_dashboard.php?success=assigned");
+                    exit();
                 } else {
-                    // Redirect to prevent resubmission on page reload
-                    header("Location: staff_dashboard.php?success=no_owner");
+                    // No designated owner found for the staff member
+                    header("Location: staff_dashboard.php?success=no_owner_designated");
                     exit();
                 }
             } else {
@@ -99,12 +103,15 @@ if ($_POST && isset($_POST['submit_risk'])) {
 if (isset($_GET['success'])) {
     switch ($_GET['success']) {
         case 'assigned':
-            $success_message = "Risk reported and immediately assigned to a risk owner in your department!";
+            $success_message = "Risk reported and immediately assigned to your designated risk owner!";
             break;
-        case 'reported':
+        case 'no_owner_designated':
+            $success_message = "Risk reported successfully! No designated risk owner found for your account. Please contact your administrator.";
+            break;
+        case 'reported': // Fallback for previous logic, can be removed if not needed
             $success_message = "Risk reported successfully! Assignment in progress.";
             break;
-        case 'no_owner':
+        case 'no_owner': // Fallback for previous logic, can be removed if not needed
             $success_message = "Risk reported successfully! No risk owners available in your department at the moment.";
             break;
     }
@@ -119,7 +126,6 @@ $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Get current user info with department from database
 $user = getCurrentUser();
-
 // If department is not in session, fetch from database
 if (empty($user['department']) || $user['department'] === null) {
     $dept_query = "SELECT department FROM users WHERE id = :user_id";
@@ -127,7 +133,6 @@ if (empty($user['department']) || $user['department'] === null) {
     $dept_stmt->bindParam(':user_id', $_SESSION['user_id']);
     $dept_stmt->execute();
     $dept_result = $dept_stmt->fetch(PDO::FETCH_ASSOC);
-    
     if ($dept_result && !empty($dept_result['department'])) {
         $user['department'] = $dept_result['department'];
         // Store in session for future use
@@ -147,7 +152,6 @@ if (empty($user['department']) || $user['department'] === null) {
             padding: 0;
             box-sizing: border-box;
         }
-        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #f5f5f5;
@@ -156,11 +160,9 @@ if (empty($user['department']) || $user['department'] === null) {
             min-height: 100vh;
             padding-top: 100px; /* Add padding for fixed header */
         }
-        
         .dashboard {
             min-height: 100vh;
         }
-        
         /* Header */
         .header {
             background: #E60012;
@@ -173,7 +175,6 @@ if (empty($user['department']) || $user['department'] === null) {
             z-index: 1000;
             box-shadow: 0 2px 10px rgba(230, 0, 18, 0.2);
         }
-        
         .header-content {
             max-width: 1200px;
             margin: 0 auto;
@@ -181,13 +182,11 @@ if (empty($user['department']) || $user['department'] === null) {
             justify-content: space-between;
             align-items: center;
         }
-        
         .header-left {
             display: flex;
             align-items: center;
             gap: 1rem;
         }
-        
         .logo-circle {
             width: 55px;
             height: 55px;
@@ -199,19 +198,16 @@ if (empty($user['department']) || $user['department'] === null) {
             overflow: hidden;
             padding: 5px;
         }
-        
         .logo-circle img {
             width: 100%;
             height: 100%;
             object-fit: contain;
             border-radius: 50%;
         }
-        
         .header-titles {
             display: flex;
             flex-direction: column;
         }
-        
         .main-title {
             font-size: 1.5rem;
             font-weight: 700;
@@ -219,7 +215,6 @@ if (empty($user['department']) || $user['department'] === null) {
             margin: 0;
             line-height: 1.2;
         }
-        
         .sub-title {
             font-size: 1rem;
             font-weight: 400;
@@ -227,13 +222,11 @@ if (empty($user['department']) || $user['department'] === null) {
             margin: 0;
             line-height: 1.2;
         }
-        
         .header-right {
             display: flex;
             align-items: center;
             gap: 1rem;
         }
-        
         .user-avatar {
             width: 45px;
             height: 45px;
@@ -246,13 +239,11 @@ if (empty($user['department']) || $user['department'] === null) {
             font-weight: 700;
             font-size: 1.2rem;
         }
-        
         .user-details {
             display: flex;
             flex-direction: column;
             align-items: flex-start;
         }
-        
         .user-email {
             font-size: 1rem;
             font-weight: 500;
@@ -260,7 +251,6 @@ if (empty($user['department']) || $user['department'] === null) {
             margin: 0;
             line-height: 1.2;
         }
-        
         .user-role {
             font-size: 0.9rem;
             font-weight: 400;
@@ -268,7 +258,6 @@ if (empty($user['department']) || $user['department'] === null) {
             margin: 0;
             line-height: 1.2;
         }
-        
         .logout-btn {
             background: rgba(255, 255, 255, 0.2);
             color: white;
@@ -281,19 +270,16 @@ if (empty($user['department']) || $user['department'] === null) {
             transition: all 0.3s;
             margin-left: 1rem;
         }
-        
         .logout-btn:hover {
             background: rgba(255, 255, 255, 0.3);
             border-color: rgba(255, 255, 255, 0.5);
         }
-        
         /* Main Content */
         .main-content {
             max-width: 1200px;
             margin: 0 auto;
             padding: 2rem;
         }
-        
         /* Main Cards Layout */
         .main-cards-layout {
             display: grid;
@@ -301,7 +287,6 @@ if (empty($user['department']) || $user['department'] === null) {
             gap: 2rem;
             margin-bottom: 2rem;
         }
-        
         /* Hero Section */
         .hero {
             text-align: center;
@@ -314,7 +299,6 @@ if (empty($user['department']) || $user['department'] === null) {
             justify-content: center;
             min-height: 300px;
         }
-        
         .cta-button {
             display: inline-flex;
             align-items: center;
@@ -330,11 +314,9 @@ if (empty($user['department']) || $user['department'] === null) {
             border: none;
             cursor: pointer;
         }
-        
         .cta-button:hover {
             background: #B8000E;
         }
-        
         /* Stats Card */
         .stat-card {
             background: white;
@@ -376,7 +358,6 @@ if (empty($user['department']) || $user['department'] === null) {
             justify-content: center;
             gap: 0.5rem;
         }
-        
         /* Reports Section */
         .reports-section {
             background: white;
@@ -385,11 +366,9 @@ if (empty($user['department']) || $user['department'] === null) {
             display: none;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
-        
         .reports-section.show {
             display: block;
         }
-        
         .reports-header {
             background: #E60012;
             padding: 1.5rem;
@@ -401,7 +380,6 @@ if (empty($user['department']) || $user['department'] === null) {
             top: 0;
             z-index: 100;
         }
-        
         .reports-title {
             font-size: 1.3rem;
             font-weight: 600;
@@ -409,7 +387,6 @@ if (empty($user['department']) || $user['department'] === null) {
             align-items: center;
             gap: 0.5rem;
         }
-        
         .hide-reports-btn {
             background: rgba(255, 255, 255, 0.2);
             color: white;
@@ -420,29 +397,23 @@ if (empty($user['department']) || $user['department'] === null) {
             cursor: pointer;
             transition: all 0.3s;
         }
-        
         .hide-reports-btn:hover {
             background: rgba(255, 255, 255, 0.3);
         }
-        
         .reports-content {
             max-height: 400px;
             overflow-y: auto;
         }
-        
         .risk-item {
             padding: 1.5rem;
             border-bottom: 1px solid #eee;
         }
-        
         .risk-item:hover {
             background: #f8f9fa;
         }
-        
         .risk-item:last-child {
             border-bottom: none;
         }
-        
         .risk-header {
             display: flex;
             justify-content: space-between;
@@ -450,13 +421,11 @@ if (empty($user['department']) || $user['department'] === null) {
             gap: 1rem;
             margin-bottom: 1rem;
         }
-        
         .risk-name {
             font-weight: 600;
             color: #333;
             flex: 1;
         }
-        
         .view-btn {
             padding: 0.3rem 0.8rem;
             border-radius: 15px;
@@ -468,11 +437,9 @@ if (empty($user['department']) || $user['department'] === null) {
             cursor: pointer;
             transition: background 0.3s;
         }
-        
         .view-btn:hover {
             background: #B8000E;
         }
-        
         .risk-meta {
             display: flex;
             align-items: center;
@@ -480,30 +447,25 @@ if (empty($user['department']) || $user['department'] === null) {
             font-size: 0.9rem;
             color: #666;
         }
-        
         .empty-state {
             padding: 3rem 2rem;
             text-align: center;
         }
-        
         .empty-icon {
             font-size: 3rem;
             margin-bottom: 1rem;
             opacity: 0.5;
         }
-        
         .empty-state h3 {
             font-size: 1.3rem;
             font-weight: 600;
             margin-bottom: 0.5rem;
             color: #333;
         }
-        
         .empty-state p {
             color: #666;
             margin-bottom: 1.5rem;
         }
-        
         .success {
             background: #d4edda;
             color: #155724;
@@ -513,7 +475,6 @@ if (empty($user['department']) || $user['department'] === null) {
             border-left: 4px solid #28a745;
             font-weight: 500;
         }
-        
         .error {
             background: #f8d7da;
             color: #721c24;
@@ -523,7 +484,6 @@ if (empty($user['department']) || $user['department'] === null) {
             border-left: 4px solid #dc3545;
             font-weight: 500;
         }
-        
         .chatbot {
             position: fixed;
             bottom: 25px;
@@ -542,11 +502,9 @@ if (empty($user['department']) || $user['department'] === null) {
             transition: transform 0.3s;
             z-index: 1000;
         }
-        
         .chatbot:hover {
             transform: scale(1.1);
         }
-        
         /* Modal Styles */
         .modal {
             display: none;
@@ -558,13 +516,11 @@ if (empty($user['department']) || $user['department'] === null) {
             height: 100%;
             background-color: rgba(0,0,0,0.5);
         }
-        
         .modal.show {
             display: flex;
             align-items: center;
             justify-content: center;
         }
-        
         .modal-content {
             background: white;
             border-radius: 8px;
@@ -574,7 +530,6 @@ if (empty($user['department']) || $user['department'] === null) {
             overflow-y: auto;
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
         }
-        
         .modal-header {
             background: #E60012;
             color: white;
@@ -583,13 +538,11 @@ if (empty($user['department']) || $user['department'] === null) {
             justify-content: space-between;
             align-items: center;
         }
-        
         .modal-title {
             font-size: 1.3rem;
             font-weight: 600;
             margin: 0;
         }
-        
         .close {
             color: white;
             font-size: 28px;
@@ -598,19 +551,15 @@ if (empty($user['department']) || $user['department'] === null) {
             background: none;
             border: none;
         }
-        
         .close:hover {
             opacity: 0.7;
         }
-        
         .modal-body {
             padding: 2rem;
         }
-        
         .form-group {
             margin-bottom: 1.8rem;
         }
-        
         label {
             display: block;
             margin-bottom: 0.6rem;
@@ -618,7 +567,6 @@ if (empty($user['department']) || $user['department'] === null) {
             font-weight: 500;
             font-size: 1rem;
         }
-        
         input, textarea, select {
             width: 100%;
             padding: 0.9rem;
@@ -627,18 +575,15 @@ if (empty($user['department']) || $user['department'] === null) {
             font-size: 1rem;
             transition: border-color 0.3s;
         }
-        
         input:focus, textarea:focus, select:focus {
             outline: none;
             border-color: #E60012;
             box-shadow: 0 0 0 3px rgba(230, 0, 18, 0.1);
         }
-        
         textarea {
             height: 120px;
             resize: vertical;
         }
-        
         .btn {
             background: #E60012;
             color: white;
@@ -650,92 +595,111 @@ if (empty($user['department']) || $user['department'] === null) {
             font-weight: 600;
             transition: background 0.3s;
         }
-        
         .btn:hover {
             background: #B8000E;
         }
-        
+        /* File upload styles */
+        .file-upload-area {
+            border: 2px dashed #e1e5e9;
+            border-radius: 8px;
+            padding: 1.2rem; /* Reduced padding */
+            text-align: center;
+            transition: border-color 0.3s;
+            background: #f8f9fa;
+        }
+        .file-upload-area:hover {
+            border-color: #E60012;
+        }
+        .file-upload-area.dragover {
+            border-color: #E60012;
+            background: rgba(230, 0, 18, 0.05);
+        }
+        .file-upload-icon {
+            font-size: 1.8rem; /* Adjusted font size */
+            color: #666;
+            margin-bottom: 0.8rem; /* Adjusted margin */
+        }
+        .file-upload-text {
+            color: #666;
+            margin-bottom: 0.4rem; /* Adjusted margin */
+            font-size: 0.95rem; /* Adjusted font size */
+        }
+        .file-upload-hint {
+            font-size: 0.8rem; /* Adjusted font size */
+            color: #999;
+        }
+        .file-input {
+            display: none;
+        }
+        .file-selected {
+            background: #d4edda;
+            border-color: #28a745;
+            color: #155724;
+        }
         /* Responsive */
         @media (max-width: 768px) {
             body {
                 padding-top: 120px; /* Increased padding for mobile header */
             }
-            
             .header {
                 padding: 1.2rem 1.5rem;
             }
-            
             .header-content {
                 flex-direction: column;
                 gap: 1rem;
                 align-items: flex-start;
             }
-            
             .header-right {
                 align-self: flex-end;
             }
-            
             .main-title {
                 font-size: 1.3rem;
             }
-            
             .sub-title {
                 font-size: 0.9rem;
             }
-            
             .main-cards-layout {
                 grid-template-columns: 1fr;
                 gap: 1rem;
             }
-            
             .hero {
                 padding: 3rem 2rem;
                 min-height: 250px;
             }
-            
             .stat-card {
                 padding: 2.5rem 1.5rem;
                 min-height: 250px;
             }
-            
             .stat-number {
                 font-size: 3.5rem;
             }
-            
             .stat-label {
                 font-size: 1.2rem;
             }
-            
             .stat-hint {
                 font-size: 0.9rem;
             }
-            
             .reports-header {
                 flex-direction: column;
                 gap: 1rem;
                 align-items: flex-start;
             }
-            
             .main-content {
                 padding: 1rem;
             }
-            
             .risk-header {
                 flex-direction: column;
                 align-items: flex-start;
                 gap: 0.5rem;
             }
-            
             .logout-btn {
                 margin-left: 0;
                 margin-top: 0.5rem;
             }
-            
             .modal-content {
                 width: 95%;
                 margin: 1rem;
             }
-            
             .modal-body {
                 padding: 1.5rem;
             }
@@ -766,19 +730,13 @@ if (empty($user['department']) || $user['department'] === null) {
                 </div>
             </div>
         </header>
-
         <!-- Main Content -->
         <main class="main-content">
-            <?php if (isset($success_message)): ?>
-<div class="success">
-    ✅ <?php echo $success_message; ?>
-</div>
-<?php endif; ?>
-            
+            <?php if (isset($success_message)): ?><div class="success">
+    ✅ <?php echo $success_message; ?></div><?php endif; ?>
             <?php if (isset($error_message)): ?>
                 <div class="error">❌ <?php echo $error_message; ?></div>
             <?php endif; ?>
-            
             <!-- Main Cards Layout -->
             <div class="main-cards-layout">
                 <!-- Hero Section -->
@@ -790,9 +748,7 @@ if (empty($user['department']) || $user['department'] === null) {
             </svg>
             Report New Risk
         </button>
-    </div>
-</section>
-
+    </div></section>
                 <!-- Stats Card -->
                 <div class="stat-card" id="statsCard" onclick="scrollToReports()">
                     <div class="stat-number"><?php echo count($user_risks); ?></div>
@@ -805,7 +761,6 @@ if (empty($user['department']) || $user['department'] === null) {
                     </div>
                 </div>
             </div>
-
             <!-- Workflow Explanation Section -->
             <!-- Info Section -->
             <!-- Reports Section -->
@@ -819,7 +774,6 @@ if (empty($user['department']) || $user['department'] === null) {
                     </h2>
                     <button class="hide-reports-btn" onclick="closeReports()">Click to Hide</button>
                 </div>
-                
                 <div class="reports-content">
                     <?php if (count($user_risks) > 0): ?>
                         <?php foreach (array_slice($user_risks, 0, 10) as $risk): ?>
@@ -860,7 +814,6 @@ if (empty($user['department']) || $user['department'] === null) {
             </section>
         </main>
     </div>
-
     <!-- Risk Report Modal -->
     <div id="reportModal" class="modal">
         <div class="modal-content">
@@ -869,33 +822,33 @@ if (empty($user['department']) || $user['department'] === null) {
                 <button class="close" onclick="closeReportModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <form method="POST">
+                <form method="POST" enctype="multipart/form-data">
                     <div class="form-group">
                         <label for="risk_name">Risk Name</label>
                         <input type="text" id="risk_name" name="risk_name" required placeholder="Enter a clear risk title">
                     </div>
-                    
                     <div class="form-group">
                         <label for="risk_description">Risk Description</label>
                         <textarea id="risk_description" name="risk_description" required placeholder="Describe the risk in detail"></textarea>
                     </div>
-                    
                     <div class="form-group">
                         <label for="cause_of_risk">Cause of Risk</label>
                         <textarea id="cause_of_risk" name="cause_of_risk" required placeholder="What causes this risk?"></textarea>
                     </div>
-                    
                     <div class="form-group">
-                        <label for="department">Department</label>
-                        <input type="text" id="department" name="department" required placeholder="Your department" value="<?php echo $user['department'] ?? ''; ?>">
+                        <label for="risk_document">Supporting Document (Optional)</label>
+                        <div class="file-upload-area" id="fileUploadArea" onclick="document.getElementById('risk_document').click()">
+                            <div class="file-upload-icon">📄</div>
+                            <div class="file-upload-text">Click to upload a document</div>
+                            <div class="file-upload-hint">Supports: PDF, DOC, DOCX, TXT, JPG, PNG (Max 10MB)</div>
+                        </div>
+                        <input type="file" id="risk_document" name="risk_document" class="file-input" accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png" onchange="handleFileSelect(this)">
                     </div>
-                    
                     <button type="submit" name="submit_risk" class="btn">Submit Risk Report</button>
                 </form>
             </div>
         </div>
     </div>
-
     <!-- Risk Details Modal -->
     <div id="riskModal" class="modal">
         <div class="modal-content">
@@ -919,35 +872,87 @@ if (empty($user['department']) || $user['department'] === null) {
                 <div class="form-group">
                     <label>Date Submitted:</label>
                     <div style="background: #f8f9fa; padding: 1rem; border-radius: 4px; border-left: 3px solid #E60012;" id="modalDateSubmitted"></div>
-                </div>
-<div class="form-group">
+                </div><div class="form-group">
     <label>Assignment Status:</label>
     <div style="background: #f8f9fa; padding: 1rem; border-radius: 4px; border-left: 3px solid #E60012;" id="modalAssignmentStatus"></div>
 </div>
             </div>
         </div>
     </div>
-
     <div class="chatbot" onclick="openChatbot()" title="Need help? Click to chat">💬</div>
-
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const statsCard = document.getElementById('statsCard');
             const reportsSection = document.getElementById('reportsSection');
-            
             // Hide reports section by default - user must click to view
             if (reportsSection) {
                 reportsSection.style.display = 'none';
                 reportsSection.classList.remove('show');
             }
-            
             if (statsCard && <?php echo count($user_risks); ?> > 0) {
                 statsCard.addEventListener('click', function() {
                     toggleReports();
                 });
             }
         });
-
+        function handleFileSelect(input) {
+            const fileUploadArea = document.getElementById('fileUploadArea');
+            const file = input.files[0];
+            if (file) {
+                // Check file size (10MB limit)
+                if (file.size > 10 * 1024 * 1024) {
+                    alert('File size must be less than 10MB');
+                    input.value = '';
+                    return;
+                }
+                fileUploadArea.classList.add('file-selected');
+                fileUploadArea.innerHTML = `
+                    <div class="file-upload-icon">✅</div>
+                    <div class="file-upload-text">File selected: ${file.name}</div>
+                    <div class="file-upload-hint">Click to change file</div>
+                `;
+            } else {
+                fileUploadArea.classList.remove('file-selected');
+                fileUploadArea.innerHTML = `
+                    <div class="file-upload-icon">📄</div>
+                    <div class="file-upload-text">Click to upload a document</div>
+                    <div class="file-upload-hint">Supports: PDF, DOC, DOCX, TXT, JPG, PNG (Max 10MB)</div>
+                `;
+            }
+        }
+        // Drag and drop functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const fileUploadArea = document.getElementById('fileUploadArea');
+            const fileInput = document.getElementById('risk_document');
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                fileUploadArea.addEventListener(eventName, preventDefaults, false);
+            });
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            ['dragenter', 'dragover'].forEach(eventName => {
+                fileUploadArea.addEventListener(eventName, highlight, false);
+            });
+            ['dragleave', 'drop'].forEach(eventName => {
+                fileUploadArea.addEventListener(eventName, unhighlight, false);
+            });
+            function highlight(e) {
+                fileUploadArea.classList.add('dragover');
+            }
+            function unhighlight(e) {
+                fileUploadArea.classList.remove('dragover');
+            }
+            fileUploadArea.addEventListener('drop', handleDrop, false);
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                if (files.length > 0) {
+                    fileInput.files = files;
+                    handleFileSelect(fileInput);
+                }
+            }
+        });
         function toggleReports() {
             const reportsSection = document.getElementById('reportsSection');
             if (reportsSection.classList.contains('show')) {
@@ -956,40 +961,33 @@ if (empty($user['department']) || $user['department'] === null) {
                 showReports();
             }
         }
-
         function showReports() {
             const reportsSection = document.getElementById('reportsSection');
             reportsSection.style.display = 'block';
             setTimeout(() => reportsSection.classList.add('show'), 10);
         }
-
         function closeReports() {
             const reportsSection = document.getElementById('reportsSection');
             reportsSection.classList.remove('show');
             setTimeout(() => reportsSection.style.display = 'none', 300);
         }
-        
         function openReportModal() {
             document.getElementById('reportModal').classList.add('show');
         }
-        
         function closeReportModal() {
             document.getElementById('reportModal').classList.remove('show');
         }
-        
         function viewRisk(id, name, description, cause, date, isAssigned) {
     document.getElementById('modalRiskName').textContent = name;
     document.getElementById('modalRiskDescription').textContent = description;
     document.getElementById('modalCauseOfRisk').textContent = cause;
-    
-    const dateObj = new Date(date);
+            const dateObj = new Date(date);
     document.getElementById('modalDateSubmitted').textContent = dateObj.toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'long',
         day: 'numeric'
     });
-    
-    // Add assignment status to modal
+            // Add assignment status to modal
     const assignmentStatus = document.getElementById('modalAssignmentStatus');
     if (assignmentStatus) {
         if (isAssigned) {
@@ -998,14 +996,11 @@ if (empty($user['department']) || $user['department'] === null) {
             assignmentStatus.innerHTML = '<span style="color: #ffc107; font-weight: 600;">🔄 Assignment in Progress</span><br><small style="color: #666;">System is assigning this risk to a qualified risk owner.</small>';
         }
     }
-    
-    document.getElementById('riskModal').classList.add('show');
+            document.getElementById('riskModal').classList.add('show');
 }
-        
         function closeModal() {
             document.getElementById('riskModal').classList.remove('show');
         }
-        
         function openChatbot() {
             const responses = [
                 "Hello! I'm here to help with risk reporting. What would you like to know?",
@@ -1013,15 +1008,12 @@ if (empty($user['department']) || $user['department'] === null) {
                 "If you need help with risk categories, contact your risk owner or compliance team.",
                 "For technical issues, please contact IT support at support@airtel.africa"
             ];
-            
             const message = prompt("Hi! I'm your Airtel Risk Assistant. How can I help you today?\n\n• Risk reporting guidance\n• System help\n• Contact information\n\nType your question:");
-            
             if (message) {
                 const randomResponse = responses[Math.floor(Math.random() * responses.length)];
                 alert("Thank you for your question: '" + message + "'\n\n" + randomResponse + "\n\nFor more detailed assistance, please contact the compliance team.");
             }
         }
-        
         // Close modal when clicking outside
         window.onclick = function(event) {
             const modals = document.querySelectorAll('.modal');
@@ -1031,7 +1023,6 @@ if (empty($user['department']) || $user['department'] === null) {
                 }
             });
         }
-
         function scrollToReports() {
             const reportsSection = document.getElementById('reportsSection');
             if (reportsSection) {
@@ -1039,13 +1030,12 @@ if (empty($user['department']) || $user['department'] === null) {
                 if (!reportsSection.classList.contains('show')) {
                     showReports();
                 }
-                
                 // Smooth scroll to reports section
                 setTimeout(() => {
                     reportsSection.scrollIntoView({
-                         behavior: 'smooth',
-                         block: 'start'
-                     });
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
                 }, 100);
             }
         }

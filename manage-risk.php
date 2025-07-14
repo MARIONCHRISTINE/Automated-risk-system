@@ -24,14 +24,14 @@ if (!$risk_id) {
 // Get current user info
 $user = getCurrentUser();
 
-// Get comprehensive risk details
-$query = "SELECT ri.*, 
-                 reporter.full_name as reporter_name, 
+// Get comprehensive risk details, including new lock flags
+$query = "SELECT ri.*,
+                 reporter.full_name as reporter_name,
                  reporter.email as reporter_email,
-                 owner.full_name as owner_name, 
+                 owner.full_name as owner_name,
                  owner.email as owner_email,
                  owner.department as owner_department
-          FROM risk_incidents ri 
+          FROM risk_incidents ri
           LEFT JOIN users reporter ON ri.reported_by = reporter.id
           LEFT JOIN users owner ON ri.risk_owner_id = owner.id
           WHERE ri.id = :risk_id";
@@ -54,69 +54,70 @@ if ($risk['risk_owner_id'] != $_SESSION['user_id']) {
     exit();
 }
 
-// Check if sections are completed (read-only logic)
-$section_b_completed = !empty($risk['existing_or_new']) && !empty($risk['to_be_reported_to_board']) && !empty($risk['risk_category']);
-$section_c_completed = (!empty($risk['inherent_likelihood']) && !empty($risk['inherent_consequence'])) || (!empty($risk['residual_likelihood']) && !empty($risk['residual_consequence']));
-
-
+// Determine if sections are completed/locked based on new flags
+$section_b_completed = (bool)$risk['section_b_locked'];
+$section_c_completed = (bool)$risk['section_c_locked'];
 
 // Handle adding new treatment method
 if ($_POST && isset($_POST['add_treatment'])) {
     try {
-
-        
         $db->beginTransaction();
-        
+
         $treatment_title = $_POST['treatment_title'] ?? '';
         $treatment_description = $_POST['treatment_description'] ?? '';
         $assigned_to = $_POST['assigned_to'] ?? $_SESSION['user_id']; // Default to current user
         $target_date = $_POST['treatment_target_date'] ?? null;
-        
+
         if (empty($treatment_title) || empty($treatment_description)) {
             throw new Exception("Treatment title and description are required");
         }
-        
+
         // Insert new treatment method
-        $treatment_query = "INSERT INTO risk_treatments 
-                           (risk_id, treatment_title, treatment_description, assigned_to, target_completion_date, status, created_by, created_at) 
+        $treatment_query = "INSERT INTO risk_treatments
+                           (risk_id, treatment_title, treatment_description, assigned_to, target_completion_date, status, created_by, created_at)
                            VALUES (:risk_id, :title, :description, :assigned_to, :target_date, 'pending', :created_by, NOW())";
-        
+
         $treatment_stmt = $db->prepare($treatment_query);
         $treatment_stmt->bindParam(':risk_id', $risk_id);
         $treatment_stmt->bindParam(':title', $treatment_title);
         $treatment_stmt->bindParam(':description', $treatment_description);
         $treatment_stmt->bindParam(':assigned_to', $assigned_to);
-        $treatment_stmt->bindParam(':target_date', $target_date);
+        // Bind target_date only if it's not empty, otherwise let DB handle NULL
+        if (!empty($target_date)) {
+            $treatment_stmt->bindParam(':target_date', $target_date);
+        } else {
+            $treatment_stmt->bindValue(':target_date', null, PDO::PARAM_NULL);
+        }
         $treatment_stmt->bindParam(':created_by', $_SESSION['user_id']);
-        
+
         if ($treatment_stmt->execute()) {
             $treatment_id = $db->lastInsertId();
-            
+
             // Handle file uploads for the new treatment
             if (isset($_FILES['treatment_files']) && !empty($_FILES['treatment_files']['name'][0])) {
                 $files = $_FILES['treatment_files'];
-                
+
                 for ($i = 0; $i < count($files['name']); $i++) {
                     if ($files['error'][$i] === UPLOAD_ERR_OK) {
                         $original_filename = $files['name'][$i];
                         $file_size = $files['size'][$i];
                         $file_type = $files['type'][$i];
                         $tmp_name = $files['tmp_name'][$i];
-                        
+
                         // Generate unique filename
                         $file_extension = pathinfo($original_filename, PATHINFO_EXTENSION);
                         $unique_filename = uniqid() . '_' . time() . '.' . $file_extension;
                         $upload_path = 'uploads/treatments/' . $unique_filename;
-                        
+
                         // Create directory if it doesn't exist
                         if (!file_exists('uploads/treatments/')) {
                             mkdir('uploads/treatments/', 0755, true);
                         }
-                        
+
                         if (move_uploaded_file($tmp_name, $upload_path)) {
                             // Insert file record
-                            $file_query = "INSERT INTO treatment_documents 
-                                         (treatment_id, original_filename, file_path, file_size, file_type, uploaded_at) 
+                            $file_query = "INSERT INTO treatment_documents
+                                         (treatment_id, original_filename, file_path, file_size, file_type, uploaded_at)
                                          VALUES (:treatment_id, :original_filename, :file_path, :file_size, :file_type, NOW())";
                             $file_stmt = $db->prepare($file_query);
                             $file_stmt->bindParam(':treatment_id', $treatment_id);
@@ -129,7 +130,7 @@ if ($_POST && isset($_POST['add_treatment'])) {
                     }
                 }
             }
-            
+
             $db->commit();
             $_SESSION['success_message'] = "Treatment method added successfully!";
             header("Location: manage-risk.php?id=" . $risk_id);
@@ -137,7 +138,7 @@ if ($_POST && isset($_POST['add_treatment'])) {
         } else {
             throw new Exception("Failed to add treatment method");
         }
-        
+
     } catch (Exception $e) {
         $db->rollBack();
         $error_message = "Error adding treatment: " . $e->getMessage();
@@ -147,14 +148,12 @@ if ($_POST && isset($_POST['add_treatment'])) {
 // Handle updating treatment method
 if ($_POST && isset($_POST['update_treatment'])) {
     try {
-
-        
         $db->beginTransaction();
-        
+
         $treatment_id = $_POST['treatment_id'] ?? 0;
         $treatment_status = $_POST['treatment_status'] ?? '';
         $progress_notes = $_POST['progress_notes'] ?? '';
-        
+
         // Check if user can update this treatment (must be assigned to them or be the main risk owner)
         $check_query = "SELECT assigned_to FROM risk_treatments WHERE id = :treatment_id AND risk_id = :risk_id";
         $check_stmt = $db->prepare($check_query);
@@ -162,49 +161,49 @@ if ($_POST && isset($_POST['update_treatment'])) {
         $check_stmt->bindParam(':risk_id', $risk_id);
         $check_stmt->execute();
         $treatment = $check_stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         if (!$treatment || ($treatment['assigned_to'] != $_SESSION['user_id'] && $risk['risk_owner_id'] != $_SESSION['user_id'])) {
             throw new Exception("You don't have permission to update this treatment");
         }
-        
+
         // Update treatment
-        $update_query = "UPDATE risk_treatments SET 
+        $update_query = "UPDATE risk_treatments SET
                         status = :status,
                         progress_notes = :progress_notes,
                         updated_at = NOW()
                         WHERE id = :treatment_id";
-        
+
         $update_stmt = $db->prepare($update_query);
         $update_stmt->bindParam(':status', $treatment_status);
         $update_stmt->bindParam(':progress_notes', $progress_notes);
         $update_stmt->bindParam(':treatment_id', $treatment_id);
-        
+
         if ($update_stmt->execute()) {
             // Handle file uploads for treatment update
             if (isset($_FILES['treatment_update_files']) && !empty($_FILES['treatment_update_files']['name'][0])) {
                 $files = $_FILES['treatment_update_files'];
-                
+
                 for ($i = 0; $i < count($files['name']); $i++) {
                     if ($files['error'][$i] === UPLOAD_ERR_OK) {
                         $original_filename = $files['name'][$i];
                         $file_size = $files['size'][$i];
                         $file_type = $files['type'][$i];
                         $tmp_name = $files['tmp_name'][$i];
-                        
+
                         // Generate unique filename
                         $file_extension = pathinfo($original_filename, PATHINFO_EXTENSION);
                         $unique_filename = uniqid() . '_' . time() . '.' . $file_extension;
                         $upload_path = 'uploads/treatments/' . $unique_filename;
-                        
+
                         // Create directory if it doesn't exist
                         if (!file_exists('uploads/treatments/')) {
                             mkdir('uploads/treatments/', 0755, true);
                         }
-                        
+
                         if (move_uploaded_file($tmp_name, $upload_path)) {
                             // Insert file record
-                            $file_query = "INSERT INTO treatment_documents 
-                                         (treatment_id, original_filename, file_path, file_size, file_type, uploaded_at) 
+                            $file_query = "INSERT INTO treatment_documents
+                                         (treatment_id, original_filename, file_path, file_size, file_type, uploaded_at)
                                          VALUES (:treatment_id, :original_filename, :file_path, :file_size, :file_type, NOW())";
                             $file_stmt = $db->prepare($file_query);
                             $file_stmt->bindParam(':treatment_id', $treatment_id);
@@ -217,7 +216,7 @@ if ($_POST && isset($_POST['update_treatment'])) {
                     }
                 }
             }
-            
+
             $db->commit();
             $_SESSION['success_message'] = "Treatment updated successfully!";
             header("Location: manage-risk.php?id=" . $risk_id);
@@ -225,7 +224,7 @@ if ($_POST && isset($_POST['update_treatment'])) {
         } else {
             throw new Exception("Failed to update treatment");
         }
-        
+
     } catch (Exception $e) {
         $db->rollBack();
         $error_message = "Error updating treatment: " . $e->getMessage();
@@ -236,42 +235,59 @@ if ($_POST && isset($_POST['update_treatment'])) {
 if ($_POST && isset($_POST['update_risk'])) {
     try {
         $db->beginTransaction();
-        
 
-        
         // Get form data (only risk owner sections)
+        // These values will come from the visible select/input if editable,
+        // or from the hidden input if disabled/locked.
         $existing_or_new = $_POST['existing_or_new'] ?? null;
         $to_be_reported_to_board = $_POST['to_be_reported_to_board'] ?? null;
         $risk_category = $_POST['risk_category'] ?? null;
-        
+
         // Risk Assessment
         $inherent_likelihood = $_POST['inherent_likelihood'] ?? null;
         $inherent_consequence = $_POST['inherent_consequence'] ?? null;
         $residual_likelihood = $_POST['residual_likelihood'] ?? null;
         $residual_consequence = $_POST['residual_consequence'] ?? null;
-        
 
-        
         // Overall risk status
         $risk_status = $_POST['risk_status'] ?? null;
-        
+
         // Calculate risk level based on the highest rating available
         $risk_level = 'Low';
         $max_rating = 0;
-        
+
         if ($inherent_likelihood && $inherent_consequence) {
             $max_rating = max($max_rating, $inherent_likelihood * $inherent_consequence);
         }
         if ($residual_likelihood && $residual_consequence) {
             $max_rating = max($max_rating, $residual_likelihood * $residual_consequence);
         }
-        
+
         if ($max_rating >= 15) $risk_level = 'Critical';
         elseif ($max_rating >= 9) $risk_level = 'High';
         elseif ($max_rating >= 4) $risk_level = 'Medium';
-        
+
+        // Determine new lock states for sections B and C
+        $new_section_b_locked = $risk['section_b_locked']; // Keep current locked state by default
+        // Lock if not already locked AND all fields are now filled
+        if (!$new_section_b_locked &&
+            !empty($existing_or_new) &&
+            !empty($to_be_reported_to_board) &&
+            !empty($risk_category)) {
+            $new_section_b_locked = 1;
+        }
+
+        $new_section_c_locked = $risk['section_c_locked']; // Keep current locked state by default
+        // Lock if not already locked AND at least one assessment (inherent or residual) is fully filled
+        if (!$new_section_c_locked &&
+            ((!empty($inherent_likelihood) && !empty($inherent_consequence)) ||
+             (!empty($residual_likelihood) && !empty($residual_consequence)))) {
+            $new_section_c_locked = 1;
+        }
+
+
         // Update risk incident
-        $update_query = "UPDATE risk_incidents SET 
+        $update_query = "UPDATE risk_incidents SET
                         existing_or_new = :existing_or_new,
                         to_be_reported_to_board = :to_be_reported_to_board,
                         risk_category = :risk_category,
@@ -281,9 +297,11 @@ if ($_POST && isset($_POST['update_risk'])) {
                         residual_consequence = :residual_consequence,
                         risk_level = :risk_level,
                         risk_status = :risk_status,
+                        section_b_locked = :section_b_locked,
+                        section_c_locked = :section_c_locked,
                         updated_at = NOW()
                         WHERE id = :risk_id";
-        
+
         $update_stmt = $db->prepare($update_query);
         $update_stmt->bindParam(':existing_or_new', $existing_or_new);
         $update_stmt->bindParam(':to_be_reported_to_board', $to_be_reported_to_board);
@@ -294,8 +312,10 @@ if ($_POST && isset($_POST['update_risk'])) {
         $update_stmt->bindParam(':residual_consequence', $residual_consequence);
         $update_stmt->bindParam(':risk_level', $risk_level);
         $update_stmt->bindParam(':risk_status', $risk_status);
+        $update_stmt->bindParam(':section_b_locked', $new_section_b_locked, PDO::PARAM_INT); // Ensure INT type
+        $update_stmt->bindParam(':section_c_locked', $new_section_c_locked, PDO::PARAM_INT); // Ensure INT type
         $update_stmt->bindParam(':risk_id', $risk_id);
-        
+
         if ($update_stmt->execute()) {
             $db->commit();
             $_SESSION['success_message'] = "Risk updated successfully!";
@@ -304,7 +324,7 @@ if ($_POST && isset($_POST['update_risk'])) {
         } else {
             throw new Exception("Failed to update risk");
         }
-        
+
     } catch (Exception $e) {
         $db->rollBack();
         $error_message = "Error updating risk: " . $e->getMessage();
@@ -312,7 +332,7 @@ if ($_POST && isset($_POST['update_risk'])) {
 }
 
 // Get existing treatment methods
-$treatments_query = "SELECT rt.*, 
+$treatments_query = "SELECT rt.*,
                             assigned_user.full_name as assigned_user_name,
                             assigned_user.email as assigned_user_email,
                             assigned_user.department as assigned_user_department,
@@ -336,7 +356,7 @@ if (!empty($treatments)) {
     $docs_stmt = $db->prepare($docs_query);
     $docs_stmt->execute($treatment_ids);
     $docs_result = $docs_stmt->fetchAll(PDO::FETCH_ASSOC);
-    
+
     // Group by treatment_id
     foreach ($docs_result as $doc) {
         $treatment_docs[$doc['treatment_id']][] = $doc;
@@ -399,7 +419,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #f5f5f5;
@@ -408,7 +428,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             min-height: 100vh;
             padding-top: 150px;
         }
-        
+
         /* Header - Keep original styling */
         .header {
             background: #E60012;
@@ -567,14 +587,14 @@ $completion_percentage = round($base_completion + $treatment_completion);
             border-bottom-color: #E60012;
             background-color: rgba(230, 0, 18, 0.05);
         }
-        
+
         /* Main Content */
         .main-content {
             max-width: 1200px;
             margin: 0 auto;
             padding: 2rem;
         }
-        
+
         /* Enhanced Page Header */
         .page-header {
             background: linear-gradient(135deg, #E60012, #B8000E);
@@ -586,7 +606,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             position: relative;
             overflow: hidden;
         }
-        
+
         .page-header::before {
             content: '';
             position: absolute;
@@ -598,7 +618,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             border-radius: 50%;
             transform: translate(30px, -30px);
         }
-        
+
         .page-header-content {
             display: flex;
             justify-content: space-between;
@@ -608,7 +628,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             position: relative;
             z-index: 1;
         }
-        
+
         .page-title-section h1 {
             font-size: 1.8rem;
             font-weight: bold;
@@ -617,7 +637,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             align-items: center;
             gap: 0.5rem;
         }
-        
+
         .page-meta {
             display: flex;
             flex-wrap: wrap;
@@ -625,7 +645,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             opacity: 0.9;
             margin-bottom: 1rem;
         }
-        
+
         .page-meta .badge {
             background: rgba(255, 255, 255, 0.2);
             color: white;
@@ -634,18 +654,18 @@ $completion_percentage = round($base_completion + $treatment_completion);
             font-size: 0.8rem;
             font-weight: 500;
         }
-        
+
         .completion-info {
             text-align: right;
             min-width: 200px;
         }
-        
+
         .completion-percentage {
             font-size: 2rem;
             font-weight: bold;
             margin-bottom: 0.5rem;
         }
-        
+
         .completion-bar {
             background: rgba(255, 255, 255, 0.3);
             border-radius: 10px;
@@ -653,14 +673,14 @@ $completion_percentage = round($base_completion + $treatment_completion);
             overflow: hidden;
             margin-top: 0.5rem;
         }
-        
+
         .completion-fill {
             background: white;
             height: 100%;
             border-radius: 10px;
             transition: width 0.8s ease;
         }
-        
+
         /* Enhanced Form Sections */
         .form-section {
             background: white;
@@ -671,17 +691,17 @@ $completion_percentage = round($base_completion + $treatment_completion);
             border-top: 4px solid #E60012;
             transition: all 0.3s ease;
         }
-        
+
         .form-section:hover {
             box-shadow: 0 6px 25px rgba(0,0,0,0.12);
             transform: translateY(-2px);
         }
-        
+
         .form-section.readonly {
             background: #f8f9fa;
             border-top-color: #6c757d;
         }
-        
+
         .section-header {
             display: flex;
             align-items: center;
@@ -690,11 +710,11 @@ $completion_percentage = round($base_completion + $treatment_completion);
             padding-bottom: 1rem;
             border-bottom: 2px solid #E60012;
         }
-        
+
         .section-header.readonly {
             border-bottom-color: #6c757d;
         }
-        
+
         .section-icon {
             width: 50px;
             height: 50px;
@@ -707,29 +727,29 @@ $completion_percentage = round($base_completion + $treatment_completion);
             font-size: 1.3rem;
             box-shadow: 0 4px 15px rgba(230, 0, 18, 0.3);
         }
-        
+
         .section-icon.readonly {
             background: linear-gradient(135deg, #6c757d, #545b62);
             box-shadow: 0 4px 15px rgba(108, 117, 125, 0.3);
         }
-        
+
         .section-title h3 {
             font-size: 1.4rem;
             color: #E60012;
             margin: 0;
             font-weight: 600;
         }
-        
+
         .section-title.readonly h3 {
             color: #6c757d;
         }
-        
+
         .section-title p {
             font-size: 0.9rem;
             color: #666;
             margin: 0.25rem 0 0 0;
         }
-        
+
         .section-note {
             background: linear-gradient(135deg, #fff3cd, #ffeaa7);
             border: 1px solid #ffeaa7;
@@ -742,7 +762,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             gap: 0.75rem;
             font-size: 0.9rem;
         }
-        
+
         /* Enhanced Form Elements */
         .form-row {
             display: grid;
@@ -750,15 +770,15 @@ $completion_percentage = round($base_completion + $treatment_completion);
             gap: 1.5rem;
             margin-bottom: 1.5rem;
         }
-        
+
         .form-group {
             margin-bottom: 1.5rem;
         }
-        
+
         .form-group.full-width {
             grid-column: 1 / -1;
         }
-        
+
         label {
             display: block;
             margin-bottom: 0.75rem;
@@ -766,12 +786,12 @@ $completion_percentage = round($base_completion + $treatment_completion);
             color: #333;
             font-size: 0.95rem;
         }
-        
+
         .required {
             color: #E60012;
             margin-left: 0.25rem;
         }
-        
+
         input, select, textarea {
             width: 100%;
             padding: 0.9rem;
@@ -781,7 +801,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             font-size: 1rem;
             background: white;
         }
-        
+
         input:focus, select:focus, textarea:focus {
             outline: none;
             border-color: #E60012;
@@ -789,12 +809,22 @@ $completion_percentage = round($base_completion + $treatment_completion);
             transform: translateY(-1px);
         }
         
+        /* Style for disabled inputs to look like readonly-display */
+        input[disabled], select[disabled], textarea[disabled] {
+            background: #f8f9fa;
+            color: #495057;
+            cursor: not-allowed;
+            border-color: #dee2e6;
+            box-shadow: none;
+            transform: none;
+        }
+
         textarea {
             height: 120px;
             resize: vertical;
             font-family: inherit;
         }
-        
+
         .readonly-display {
             background: #f8f9fa;
             padding: 1rem;
@@ -806,13 +836,13 @@ $completion_percentage = round($base_completion + $treatment_completion);
             display: flex;
             align-items: center;
         }
-        
+
         /* Enhanced Risk Assessment Matrix */
         .risk-matrix-container {
             background: linear-gradient(135deg, #f8f9fa, #e9ecef);
             align-items: center;
         }
-        
+
         /* Enhanced Risk Assessment Matrix */
         .risk-matrix-container {
             background: linear-gradient(135deg, #f8f9fa, #e9ecef);
@@ -821,7 +851,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             margin: 2rem 0;
             border: 2px solid #dee2e6;
         }
-        
+
         .matrix-title {
             text-align: center;
             color: #E60012;
@@ -829,7 +859,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             font-weight: 600;
             margin-bottom: 1.5rem;
         }
-        
+
         /* Enhanced Assessment Cards */
         .assessment-grid {
             display: grid;
@@ -837,7 +867,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             gap: 2rem;
             margin: 2rem 0;
         }
-        
+
         .assessment-card {
             background: white;
             border-radius: 12px;
@@ -846,13 +876,13 @@ $completion_percentage = round($base_completion + $treatment_completion);
             border: 2px solid #e1e5e9;
             transition: all 0.3s ease;
         }
-        
+
         .assessment-card:hover {
             transform: translateY(-3px);
             box-shadow: 0 8px 25px rgba(0,0,0,0.12);
             border-color: #E60012;
         }
-        
+
         .assessment-card h4 {
             color: #E60012;
             margin-bottom: 1rem;
@@ -861,7 +891,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             align-items: center;
             gap: 0.5rem;
         }
-        
+
         .risk-rating-display {
             margin-top: 1rem;
             padding: 1rem;
@@ -870,7 +900,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             font-weight: 600;
             transition: all 0.3s ease;
         }
-        
+
         /* Treatment Methods Section */
         .treatments-section {
             background: white;
@@ -880,7 +910,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             box-shadow: 0 4px 15px rgba(0,0,0,0.08);
             border-top: 4px solid #17a2b8;
         }
-        
+
         .treatment-card {
             background: #f8f9fa;
             border: 2px solid #dee2e6;
@@ -889,39 +919,39 @@ $completion_percentage = round($base_completion + $treatment_completion);
             margin-bottom: 1.5rem;
             transition: all 0.3s ease;
         }
-        
+
         .treatment-card:hover {
             border-color: #17a2b8;
             transform: translateY(-2px);
             box-shadow: 0 4px 15px rgba(23, 162, 184, 0.2);
         }
-        
+
         .treatment-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
             margin-bottom: 1rem;
         }
-        
+
         .treatment-title {
             font-size: 1.2rem;
             font-weight: 600;
             color: #17a2b8;
             margin: 0;
         }
-        
+
         .treatment-status {
             padding: 0.25rem 0.75rem;
             border-radius: 15px;
             font-size: 0.8rem;
             font-weight: 600;
         }
-        
+
         .status-pending { background: #fff3cd; color: #856404; }
         .status-in-progress { background: #cce5ff; color: #004085; }
         .status-completed { background: #d4edda; color: #155724; }
         .status-cancelled { background: #f8d7da; color: #721c24; }
-        
+
         .treatment-meta {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -932,24 +962,24 @@ $completion_percentage = round($base_completion + $treatment_completion);
             border-radius: 8px;
             border: 1px solid #dee2e6;
         }
-        
+
         .meta-item {
             display: flex;
             flex-direction: column;
         }
-        
+
         .meta-label {
             font-size: 0.8rem;
             color: #666;
             font-weight: 500;
             margin-bottom: 0.25rem;
         }
-        
+
         .meta-value {
             font-weight: 600;
             color: #333;
         }
-        
+
         .treatment-description {
             background: white;
             padding: 1rem;
@@ -958,14 +988,14 @@ $completion_percentage = round($base_completion + $treatment_completion);
             margin: 1rem 0;
             line-height: 1.6;
         }
-        
+
         .treatment-actions {
             display: flex;
             gap: 0.5rem;
             flex-wrap: wrap;
             margin-top: 1rem;
         }
-        
+
         .add-treatment-btn {
             background: linear-gradient(135deg, #17a2b8, #138496);
             color: white;
@@ -981,12 +1011,12 @@ $completion_percentage = round($base_completion + $treatment_completion);
             transition: all 0.3s;
             box-shadow: 0 4px 15px rgba(23, 162, 184, 0.3);
         }
-        
+
         .add-treatment-btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(23, 162, 184, 0.4);
         }
-        
+
         /* Modal Styles */
         .modal {
             display: none;
@@ -999,13 +1029,13 @@ $completion_percentage = round($base_completion + $treatment_completion);
             background-color: rgba(0,0,0,0.5);
             backdrop-filter: blur(5px);
         }
-        
+
         .modal.show {
             display: flex;
             align-items: center;
             justify-content: center;
         }
-        
+
         .modal-content {
             background: white;
             border-radius: 12px;
@@ -1016,7 +1046,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             overflow-y: auto;
             box-shadow: 0 10px 30px rgba(0,0,0,0.3);
         }
-        
+
         .modal-header {
             background: linear-gradient(135deg, #17a2b8, #138496);
             color: white;
@@ -1026,13 +1056,13 @@ $completion_percentage = round($base_completion + $treatment_completion);
             justify-content: space-between;
             align-items: center;
         }
-        
+
         .modal-title {
             font-size: 1.3rem;
             font-weight: 600;
             margin: 0;
         }
-        
+
         .close {
             color: white;
             font-size: 28px;
@@ -1042,21 +1072,21 @@ $completion_percentage = round($base_completion + $treatment_completion);
             border: none;
             transition: opacity 0.3s;
         }
-        
+
         .close:hover {
             opacity: 0.7;
         }
-        
+
         .modal-body {
             padding: 2rem;
         }
-        
+
         /* User Selection Styles */
         .user-search-container {
             position: relative;
             margin-bottom: 1rem;
         }
-        
+
         .user-search-input {
             width: 100%;
             padding: 0.9rem;
@@ -1064,7 +1094,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             border-radius: 8px;
             font-size: 1rem;
         }
-        
+
         .user-dropdown {
             position: absolute;
             top: 100%;
@@ -1079,37 +1109,37 @@ $completion_percentage = round($base_completion + $treatment_completion);
             z-index: 1000;
             display: none;
         }
-        
+
         .user-dropdown.show {
             display: block;
         }
-        
+
         .user-option {
             padding: 0.75rem;
             cursor: pointer;
             border-bottom: 1px solid #f8f9fa;
             transition: background 0.2s;
         }
-        
+
         .user-option:hover {
             background: #f8f9fa;
         }
-        
+
         .user-option:last-child {
             border-bottom: none;
         }
-        
+
         .user-name {
             font-weight: 600;
             color: #333;
         }
-        
+
         .user-dept {
             font-size: 0.8rem;
             color: #666;
             margin-top: 0.25rem;
         }
-        
+
         /* Enhanced File Upload */
         .file-upload-area {
             border: 3px dashed #dee2e6;
@@ -1121,29 +1151,29 @@ $completion_percentage = round($base_completion + $treatment_completion);
             cursor: pointer;
             background: linear-gradient(135deg, #f8f9fa, #ffffff);
         }
-        
+
         .file-upload-area:hover {
             border-color: #E60012;
             background: linear-gradient(135deg, rgba(230, 0, 18, 0.05), rgba(230, 0, 18, 0.02));
             transform: translateY(-2px);
         }
-        
+
         .file-upload-area.dragover {
             border-color: #E60012;
             background: linear-gradient(135deg, rgba(230, 0, 18, 0.1), rgba(230, 0, 18, 0.05));
             transform: scale(1.02);
         }
-        
+
         .upload-icon {
             font-size: 2.5rem;
             color: #E60012;
             margin-bottom: 1rem;
         }
-        
+
         .existing-files {
             margin-top: 1.5rem;
         }
-        
+
         .file-item {
             background: linear-gradient(135deg, #f8f9fa, #ffffff);
             border: 2px solid #dee2e6;
@@ -1155,18 +1185,18 @@ $completion_percentage = round($base_completion + $treatment_completion);
             justify-content: space-between;
             transition: all 0.3s ease;
         }
-        
+
         .file-item:hover {
             border-color: #E60012;
             transform: translateX(5px);
         }
-        
+
         .file-info {
             display: flex;
             align-items: center;
             gap: 0.75rem;
         }
-        
+
         .file-icon {
             width: 35px;
             height: 35px;
@@ -1177,7 +1207,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             align-items: center;
             justify-content: center;
         }
-        
+
         /* Enhanced Buttons */
         .btn {
             background: linear-gradient(135deg, #E60012, #B8000E);
@@ -1195,49 +1225,49 @@ $completion_percentage = round($base_completion + $treatment_completion);
             gap: 0.5rem;
             box-shadow: 0 4px 15px rgba(230, 0, 18, 0.3);
         }
-        
+
         .btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(230, 0, 18, 0.4);
             color: white;
             text-decoration: none;
         }
-        
+
         .btn-secondary {
             background: linear-gradient(135deg, #6c757d, #545b62);
             box-shadow: 0 4px 15px rgba(108, 117, 125, 0.3);
         }
-        
+
         .btn-secondary:hover {
             box-shadow: 0 6px 20px rgba(108, 117, 125, 0.4);
         }
-        
+
         .btn-outline {
             background: transparent;
             border: 2px solid #E60012;
             color: #E60012;
             box-shadow: none;
         }
-        
+
         .btn-outline:hover {
             background: #E60012;
             color: white;
         }
-        
+
         .btn-info {
             background: linear-gradient(135deg, #17a2b8, #138496);
             box-shadow: 0 4px 15px rgba(23, 162, 184, 0.3);
         }
-        
+
         .btn-info:hover {
             box-shadow: 0 6px 20px rgba(23, 162, 184, 0.4);
         }
-        
+
         .btn-sm {
             padding: 0.5rem 1rem;
             font-size: 0.9rem;
         }
-        
+
         .action-buttons {
             display: flex;
             gap: 1rem;
@@ -1249,7 +1279,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             border-radius: 12px;
             backdrop-filter: blur(10px);
         }
-        
+
         /* Enhanced Alerts */
         .alert {
             padding: 1.2rem;
@@ -1260,23 +1290,23 @@ $completion_percentage = round($base_completion + $treatment_completion);
             align-items: center;
             gap: 1rem;
         }
-        
+
         .alert-success {
             background: linear-gradient(135deg, rgba(212, 237, 218, 0.9), rgba(195, 230, 203, 0.9));
             color: #155724;
             border: 2px solid #28a745;
         }
-        
+
         .alert-danger {
             background: linear-gradient(135deg, rgba(248, 215, 218, 0.9), rgba(245, 198, 203, 0.9));
             color: #721c24;
             border: 2px solid #dc3545;
         }
-        
+
         .alert i {
             font-size: 1.3rem;
         }
-        
+
         /* Enhanced Info Groups for Section A */
         .info-group {
             background: rgba(248, 249, 250, 0.8);
@@ -1285,7 +1315,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             padding: 1.5rem;
             margin-bottom: 1.5rem;
         }
-        
+
         .info-group-title {
             color: #6c757d;
             font-size: 1.1rem;
@@ -1297,7 +1327,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             align-items: center;
             gap: 0.5rem;
         }
-        
+
         .risk-name-display {
             font-size: 1.1rem;
             font-weight: 600;
@@ -1305,57 +1335,57 @@ $completion_percentage = round($base_completion + $treatment_completion);
             background: rgba(230, 0, 18, 0.05);
             border-left-color: #E60012;
         }
-        
+
         .risk-description-display,
         .risk-cause-display {
             min-height: 80px;
             line-height: 1.6;
         }
-        
+
         /* Responsive Design */
         @media (max-width: 768px) {
             body {
                 padding-top: 200px;
             }
-            
+
             .header {
                 padding: 1.2rem 1.5rem;
             }
-            
+
             .header-content {
                 flex-direction: column;
                 gap: 1rem;
                 align-items: flex-start;
             }
-            
+
             .header-right {
                 align-self: flex-end;
             }
-            
+
             .main-title {
                 font-size: 1.3rem;
             }
-            
+
             .sub-title {
                 font-size: 0.9rem;
             }
-            
+
             .logout-btn {
                 margin-left: 0;
                 margin-top: 0.5rem;
             }
-            
+
             .nav {
                 top: 120px;
                 padding: 0.25rem 0;
             }
-            
+
             .nav-content {
                 padding: 0 0.5rem;
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
             }
-            
+
             .nav-menu {
                 flex-wrap: nowrap;
                 justify-content: flex-start;
@@ -1363,12 +1393,12 @@ $completion_percentage = round($base_completion + $treatment_completion);
                 min-width: max-content;
                 padding: 0 0.5rem;
             }
-            
+
             .nav-item {
                 flex: 0 0 auto;
                 min-width: 80px;
             }
-            
+
             .nav-item a {
                 padding: 0.75rem 0.5rem;
                 font-size: 0.75rem;
@@ -1384,75 +1414,75 @@ $completion_percentage = round($base_completion + $treatment_completion);
                 justify-content: center;
                 gap: 0.25rem;
             }
-            
+
             .nav-item a.active {
                 border-bottom-color: #E60012;
                 border-left-color: transparent;
                 background-color: rgba(230, 0, 18, 0.1);
             }
-            
+
             .nav-item a:hover {
                 background-color: rgba(230, 0, 18, 0.05);
             }
-            
+
             .form-row {
                 grid-template-columns: 1fr;
             }
-            
+
             .main-content {
                 padding: 1rem;
             }
-            
+
             .form-section {
                 padding: 1.5rem;
             }
-            
+
             .action-buttons {
                 flex-direction: column;
             }
-            
+
             .page-header-content {
                 flex-direction: column;
             }
-            
+
             .completion-info {
                 text-align: left;
                 min-width: auto;
             }
-            
+
             .assessment-grid {
                 grid-template-columns: 1fr;
             }
-            
+
             .treatment-meta {
                 grid-template-columns: 1fr;
             }
-            
+
             .treatment-actions {
                 flex-direction: column;
             }
         }
-        
+
         /* Loading States */
         .loading {
             opacity: 0.7;
             pointer-events: none;
         }
-        
+
         .spinner {
             animation: spin 1s linear infinite;
         }
-        
+
         @keyframes spin {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
         }
-        
+
         /* Smooth Animations */
         .form-section {
             animation: slideInUp 0.4s ease;
         }
-        
+
         @keyframes slideInUp {
             from {
                 opacity: 0;
@@ -1463,7 +1493,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
                 transform: translateY(0);
             }
         }
-        
+
         /* Notification Styles */
         .notification-nav-item {
             position: relative;
@@ -1681,14 +1711,14 @@ $completion_percentage = round($base_completion + $treatment_completion);
                 <div class="header-right">
                     <div class="user-avatar"><?php echo isset($_SESSION['full_name']) ? strtoupper(substr($_SESSION['full_name'], 0, 1)) : 'R'; ?></div>
                     <div class="user-details">
-                        <div class="user-email"><?php echo isset($_SESSION['email']) ? $_SESSION['email'] : 'No Email'; ?></div>
+                        <div class="user-email"><?php echo htmlspecialchars($_SESSION['email'] ?? 'No Email'); ?></div>
                         <div class="user-role">Risk_owner • <?php echo htmlspecialchars($user['department'] ?? 'No Department'); ?></div>
                     </div>
                     <a href="logout.php" class="logout-btn">Logout</a>
                 </div>
             </div>
         </header>
-        
+
         <nav class="nav">
             <div class="nav-content">
                 <ul class="nav-menu">
@@ -1723,7 +1753,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
                 </ul>
             </div>
         </nav>
-        
+
         <main class="main-content">
             <!-- Back Button -->
             <div style="margin-bottom: 2rem;">
@@ -1731,14 +1761,14 @@ $completion_percentage = round($base_completion + $treatment_completion);
                     <i class="fas fa-arrow-left"></i> Back to Dashboard
                 </a>
             </div>
-            
+
             <!-- Enhanced Page Header -->
             <div class="page-header">
                 <div class="page-header-content">
                     <div class="page-title-section">
                         <h1>🛠️ Manage Risk: <?php echo htmlspecialchars($risk['risk_name']); ?></h1>
                         <div class="page-meta">
-                            <span class="badge">ID: <?php echo $risk['id']; ?></span>
+                            <span class="badge">ID: <?php echo htmlspecialchars($risk['id']); ?></span>
                             <span class="badge">Reported by: <?php echo htmlspecialchars($risk['reporter_name']); ?></span>
                             <span class="badge">Department: <?php echo htmlspecialchars($risk['department']); ?></span>
                             <span class="badge">Assigned to: You</span>
@@ -1746,29 +1776,29 @@ $completion_percentage = round($base_completion + $treatment_completion);
                         </div>
                     </div>
                     <div class="completion-info">
-                        <div class="completion-percentage"><?php echo $completion_percentage; ?>%</div>
+                        <div class="completion-percentage"><?php echo htmlspecialchars($completion_percentage); ?>%</div>
                         <div>Complete</div>
                         <div class="completion-bar">
-                            <div class="completion-fill" style="width: <?php echo $completion_percentage; ?>%"></div>
+                            <div class="completion-fill" style="width: <?php echo htmlspecialchars($completion_percentage); ?>%"></div>
                         </div>
                     </div>
                 </div>
             </div>
-            
+
             <?php if (isset($error_message)): ?>
                 <div class="alert alert-danger">
                     <i class="fas fa-exclamation-triangle"></i>
-                    <span><?php echo $error_message; ?></span>
+                    <span><?php echo htmlspecialchars($error_message); ?></span>
                 </div>
             <?php endif; ?>
-            
+
             <?php if (isset($_SESSION['success_message'])): ?>
                 <div class="alert alert-success">
                     <i class="fas fa-check-circle"></i>
-                    <span><?php echo $_SESSION['success_message']; unset($_SESSION['success_message']); ?></span>
+                    <span><?php echo htmlspecialchars($_SESSION['success_message']); unset($_SESSION['success_message']); ?></span>
                 </div>
             <?php endif; ?>
-            
+
             <form method="POST" enctype="multipart/form-data" id="riskForm">
                 <!-- SECTION A: RISK IDENTIFICATION (Read-only) -->
                 <div class="form-section readonly">
@@ -1781,26 +1811,26 @@ $completion_percentage = round($base_completion + $treatment_completion);
                             <p>Information provided by the risk reporter</p>
                         </div>
                     </div>
-                    
+
                     <div class="section-note">
                         <i class="fas fa-info-circle"></i>
                         <span>This section was completed by the staff member who reported the risk. It is read-only for reference.</span>
                     </div>
-                    
+
                     <!-- Risk Basic Information -->
                     <div class="info-group">
                         <h4 class="info-group-title"><i class="fas fa-info-circle"></i> Basic Information</h4>
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Risk ID</label>
-                                <div class="readonly-display"><?php echo $risk['id']; ?></div>
+                                <div class="readonly-display"><?php echo htmlspecialchars($risk['id']); ?></div>
                             </div>
                             <div class="form-group">
                                 <label>Date of Risk Entry</label>
-                                <div class="readonly-display"><?php echo date('M j, Y', strtotime($risk['created_at'])); ?></div>
+                                <div class="readonly-display"><?php echo htmlspecialchars(date('M j, Y', strtotime($risk['created_at']))); ?></div>
                             </div>
                         </div>
-                        
+
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Department</label>
@@ -1812,7 +1842,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Risk Details -->
                     <div class="info-group">
                         <h4 class="info-group-title"><i class="fas fa-exclamation-triangle"></i> Risk Details</h4>
@@ -1820,19 +1850,19 @@ $completion_percentage = round($base_completion + $treatment_completion);
                             <label>Risk Name</label>
                             <div class="readonly-display risk-name-display"><?php echo htmlspecialchars($risk['risk_name']); ?></div>
                         </div>
-                        
+
                         <div class="form-group">
                             <label>Risk Description</label>
                             <div class="readonly-display risk-description-display"><?php echo nl2br(htmlspecialchars($risk['risk_description'])); ?></div>
                         </div>
-                        
+
                         <div class="form-group">
                             <label>Cause of Risk</label>
                             <div class="readonly-display risk-cause-display"><?php echo nl2br(htmlspecialchars($risk['cause_of_risk'])); ?></div>
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- SECTION B: RISK CLASSIFICATION -->
                 <div class="form-section <?php echo $section_b_completed ? 'readonly' : ''; ?>">
                     <div class="section-header <?php echo $section_b_completed ? 'readonly' : ''; ?>">
@@ -1851,25 +1881,18 @@ $completion_percentage = round($base_completion + $treatment_completion);
                             </div>
                         <?php endif; ?>
                     </div>
-                    
+
                     <?php if ($section_b_completed): ?>
-                        <div class="section-note" style="background: linear-gradient(135deg, #d4edda, #c3e6cb); border-color: #28a745; color: #155724;">
-                            <i class="fas fa-check-circle"></i>
-                            <span>This section has been completed and is now locked to prevent accidental changes. Contact your administrator if modifications are needed.</span>
-                        </div>
-                        
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Existing or New Risk</label>
-                                <div class="readonly-display"><?php echo ucfirst($risk['existing_or_new']); ?></div>
+                                <div class="readonly-display"><?php echo htmlspecialchars(ucfirst($risk['existing_or_new'])); ?></div>
                             </div>
-                            
                             <div class="form-group">
                                 <label>To be Reported to Board</label>
-                                <div class="readonly-display"><?php echo ucfirst($risk['to_be_reported_to_board']); ?></div>
+                                <div class="readonly-display"><?php echo htmlspecialchars(ucfirst($risk['to_be_reported_to_board'])); ?></div>
                             </div>
                         </div>
-                        
                         <div class="form-group">
                             <label>Risk Category</label>
                             <div class="readonly-display"><?php echo htmlspecialchars($risk['risk_category']); ?></div>
@@ -1878,26 +1901,24 @@ $completion_percentage = round($base_completion + $treatment_completion);
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="existing_or_new">Existing or New Risk <span class="required">*</span></label>
-                                <select id="existing_or_new" name="existing_or_new" required>
+                                <select id="existing_or_new" name="existing_or_new" class="form-control" required>
                                     <option value="">Select...</option>
                                     <option value="existing" <?php echo ($risk['existing_or_new'] == 'existing') ? 'selected' : ''; ?>>Existing</option>
                                     <option value="new" <?php echo ($risk['existing_or_new'] == 'new') ? 'selected' : ''; ?>>New</option>
                                 </select>
                             </div>
-                            
                             <div class="form-group">
                                 <label for="to_be_reported_to_board">To be Reported to Board <span class="required">*</span></label>
-                                <select id="to_be_reported_to_board" name="to_be_reported_to_board" required>
+                                <select id="to_be_reported_to_board" name="to_be_reported_to_board" class="form-control" required>
                                     <option value="">Select...</option>
                                     <option value="yes" <?php echo ($risk['to_be_reported_to_board'] == 'yes') ? 'selected' : ''; ?>>Yes</option>
                                     <option value="no" <?php echo ($risk['to_be_reported_to_board'] == 'no') ? 'selected' : ''; ?>>No</option>
                                 </select>
                             </div>
                         </div>
-                        
                         <div class="form-group">
                             <label for="risk_category">Risk Category <span class="required">*</span></label>
-                            <select id="risk_category" name="risk_category" required>
+                            <select id="risk_category" name="risk_category" class="form-control" required>
                                 <option value="">Select Risk Category...</option>
                                 <option value="Operational" <?php echo ($risk['risk_category'] == 'Operational') ? 'selected' : ''; ?>>Operational</option>
                                 <option value="Financial" <?php echo ($risk['risk_category'] == 'Financial') ? 'selected' : ''; ?>>Financial</option>
@@ -1905,13 +1926,12 @@ $completion_percentage = round($base_completion + $treatment_completion);
                                 <option value="Compliance" <?php echo ($risk['risk_category'] == 'Compliance') ? 'selected' : ''; ?>>Compliance</option>
                                 <option value="Technology" <?php echo ($risk['risk_category'] == 'Technology') ? 'selected' : ''; ?>>Technology</option>
                                 <option value="Reputational" <?php echo ($risk['risk_category'] == 'Reputational') ? 'selected' : ''; ?>>Reputational</option>
-                                <option value="Environmental" <?php echo ($risk['risk_category'] == 'Environmental') ? 'selected' : ''; ?>>Environmental</option>
                                 <option value="Human Resources" <?php echo ($risk['risk_category'] == 'Human Resources') ? 'selected' : ''; ?>>Human Resources</option>
                             </select>
                         </div>
                     <?php endif; ?>
                 </div>
-                
+
                 <!-- SECTION C: RISK ASSESSMENT -->
                 <div class="form-section <?php echo $section_c_completed ? 'readonly' : ''; ?>" id="section-c">
                     <div class="section-header <?php echo $section_c_completed ? 'readonly' : ''; ?>">
@@ -1930,88 +1950,39 @@ $completion_percentage = round($base_completion + $treatment_completion);
                             </div>
                         <?php endif; ?>
                     </div>
-                    
+
                     <?php if ($section_c_completed): ?>
-                        <div class="section-note" style="background: linear-gradient(135deg, #d4edda, #c3e6cb); border-color: #28a745; color: #155724;">
-                            <i class="fas fa-check-circle"></i>
-                            <span>Risk assessment has been completed and locked. These values are now used for risk calculations and cannot be changed.</span>
-                        </div>
-                        
-                        <!-- Read-only Assessment Display -->
                         <div class="assessment-grid">
-                            <?php if (!empty($risk['inherent_likelihood']) && !empty($risk['inherent_consequence'])): ?>
-                                <div class="assessment-card" style="border-color: #28a745; background: #f8fff9;">
-                                    <h4 style="color: #28a745;"><i class="fas fa-exclamation-triangle"></i> Inherent Risk (Before Controls)</h4>
-                                    <div class="form-row">
-                                        <div class="form-group">
-                                            <label>Inherent Likelihood</label>
-                                            <div class="readonly-display"><?php echo $risk['inherent_likelihood']; ?> - <?php 
-                                                $likelihood_labels = [1 => 'Very Unlikely', 2 => 'Unlikely', 3 => 'Possible', 4 => 'Likely', 5 => 'Very Likely'];
-                                                echo $likelihood_labels[$risk['inherent_likelihood']] ?? 'Unknown';
-                                            ?></div>
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Inherent Consequence</label>
-                                            <div class="readonly-display"><?php echo $risk['inherent_consequence']; ?> - <?php 
-                                                $consequence_labels = [1 => 'Very Low', 2 => 'Low', 3 => 'Medium', 4 => 'High', 5 => 'Very High'];
-                                                echo $consequence_labels[$risk['inherent_consequence']] ?? 'Unknown';
-                                            ?></div>
-                                        </div>
-                                    </div>
-                                    <?php 
-                                        $inherent_rating = $risk['inherent_likelihood'] * $risk['inherent_consequence'];
-                                        $inherent_level = 'Low';
-                                        $inherent_color = '#28a745';
-                                        if ($inherent_rating >= 15) { $inherent_level = 'Critical'; $inherent_color = '#dc3545'; }
-                                        elseif ($inherent_rating >= 9) { $inherent_level = 'High'; $inherent_color = '#fd7e14'; }
-                                        elseif ($inherent_rating >= 4) { $inherent_level = 'Medium'; $inherent_color = '#ffc107'; }
-                                    ?>
-                                    <div class="risk-rating-display" style="background: <?php echo $inherent_color; ?>; color: white;">
-                                        <strong>Risk Rating: <?php echo $inherent_rating; ?> - <?php echo $inherent_level; ?></strong>
-                                    </div>
+                            <div class="assessment-card">
+                                <h4><i class="fas fa-exclamation-triangle"></i> Inherent Risk (Before Controls)</h4>
+                                <div class="form-group">
+                                    <label>Inherent Likelihood (1-5)</label>
+                                    <div class="readonly-display"><?php echo htmlspecialchars($risk['inherent_likelihood']); ?></div>
                                 </div>
-                            <?php endif; ?>
-                            
-                            <?php if (!empty($risk['residual_likelihood']) && !empty($risk['residual_consequence'])): ?>
-                                <div class="assessment-card" style="border-color: #28a745; background: #f8fff9;">
-                                    <h4 style="color: #28a745;"><i class="fas fa-shield-alt"></i> Residual Risk (After Controls)</h4>
-                                    <div class="form-row">
-                                        <div class="form-group">
-                                            <label>Residual Likelihood</label>
-                                            <div class="readonly-display"><?php echo $risk['residual_likelihood']; ?> - <?php 
-                                                echo $likelihood_labels[$risk['residual_likelihood']] ?? 'Unknown';
-                                            ?></div>
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Residual Consequence</label>
-                                            <div class="readonly-display"><?php echo $risk['residual_consequence']; ?> - <?php 
-                                                echo $consequence_labels[$risk['residual_consequence']] ?? 'Unknown';
-                                            ?></div>
-                                        </div>
-                                    </div>
-                                    <?php 
-                                        $residual_rating = $risk['residual_likelihood'] * $risk['residual_consequence'];
-                                        $residual_level = 'Low';
-                                        $residual_color = '#28a745';
-                                        if ($residual_rating >= 15) { $residual_level = 'Critical'; $residual_color = '#dc3545'; }
-                                        elseif ($residual_rating >= 9) { $residual_level = 'High'; $residual_color = '#fd7e14'; }
-                                        elseif ($residual_rating >= 4) { $residual_level = 'Medium'; $residual_color = '#ffc107'; }
-                                    ?>
-                                    <div class="risk-rating-display" style="background: <?php echo $residual_color; ?>; color: white;">
-                                        <strong>Risk Rating: <?php echo $residual_rating; ?> - <?php echo $residual_level; ?></strong>
-                                    </div>
+                                <div class="form-group">
+                                    <label>Inherent Consequence (1-5)</label>
+                                    <div class="readonly-display"><?php echo htmlspecialchars($risk['inherent_consequence']); ?></div>
                                 </div>
-                            <?php endif; ?>
+                            </div>
+                            <div class="assessment-card">
+                                <h4><i class="fas fa-shield-alt"></i> Residual Risk (After Controls)</h4>
+                                <div class="form-group">
+                                    <label>Residual Likelihood (1-5)</label>
+                                    <div class="readonly-display"><?php echo htmlspecialchars($risk['residual_likelihood']); ?></div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Residual Consequence (1-5)</label>
+                                    <div class="readonly-display"><?php echo htmlspecialchars($risk['residual_consequence']); ?></div>
+                                </div>
+                            </div>
                         </div>
                     <?php else: ?>
-                        <!-- Editable Assessment Cards -->
                         <div class="assessment-grid">
-                            <!-- Inherent Risk Assessment -->
                             <div class="assessment-card">
                                 <h4><i class="fas fa-exclamation-triangle"></i> Inherent Risk (Before Controls)</h4>
                                 <div class="form-group">
                                     <label for="inherent_likelihood">Inherent Likelihood (1-5)</label>
-                                    <select id="inherent_likelihood" name="inherent_likelihood">
+                                    <select id="inherent_likelihood" name="inherent_likelihood" class="form-control">
                                         <option value="">Select...</option>
                                         <option value="1" <?php echo ($risk['inherent_likelihood'] == '1') ? 'selected' : ''; ?>>1 - Very Unlikely</option>
                                         <option value="2" <?php echo ($risk['inherent_likelihood'] == '2') ? 'selected' : ''; ?>>2 - Unlikely</option>
@@ -2020,10 +1991,9 @@ $completion_percentage = round($base_completion + $treatment_completion);
                                         <option value="5" <?php echo ($risk['inherent_likelihood'] == '5') ? 'selected' : ''; ?>>5 - Very Likely</option>
                                     </select>
                                 </div>
-                                
                                 <div class="form-group">
                                     <label for="inherent_consequence">Inherent Consequence (1-5)</label>
-                                    <select id="inherent_consequence" name="inherent_consequence">
+                                    <select id="inherent_consequence" name="inherent_consequence" class="form-control">
                                         <option value="">Select...</option>
                                         <option value="1" <?php echo ($risk['inherent_consequence'] == '1') ? 'selected' : ''; ?>>1 - Very Low</option>
                                         <option value="2" <?php echo ($risk['inherent_consequence'] == '2') ? 'selected' : ''; ?>>2 - Low</option>
@@ -2032,15 +2002,12 @@ $completion_percentage = round($base_completion + $treatment_completion);
                                         <option value="5" <?php echo ($risk['inherent_consequence'] == '5') ? 'selected' : ''; ?>>5 - Very High</option>
                                     </select>
                                 </div>
-                                <div id="inherent_rating" class="risk-rating-display"></div>
                             </div>
-                            
-                            <!-- Residual Risk Assessment -->
                             <div class="assessment-card">
                                 <h4><i class="fas fa-shield-alt"></i> Residual Risk (After Controls)</h4>
                                 <div class="form-group">
                                     <label for="residual_likelihood">Residual Likelihood (1-5)</label>
-                                    <select id="residual_likelihood" name="residual_likelihood">
+                                    <select id="residual_likelihood" name="residual_likelihood" class="form-control">
                                         <option value="">Select...</option>
                                         <option value="1" <?php echo ($risk['residual_likelihood'] == '1') ? 'selected' : ''; ?>>1 - Very Unlikely</option>
                                         <option value="2" <?php echo ($risk['residual_likelihood'] == '2') ? 'selected' : ''; ?>>2 - Unlikely</option>
@@ -2049,10 +2016,9 @@ $completion_percentage = round($base_completion + $treatment_completion);
                                         <option value="5" <?php echo ($risk['residual_likelihood'] == '5') ? 'selected' : ''; ?>>5 - Very Likely</option>
                                     </select>
                                 </div>
-                                
                                 <div class="form-group">
                                     <label for="residual_consequence">Residual Consequence (1-5)</label>
-                                    <select id="residual_consequence" name="residual_consequence">
+                                    <select id="residual_consequence" name="residual_consequence" class="form-control">
                                         <option value="">Select...</option>
                                         <option value="1" <?php echo ($risk['residual_consequence'] == '1') ? 'selected' : ''; ?>>1 - Very Low</option>
                                         <option value="2" <?php echo ($risk['residual_consequence'] == '2') ? 'selected' : ''; ?>>2 - Low</option>
@@ -2061,12 +2027,11 @@ $completion_percentage = round($base_completion + $treatment_completion);
                                         <option value="5" <?php echo ($risk['residual_consequence'] == '5') ? 'selected' : ''; ?>>5 - Very High</option>
                                     </select>
                                 </div>
-                                <div id="residual_rating" class="risk-rating-display"></div>
                             </div>
                         </div>
                     <?php endif; ?>
                 </div>
-                
+
                 <!-- Overall Risk Status -->
                 <div class="form-section">
                     <div class="section-header">
@@ -2078,10 +2043,10 @@ $completion_percentage = round($base_completion + $treatment_completion);
                             <p>Set the overall status of this risk</p>
                         </div>
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="risk_status">Overall Risk Status</label>
-                        <select id="risk_status" name="risk_status">
+                        <select id="risk_status" name="risk_status" class="form-control">
                             <option value="">Select Status...</option>
                             <option value="pending" <?php echo ($risk['risk_status'] == 'pending') ? 'selected' : ''; ?>>Open</option>
                             <option value="in_progress" <?php echo ($risk['risk_status'] == 'in_progress') ? 'selected' : ''; ?>>In Progress</option>
@@ -2090,13 +2055,13 @@ $completion_percentage = round($base_completion + $treatment_completion);
                         </select>
                     </div>
                 </div>
-                
+
                 <!-- Action Buttons for Main Risk -->
                 <div class="action-buttons">
                     <button type="submit" name="update_risk" class="btn" id="submitBtn">
                         <i class="fas fa-save"></i> Update Risk
                     </button>
-                    <a href="view_risk.php?id=<?php echo $risk_id; ?>" class="btn btn-outline">
+                    <a href="view_risk.php?id=<?php echo htmlspecialchars($risk_id); ?>" class="btn btn-outline">
                         <i class="fas fa-eye"></i> View Details
                     </a>
                     <a href="risk_owner_dashboard.php" class="btn btn-secondary">
@@ -2104,7 +2069,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
                     </a>
                 </div>
             </form>
-            
+
             <!-- SECTION D: TREATMENT METHODS -->
             <div class="treatments-section">
                 <div class="section-header">
@@ -2121,7 +2086,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
                         </button>
                     </div>
                 </div>
-                
+
                 <?php if (empty($treatments)): ?>
                     <div style="text-align: center; padding: 3rem; color: #666;">
                         <div style="font-size: 3rem; margin-bottom: 1rem; color: #17a2b8;">
@@ -2138,19 +2103,19 @@ $completion_percentage = round($base_completion + $treatment_completion);
                         <div class="treatment-card">
                             <div class="treatment-header">
                                 <h4 class="treatment-title"><?php echo htmlspecialchars($treatment['treatment_title']); ?></h4>
-                                <span class="treatment-status status-<?php echo $treatment['status']; ?>">
-                                    <?php 
+                                <span class="treatment-status status-<?php echo htmlspecialchars($treatment['status']); ?>">
+                                    <?php
                                     $status_labels = [
                                         'pending' => '🔓 Pending',
-                                        'in_progress' => '⚡ In Progress', 
+                                        'in_progress' => '⚡ In Progress',
                                         'completed' => '✅ Completed',
                                         'cancelled' => '❌ Cancelled'
                                     ];
-                                    echo $status_labels[$treatment['status']] ?? ucfirst($treatment['status']);
+                                    echo htmlspecialchars($status_labels[$treatment['status']] ?? ucfirst($treatment['status']));
                                     ?>
                                 </span>
                             </div>
-                            
+
                             <div class="treatment-meta">
                                 <div class="meta-item">
                                     <div class="meta-label">Assigned To</div>
@@ -2166,26 +2131,26 @@ $completion_percentage = round($base_completion + $treatment_completion);
                                 <div class="meta-item">
                                     <div class="meta-label">Target Date</div>
                                     <div class="meta-value">
-                                        <?php echo $treatment['target_completion_date'] ? date('M j, Y', strtotime($treatment['target_completion_date'])) : 'Not set'; ?>
+                                        <?php echo $treatment['target_completion_date'] ? htmlspecialchars(date('M j, Y', strtotime($treatment['target_completion_date']))) : 'Not set'; ?>
                                     </div>
                                 </div>
                                 <div class="meta-item">
                                     <div class="meta-label">Created</div>
-                                    <div class="meta-value"><?php echo date('M j, Y', strtotime($treatment['created_at'])); ?></div>
+                                    <div class="meta-value"><?php echo htmlspecialchars(date('M j, Y', strtotime($treatment['created_at']))); ?></div>
                                 </div>
                             </div>
-                            
+
                             <div class="treatment-description">
                                 <?php echo nl2br(htmlspecialchars($treatment['treatment_description'])); ?>
                             </div>
-                            
+
                             <?php if (!empty($treatment['progress_notes'])): ?>
                                 <div style="background: #e3f2fd; padding: 1rem; border-radius: 8px; border-left: 4px solid #2196f3; margin: 1rem 0;">
                                     <strong style="color: #1976d2;">Progress Notes:</strong><br>
                                     <?php echo nl2br(htmlspecialchars($treatment['progress_notes'])); ?>
                                 </div>
                             <?php endif; ?>
-                            
+
                             <!-- Treatment Documents -->
                             <?php if (isset($treatment_docs[$treatment['id']])): ?>
                                 <div class="existing-files">
@@ -2198,7 +2163,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
                                                 </div>
                                                 <div>
                                                     <strong><?php echo htmlspecialchars($doc['original_filename']); ?></strong>
-                                                    <br><small><?php echo number_format($doc['file_size'] / 1024, 1); ?> KB • <?php echo date('M j, Y', strtotime($doc['uploaded_at'])); ?></small>
+                                                    <br><small><?php echo htmlspecialchars(number_format($doc['file_size'] / 1024, 1)); ?> KB • <?php echo htmlspecialchars(date('M j, Y', strtotime($doc['uploaded_at']))); ?></small>
                                                 </div>
                                             </div>
                                             <a href="<?php echo htmlspecialchars($doc['file_path']); ?>" target="_blank" class="btn btn-outline btn-sm">
@@ -2208,16 +2173,16 @@ $completion_percentage = round($base_completion + $treatment_completion);
                                     <?php endforeach; ?>
                                 </div>
                             <?php endif; ?>
-                            
+
                             <div class="treatment-actions">
                                 <?php if ($treatment['assigned_to'] == $_SESSION['user_id'] || $risk['risk_owner_id'] == $_SESSION['user_id']): ?>
-                                    <button type="button" class="btn btn-info btn-sm" onclick="openUpdateTreatmentModal(<?php echo $treatment['id']; ?>, '<?php echo addslashes($treatment['treatment_title']); ?>', '<?php echo $treatment['status']; ?>', '<?php echo addslashes($treatment['progress_notes'] ?? ''); ?>')">
+                                    <button type="button" class="btn btn-info btn-sm" onclick="openUpdateTreatmentModal(<?php echo htmlspecialchars($treatment['id']); ?>, '<?php echo addslashes(htmlspecialchars($treatment['treatment_title'])); ?>', '<?php echo htmlspecialchars($treatment['status']); ?>', '<?php echo addslashes(htmlspecialchars($treatment['progress_notes'] ?? '')); ?>')">
                                         <i class="fas fa-edit"></i> Update Progress
                                     </button>
                                 <?php endif; ?>
-                                
+
                                 <?php if ($risk['risk_owner_id'] == $_SESSION['user_id']): ?>
-                                    <button type="button" class="btn btn-outline btn-sm" onclick="reassignTreatment(<?php echo $treatment['id']; ?>)">
+                                    <button type="button" class="btn btn-outline btn-sm" onclick="reassignTreatment(<?php echo htmlspecialchars($treatment['id']); ?>)">
                                         <i class="fas fa-user-edit"></i> Reassign
                                     </button>
                                 <?php endif; ?>
@@ -2228,7 +2193,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             </div>
         </main>
     </div>
-    
+
     <!-- Add Treatment Modal -->
     <div id="addTreatmentModal" class="modal">
         <div class="modal-content">
@@ -2242,29 +2207,29 @@ $completion_percentage = round($base_completion + $treatment_completion);
                         <label for="treatment_title">Treatment Title <span class="required">*</span></label>
                         <input type="text" id="treatment_title" name="treatment_title" required placeholder="e.g., Implement Security Controls">
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="treatment_description">Treatment Description <span class="required">*</span></label>
                         <textarea id="treatment_description" name="treatment_description" required placeholder="Describe the specific treatment approach and actions to be taken..."></textarea>
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="assigned_to">Assign To</label>
                         <div class="user-search-container">
                             <input type="text" id="user_search" class="user-search-input" placeholder="Search by name or department..." autocomplete="off">
-                            <input type="hidden" id="assigned_to" name="assigned_to" value="<?php echo $_SESSION['user_id']; ?>">
+                            <input type="hidden" id="assigned_to" name="assigned_to" value="<?php echo htmlspecialchars($_SESSION['user_id']); ?>">
                             <div id="user_dropdown" class="user-dropdown"></div>
                         </div>
                         <small style="color: #666; margin-top: 0.5rem; display: block;">
                             Currently assigned to: <strong id="selected_user_display"><?php echo htmlspecialchars($user['full_name']); ?> (You)</strong>
                         </small>
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="treatment_target_date">Target Completion Date</label>
                         <input type="date" id="treatment_target_date" name="treatment_target_date">
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="treatment_files">Supporting Documents</label>
                         <div class="file-upload-area" onclick="document.getElementById('treatment_files').click()">
@@ -2277,7 +2242,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
                             <input type="file" id="treatment_files" name="treatment_files[]" multiple style="display: none;" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png">
                         </div>
                     </div>
-                    
+
                     <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 2rem;">
                         <button type="button" class="btn btn-secondary" onclick="closeAddTreatmentModal()">Cancel</button>
                         <button type="submit" name="add_treatment" class="btn btn-info">
@@ -2288,7 +2253,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
             </div>
         </div>
     </div>
-    
+
     <!-- Update Treatment Modal -->
     <div id="updateTreatmentModal" class="modal">
         <div class="modal-content">
@@ -2299,27 +2264,27 @@ $completion_percentage = round($base_completion + $treatment_completion);
             <div class="modal-body">
                 <form method="POST" enctype="multipart/form-data" id="updateTreatmentForm">
                     <input type="hidden" id="update_treatment_id" name="treatment_id">
-                    
+
                     <div class="form-group">
                         <label>Treatment Title</label>
                         <div id="update_treatment_title_display" class="readonly-display"></div>
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="treatment_status">Status</label>
-                        <select id="treatment_status" name="treatment_status">
+                        <select id="treatment_status" name="treatment_status" class="form-control">
                             <option value="pending">Pending</option>
                             <option value="in_progress">In Progress</option>
                             <option value="completed">Completed</option>
                             <option value="cancelled">Cancelled</option>
                         </select>
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="progress_notes">Progress Notes</label>
-                        <textarea id="progress_notes" name="progress_notes" placeholder="Add progress updates, challenges, or completion notes..."></textarea>
+                        <textarea id="progress_notes" name="progress_notes" class="form-control" placeholder="Add progress updates, challenges, or completion notes..."></textarea>
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="treatment_update_files">Additional Documents</label>
                         <div class="file-upload-area" onclick="document.getElementById('treatment_update_files').click()">
@@ -2332,7 +2297,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
                             <input type="file" id="treatment_update_files" name="treatment_update_files[]" multiple style="display: none;" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png">
                         </div>
                     </div>
-                    
+
                     <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 2rem;">
                         <button type="button" class="btn btn-secondary" onclick="closeUpdateTreatmentModal()">Cancel</button>
                         <button type="submit" name="update_treatment" class="btn btn-info">
@@ -2343,31 +2308,31 @@ $completion_percentage = round($base_completion + $treatment_completion);
             </div>
         </div>
     </div>
-    
+
     <script>
         // Risk owners data for user search
         const riskOwners = <?php echo json_encode($risk_owners); ?>;
-        
+
         // Enhanced file upload handling
         document.addEventListener('DOMContentLoaded', function() {
             const fileInputs = document.querySelectorAll('input[type="file"]');
-            
+
             fileInputs.forEach(input => {
                 input.addEventListener('change', function() {
                     const files = this.files;
                     const uploadArea = this.parentElement;
-                    
+
                     if (files.length > 0) {
                         let fileNames = [];
                         let totalSize = 0;
-                        
+
                         for (let i = 0; i < files.length; i++) {
                             fileNames.push(files[i].name);
                             totalSize += files[i].size;
                         }
-                        
+
                         const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(2);
-                        
+
                         uploadArea.innerHTML = `
                             <div class="upload-icon">
                                 <i class="fas fa-check-circle" style="color: #28a745;"></i>
@@ -2376,7 +2341,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
                             <p style="font-size: 0.9rem; color: #666; margin: 0.5rem 0;">${fileNames.join(', ')}</p>
                             <small style="color: #999;">Total size: ${totalSizeMB} MB • Click to change files</small>
                         `;
-                        
+
                         // Add success animation
                         uploadArea.style.transform = 'scale(1.02)';
                         setTimeout(() => {
@@ -2385,51 +2350,51 @@ $completion_percentage = round($base_completion + $treatment_completion);
                     }
                 });
             });
-            
+
             // Enhanced drag and drop functionality
             const uploadAreas = document.querySelectorAll('.file-upload-area');
-            
+
             uploadAreas.forEach(area => {
                 area.addEventListener('dragover', function(e) {
                     e.preventDefault();
                     this.classList.add('dragover');
                 });
-                
+
                 area.addEventListener('dragleave', function(e) {
                     e.preventDefault();
                     this.classList.remove('dragover');
                 });
-                
+
                 area.addEventListener('drop', function(e) {
                     e.preventDefault();
                     this.classList.remove('dragover');
-                    
+
                     const fileInput = this.querySelector('input[type="file"]');
                     fileInput.files = e.dataTransfer.files;
-                    
+
                     // Trigger change event
                     const event = new Event('change', { bubbles: true });
                     fileInput.dispatchEvent(event);
                 });
             });
         });
-        
+
         // User search functionality
         document.getElementById('user_search').addEventListener('input', function() {
             const searchTerm = this.value.toLowerCase();
             const dropdown = document.getElementById('user_dropdown');
-            
+
             if (searchTerm.length < 2) {
                 dropdown.classList.remove('show');
                 return;
             }
-            
-            const filteredUsers = riskOwners.filter(user => 
+
+            const filteredUsers = riskOwners.filter(user =>
                 user.full_name.toLowerCase().includes(searchTerm) ||
                 user.department.toLowerCase().includes(searchTerm) ||
                 user.email.toLowerCase().includes(searchTerm)
             );
-            
+
             if (filteredUsers.length > 0) {
                 dropdown.innerHTML = filteredUsers.map(user => `
                     <div class="user-option" onclick="selectUser(${user.id}, '${user.full_name}', '${user.department}')">
@@ -2443,30 +2408,30 @@ $completion_percentage = round($base_completion + $treatment_completion);
                 dropdown.classList.add('show');
             }
         });
-        
+
         function selectUser(userId, userName, userDept) {
             document.getElementById('assigned_to').value = userId;
             document.getElementById('user_search').value = userName;
             document.getElementById('selected_user_display').textContent = `${userName} (${userDept})`;
             document.getElementById('user_dropdown').classList.remove('show');
         }
-        
+
         // Close dropdown when clicking outside
         document.addEventListener('click', function(e) {
             if (!e.target.closest('.user-search-container')) {
                 document.getElementById('user_dropdown').classList.remove('show');
             }
         });
-        
+
         // Modal functions
         function openAddTreatmentModal() {
             document.getElementById('addTreatmentModal').classList.add('show');
         }
-        
+
         function closeAddTreatmentModal() {
             document.getElementById('addTreatmentModal').classList.remove('show');
         }
-        
+
         function openUpdateTreatmentModal(treatmentId, title, status, progressNotes) {
             document.getElementById('update_treatment_id').value = treatmentId;
             document.getElementById('update_treatment_title_display').textContent = title;
@@ -2474,33 +2439,33 @@ $completion_percentage = round($base_completion + $treatment_completion);
             document.getElementById('progress_notes').value = progressNotes;
             document.getElementById('updateTreatmentModal').classList.add('show');
         }
-        
+
         function closeUpdateTreatmentModal() {
             document.getElementById('updateTreatmentModal').classList.remove('show');
         }
-        
+
         function reassignTreatment(treatmentId) {
             // This would open a reassignment modal - simplified for now
             alert('Reassignment feature coming soon!');
         }
-        
+
         // Update form validation to handle read-only sections
         document.getElementById('riskForm').addEventListener('submit', function(e) {
             const requiredFields = [];
-            
+
             // Only validate editable sections
             <?php if (!$section_b_completed): ?>
             requiredFields.push('existing_or_new', 'to_be_reported_to_board', 'risk_category');
             <?php endif; ?>
-            
+
             let hasError = false;
             let firstErrorField = null;
-            
+
             // Remove previous error states
             document.querySelectorAll('.error').forEach(el => el.classList.remove('error'));
-            
+
             requiredFields.forEach(fieldName => {
-                const field = document.querySelector(`[name="${fieldName}"]`);
+                const field = document.querySelector(`[name="${fieldName}"]:not([disabled])`); // Only validate non-disabled fields
                 if (field && !field.value) {
                     field.style.borderColor = '#dc3545';
                     field.style.boxShadow = '0 0 0 3px rgba(220, 53, 69, 0.1)';
@@ -2508,14 +2473,14 @@ $completion_percentage = round($base_completion + $treatment_completion);
                     hasError = true;
                     if (!firstErrorField) firstErrorField = field;
                 } else if (field) {
-                    field.style.borderColor = '#28a745';
-                    field.style.boxShadow = '0 0 0 3px rgba(40, 167, 69, 0.1)';
+                    field.style.borderColor = ''; // Reset to default
+                    field.style.boxShadow = ''; // Reset to default
                 }
             });
-            
+
             if (hasError) {
                 e.preventDefault();
-                
+
                 // Show error message
                 const errorAlert = document.createElement('div');
                 errorAlert.className = 'alert alert-danger';
@@ -2523,30 +2488,30 @@ $completion_percentage = round($base_completion + $treatment_completion);
                     <i class="fas fa-exclamation-triangle"></i>
                     <span>Please fill in all required fields in the editable sections.</span>
                 `;
-                
+
                 // Insert error message at top of form
                 const form = document.getElementById('riskForm');
                 form.insertBefore(errorAlert, form.firstChild);
-                
+
                 // Scroll to first error field
                 firstErrorField.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 firstErrorField.focus();
-                
+
                 // Remove error message after 5 seconds
                 setTimeout(() => {
                     errorAlert.remove();
                 }, 5000);
-                
+
                 return false;
             }
-            
+
             // Show loading state
             const submitBtn = document.getElementById('submitBtn');
             const originalText = submitBtn.innerHTML;
             submitBtn.innerHTML = '<i class="fas fa-spinner spinner"></i> Updating Risk...';
             submitBtn.disabled = true;
             submitBtn.style.opacity = '0.7';
-            
+
             // Add loading class to form
             document.getElementById('riskForm').classList.add('loading');
         });
@@ -2555,33 +2520,39 @@ $completion_percentage = round($base_completion + $treatment_completion);
         function calculateRisk(likelihoodId, consequenceId, displayId) {
             const likelihood = document.getElementById(likelihoodId);
             const consequence = document.getElementById(consequenceId);
-            
+
             if (likelihood && consequence) {
-                likelihood.addEventListener('change', updateRating);
-                consequence.addEventListener('change', updateRating);
-                
+                // Only add event listeners if the fields are NOT disabled
+                if (!likelihood.disabled) {
+                    likelihood.addEventListener('change', updateRating);
+                }
+                if (!consequence.disabled) {
+                    consequence.addEventListener('change', updateRating);
+                }
+
                 // Initial calculation
                 updateRating();
-                
+
                 function updateRating() {
                     const l = parseInt(likelihood.value) || 0;
                     const c = parseInt(consequence.value) || 0;
                     const rating = l * c;
-                    
+
                     let ratingDisplay = document.getElementById(displayId);
                     if (!ratingDisplay) {
                         ratingDisplay = document.createElement('div');
                         ratingDisplay.id = displayId;
                         ratingDisplay.className = 'risk-rating-display';
-                        consequence.parentElement.appendChild(ratingDisplay);
+                        // Append to the parent of the consequence select
+                        consequence.closest('.assessment-card').appendChild(ratingDisplay);
                     }
-                    
+
                     if (rating > 0) {
                         let level = 'Low';
                         let color = '#28a745';
                         let bgColor = 'linear-gradient(135deg, #d4edda, #c3e6cb)';
                         let textColor = '#155724';
-                        
+
                         if (rating >= 15) {
                             level = 'Critical';
                             color = '#dc3545';
@@ -2598,7 +2569,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
                             bgColor = 'linear-gradient(135deg, #fff3cd, #ffeaa7)';
                             textColor = '#856404';
                         }
-                        
+
                         ratingDisplay.innerHTML = `
                             <div style="display: flex; align-items: center; justify-content: space-between;">
                                 <strong>Risk Rating:</strong>
@@ -2608,13 +2579,13 @@ $completion_percentage = round($base_completion + $treatment_completion);
                                 </div>
                             </div>
                         `;
-                        
+
                         // Add animation
                         ratingDisplay.style.transform = 'scale(1.05)';
                         setTimeout(() => {
                             ratingDisplay.style.transform = 'scale(1)';
                         }, 200);
-                        
+
                     } else {
                         ratingDisplay.innerHTML = `
                             <div style="text-align: center; color: #666; font-style: italic;">
@@ -2626,13 +2597,13 @@ $completion_percentage = round($base_completion + $treatment_completion);
                 }
             }
         }
-        
+
         // Initialize risk calculators only for editable sections
         <?php if (!$section_c_completed): ?>
         calculateRisk('inherent_likelihood', 'inherent_consequence', 'inherent_rating');
         calculateRisk('residual_likelihood', 'residual_consequence', 'residual_rating');
         <?php endif; ?>
-        
+
         // Progress bar animation
         const progressFill = document.querySelector('.completion-fill');
         if (progressFill) {
@@ -2642,7 +2613,7 @@ $completion_percentage = round($base_completion + $treatment_completion);
                 progressFill.style.width = targetWidth;
             }, 500);
         }
-        
+
         // Close modals when clicking outside
         window.addEventListener('click', function(e) {
             if (e.target.classList.contains('modal')) {
@@ -2652,4 +2623,3 @@ $completion_percentage = round($base_completion + $treatment_completion);
     </script>
 </body>
 </html>
-
