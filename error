@@ -1,0 +1,14 @@
+SQL query: Copy
+
+
+CREATE TABLE IF NOT EXISTS `risk_monitoring` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `risk_id` int(11) NOT NULL,
+  `review_date` date NOT NULL,
+  `review_notes` text NOT NULL,
+  `current_risk_level` enum('Low','Medium','High','Critical') DEFAULT NULL,
+  `effectiveness_rating` int(11) DEFAULT NULL
+);
+MySQL said: Documentation
+
+#1075 - Incorrect table definition; there can be only one auto column and it must be defined as a key
