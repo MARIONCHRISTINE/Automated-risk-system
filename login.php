@@ -26,13 +26,12 @@ if (file_exists('includes/php_compatibility.php')) {
 }
 
 $error = '';
+$database = new Database();
+$db = $database->getConnection();
 
 if ($_POST) {
     $email = $_POST['email'];
     $password = $_POST['password'];
-    
-    $database = new Database();
-    $db = $database->getConnection();
     
     $query = "SELECT id, email, password, full_name, role, status FROM users WHERE email = :email";
     $stmt = $db->prepare($query);
@@ -44,12 +43,17 @@ if ($_POST) {
         
         if ($user['status'] !== 'approved') {
             $error = "Your account is pending approval. Please contact the administrator.";
+            // Log attempt for pending/unapproved account
+            $database->logActivity($user['id'], 'Login Attempt - Account Pending/Suspended', 'User ' . $email . ' tried to log in but account is ' . $user['status'] . '.', $_SERVER['REMOTE_ADDR']);
         } elseif (password_verify($password, $user['password'])) {
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['email'] = $user['email'];
             $_SESSION['full_name'] = $user['full_name'];
             $_SESSION['role'] = $user['role'];
             
+            // Log successful login
+            $database->logActivity($_SESSION['user_id'], 'Successful Login', 'User ' . $_SESSION['email'] . ' logged in successfully.', $_SERVER['REMOTE_ADDR']);
+
             // Redirect based on role
             switch ($user['role']) {
                 case 'staff':
@@ -68,15 +72,18 @@ if ($_POST) {
             exit();
         } else {
             $error = "Invalid email or password.";
+            // Log failed login attempt (invalid password)
+            $database->logActivity($user['id'], 'Failed Login - Invalid Password', 'User ' . $email . ' entered an invalid password.', $_SERVER['REMOTE_ADDR']);
         }
     } else {
         $error = "Invalid email or password.";
+        // Log failed login attempt (user not found)
+        $database->logActivity(null, 'Failed Login - User Not Found', 'Attempt to log in with non-existent email: ' . $email, $_SERVER['REMOTE_ADDR']);
     }
 }
 
 $phpCheck = checkPHPVersion();
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -189,8 +196,6 @@ $phpCheck = checkPHPVersion();
             border: 1px solid #ffcdd2;
         }
         
-        
-        
         .register-link {
             text-align: center;
             margin-top: 1.5rem;
@@ -205,19 +210,16 @@ $phpCheck = checkPHPVersion();
         .register-link a:hover {
             text-decoration: underline;
         }
-
         .forgot-password-link {
             text-align: center;
             margin: 1rem 0;
         }
-
         .forgot-password-link a {
             color: #E60012;
             text-decoration: none;
             font-size: 0.9rem;
             font-weight: 500;
         }
-
         .forgot-password-link a:hover {
             text-decoration: underline;
         }
@@ -229,8 +231,6 @@ $phpCheck = checkPHPVersion();
             <img src="image.png" alt="Airtel Logo" class="airtel-logo">
             <h1>Airtel Risk Management</h1>
         </div>
-        
-        
         
         <?php if ($error): ?>
             <div class="error"><?php echo $error; ?></div>
@@ -249,11 +249,9 @@ $phpCheck = checkPHPVersion();
             
             <button type="submit" class="btn">Sign In</button>
         </form>
-
         <div class="forgot-password-link">
             <a href="reset_password.php">Forgot your password?</a>
         </div>
-
         <div class="register-link">
             <p>Don't have an account? <a href="register.php">Register here</a></p>
         </div>
