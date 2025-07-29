@@ -11,7 +11,43 @@ function requireLogin() {
 function requireRole($role) {
     requireLogin();
     if ($_SESSION['role'] !== $role) {
-        header('Location: dashboard.php');
+        // Redirect to appropriate dashboard based on current role
+        switch ($_SESSION['role']) {
+            case 'admin':
+                header('Location: admin_dashboard.php');
+                break;
+            case 'risk_owner':
+                header('Location: risk_owner_dashboard.php');
+                break;
+            case 'staff':
+                header('Location: staff_dashboard.php');
+                break;
+            default:
+                header('Location: login.php');
+                break;
+        }
+        exit();
+    }
+}
+
+function requireAnyRole($roles) {
+    requireLogin();
+    if (!in_array($_SESSION['role'], $roles)) {
+        // Redirect to appropriate dashboard based on current role
+        switch ($_SESSION['role']) {
+            case 'admin':
+                header('Location: admin_dashboard.php');
+                break;
+            case 'risk_owner':
+                header('Location: risk_owner_dashboard.php');
+                break;
+            case 'staff':
+                header('Location: staff_dashboard.php');
+                break;
+            default:
+                header('Location: login.php');
+                break;
+        }
         exit();
     }
 }
@@ -42,6 +78,10 @@ class Auth {
     
     public function requireRole($role) {
         requireRole($role);
+    }
+    
+    public function requireAnyRole($roles) {
+        requireAnyRole($roles);
     }
     
     public function getCurrentUser() {

@@ -1,6 +1,6 @@
 <?php
 include_once 'includes/auth.php';
-requireRole('risk_owner');
+requireAnyRole(['risk_owner', 'admin', 'compliance_officer', 'compliance']); // Allow all roles
 include_once 'config/database.php';
 
 // Verify session data exists
@@ -95,11 +95,28 @@ try {
         mkdir($uploadDir, 0755, true);
     }
 
-    // Ensure only ONE of each permanent group chat exists
-    $permanentChats = [
-        'All Risk Owners' => 'General discussion for all risk owners across departments',
-        'Risk Owners + Compliance' => 'Communication channel with compliance team'
-    ];
+    // Ensure only ONE of each permanent group chat exists based on user role
+    $permanentChats = [];
+
+    if ($_SESSION['role'] === 'admin') {
+        $permanentChats = [
+            'All Admins' => 'General discussion for all administrators',
+            'Admins + Risk Owners' => 'Communication channel between admins and risk owners',
+            'Admins + Compliance' => 'Communication channel between admins and compliance team'
+        ];
+    } elseif ($_SESSION['role'] === 'risk_owner') {
+        $permanentChats = [
+            'All Risk Owners' => 'General discussion for all risk owners across departments',
+            'Admins + Risk Owners' => 'Communication channel between admins and risk owners',
+            'Risk Owners + Compliance' => 'Communication channel with compliance team'
+        ];
+    } elseif ($_SESSION['role'] === 'compliance_officer' || $_SESSION['role'] === 'compliance') {
+        $permanentChats = [
+            'All Compliance' => 'General discussion for all compliance officers',
+            'Admins + Compliance' => 'Communication channel between admins and compliance team',
+            'Risk Owners + Compliance' => 'Communication channel with risk owners'
+        ];
+    }
 
     foreach ($permanentChats as $chatName => $description) {
         // Check if this permanent chat exists
@@ -107,7 +124,7 @@ try {
         $stmt = $db->prepare($checkChat);
         $stmt->execute([$chatName]);
         $existingChat = $stmt->fetch(PDO::FETCH_ASSOC);
-
+        
         if (!$existingChat) {
             // Create the permanent chat
             $insertRoom = "INSERT INTO chat_rooms (name, type, description, created_by, is_permanent) VALUES (?, 'group', ?, ?, 1)";
@@ -127,7 +144,6 @@ try {
         $stmt = $db->prepare($getDuplicates);
         $stmt->execute([$chatName]);
         $allChats = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
         if (count($allChats) > 1) {
             // Keep the first one, delete the rest
             for ($i = 1; $i < count($allChats); $i++) {
@@ -232,17 +248,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $hasDeletedColumn = $stmt->fetch() !== false;
             
             if ($hasDeletedColumn) {
-                $query = "SELECT cm.*, u.full_name, u.email, u.department, u.role
-                 FROM chat_messages cm 
-                 JOIN users u ON cm.sender_id = u.id 
-                 WHERE cm.room_id = ? AND cm.id > ?
-                 ORDER BY cm.created_at ASC";
+                $query = "SELECT cm.*, u.full_name, u.email, u.department, u.role 
+                         FROM chat_messages cm 
+                         JOIN users u ON cm.sender_id = u.id 
+                         WHERE cm.room_id = ? AND cm.id > ? 
+                         ORDER BY cm.created_at ASC";
             } else {
-                $query = "SELECT cm.*, u.full_name, u.email, u.department, u.role
-                 FROM chat_messages cm 
-                 JOIN users u ON cm.sender_id = u.id 
-                 WHERE cm.room_id = ? AND cm.id > ?
-                 ORDER BY cm.created_at ASC";
+                $query = "SELECT cm.*, u.full_name, u.email, u.department, u.role 
+                         FROM chat_messages cm 
+                         JOIN users u ON cm.sender_id = u.id 
+                         WHERE cm.room_id = ? AND cm.id > ? 
+                         ORDER BY cm.created_at ASC";
             }
             
             $stmt = $db->prepare($query);
@@ -304,14 +320,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $search = isset($_POST['search']) ? trim($_POST['search']) : '';
             $filter = isset($_POST['filter']) ? $_POST['filter'] : 'all';
             
-            // Build query based on filter
-            $whereClause = "WHERE role != 'staff' AND id != ?";
+            // Build query based on filter and user role
+            $whereClause = "WHERE id != ?";
             $params = [$_SESSION['user_id']];
+            
+            // Role-based filtering
+            if ($_SESSION['role'] === 'admin') {
+                // Admins can message anyone
+                $whereClause .= " AND role != 'staff'";
+            } elseif ($_SESSION['role'] === 'risk_owner') {
+                // Risk owners can message admins, other risk owners, and compliance
+                $whereClause .= " AND role IN ('admin', 'risk_owner', 'compliance_officer', 'compliance')";
+            } elseif ($_SESSION['role'] === 'compliance_officer' || $_SESSION['role'] === 'compliance') {
+                // Compliance can message admins, risk owners, and other compliance officers
+                $whereClause .= " AND role IN ('admin', 'risk_owner', 'compliance_officer', 'compliance')";
+            }
             
             if ($filter === 'risk_owners') {
                 $whereClause .= " AND role = 'risk_owner'";
             } elseif ($filter === 'compliance') {
-                $whereClause .= " AND role = 'compliance_officer'";
+                $whereClause .= " AND role IN ('compliance_officer', 'compliance')";
+            } elseif ($filter === 'admins') {
+                $whereClause .= " AND role = 'admin'";
             } elseif ($filter === 'department') {
                 $whereClause .= " AND department = ?";
                 $params[] = $user['department'];
@@ -325,9 +355,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $params[] = $searchTerm;
             }
             
-            $query = "SELECT id, full_name, email, role, department 
-                     FROM users 
-                     {$whereClause}
+            $query = "SELECT id, full_name, email, role, department
+                      FROM users
+                      {$whereClause}
                      ORDER BY full_name";
             $stmt = $db->prepare($query);
             $stmt->execute($params);
@@ -340,10 +370,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $room_id = (int)$_POST['room_id'];
             $search = isset($_POST['search']) ? trim($_POST['search']) : '';
             
+            // Get room information to determine which users can be mentioned
+            $getRoomInfo = "SELECT name, type FROM chat_rooms WHERE id = ?";
+            $stmt = $db->prepare($getRoomInfo);
+            $stmt->execute([$room_id]);
+            $roomInfo = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if (!$roomInfo) {
+                echo json_encode(['success' => false, 'error' => 'Room not found']);
+                exit();
+            }
+            
+            // Build role filter based on room name
+            $roleFilter = "";
+            if ($roomInfo['type'] === 'group') {
+                switch ($roomInfo['name']) {
+                    case 'All Admins':
+                        $roleFilter = "AND u.role = 'admin'";
+                        break;
+                    case 'All Risk Owners':
+                        $roleFilter = "AND u.role = 'risk_owner'";
+                        break;
+                    case 'All Compliance':
+                        $roleFilter = "AND u.role IN ('compliance_officer', 'compliance')";
+                        break;
+                    case 'Admins + Risk Owners':
+                        $roleFilter = "AND u.role IN ('admin', 'risk_owner')";
+                        break;
+                    case 'Admins + Compliance':
+                        $roleFilter = "AND u.role IN ('admin', 'compliance_officer', 'compliance')";
+                        break;
+                    case 'Risk Owners + Compliance':
+                        $roleFilter = "AND u.role IN ('risk_owner', 'compliance_officer', 'compliance')";
+                        break;
+                    default:
+                        // For other group chats, show all relevant users
+                        $roleFilter = "AND u.role IN ('admin', 'risk_owner', 'compliance_officer', 'compliance')";
+                        break;
+                }
+            } else {
+                // For private chats, get participants of the chat
+                $roleFilter = "AND u.id IN (SELECT user_id FROM chat_participants WHERE room_id = {$room_id})";
+            }
+            
             // Get users who can be mentioned in this room
             $query = "SELECT DISTINCT u.id, u.full_name, u.role, u.department
                      FROM users u
-                     WHERE u.role != 'staff' AND u.id != ?";
+                     WHERE u.id != ? {$roleFilter}";
             $params = [$_SESSION['user_id']];
             
             if (!empty($search)) {
@@ -394,9 +467,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         case 'get_unread_counts':
             // Get unread message counts for all chats
             $query = "SELECT cr.id as room_id, cr.name, cr.type,
-                     COALESCE((SELECT COUNT(*) FROM chat_messages cm 
-                              WHERE cm.room_id = cr.id 
-                              AND cm.id > COALESCE(cp.last_message_read, 0)
+                     COALESCE((SELECT COUNT(*) FROM chat_messages cm
+                               WHERE cm.room_id = cr.id
+                               AND cm.id > COALESCE(cp.last_message_read, 0)
                               AND cm.sender_id != ?), 0) as unread_count
                      FROM chat_rooms cr
                      JOIN chat_participants cp ON cr.id = cp.room_id
@@ -455,36 +528,62 @@ function processMentions($message, $db) {
     return $message;
 }
 
-// Get chat rooms for current user (excluding archived)
-$getRooms = "SELECT DISTINCT cr.*, 
+// Get chat rooms for current user based on role (excluding archived)
+$roleBasedWhere = "";
+$roleParams = [$_SESSION['user_id'], $_SESSION['user_id'], $_SESSION['user_id']];
+
+if ($_SESSION['role'] === 'admin') {
+    $roleBasedWhere = "AND (cr.name IN ('All Admins', 'Admins + Risk Owners', 'Admins + Compliance') OR cr.type = 'private')";
+} elseif ($_SESSION['role'] === 'risk_owner') {
+    $roleBasedWhere = "AND (cr.name IN ('All Risk Owners', 'Admins + Risk Owners', 'Risk Owners + Compliance') OR cr.type = 'private')";
+} elseif ($_SESSION['role'] === 'compliance_officer' || $_SESSION['role'] === 'compliance') {
+    $roleBasedWhere = "AND (cr.name IN ('All Compliance', 'Admins + Compliance', 'Risk Owners + Compliance') OR cr.type = 'private')";
+}
+
+$getRooms = "SELECT DISTINCT cr.*,
              (SELECT COUNT(*) FROM chat_messages WHERE room_id = cr.id) as message_count,
              (SELECT message FROM chat_messages WHERE room_id = cr.id ORDER BY created_at DESC LIMIT 1) as last_message,
              (SELECT created_at FROM chat_messages WHERE room_id = cr.id ORDER BY created_at DESC LIMIT 1) as last_message_time,
-             COALESCE((SELECT COUNT(*) FROM chat_messages cm 
-                      WHERE cm.room_id = cr.id 
-                      AND cm.id > COALESCE(cp.last_message_read, 0)
+             COALESCE((SELECT COUNT(*) FROM chat_messages cm
+                       WHERE cm.room_id = cr.id
+                       AND cm.id > COALESCE(cp.last_message_read, 0)
                       AND cm.sender_id != ?), 0) as unread_count
              FROM chat_rooms cr
              LEFT JOIN chat_participants cp ON cr.id = cp.room_id AND cp.user_id = ?
-             WHERE (cr.type = 'group' OR cp.user_id = ?) 
-             AND cr.is_archived = 0 
-             AND (cp.is_archived = 0 OR cp.is_archived IS NULL)
+             WHERE (cr.type = 'group' OR cp.user_id = ?)
+              AND cr.is_archived = 0
+              AND (cp.is_archived = 0 OR cp.is_archived IS NULL)
+              {$roleBasedWhere}
              ORDER BY cr.is_permanent DESC, last_message_time DESC, cr.created_at DESC";
+
 $stmt = $db->prepare($getRooms);
-$stmt->execute([$_SESSION['user_id'], $_SESSION['user_id'], $_SESSION['user_id']]);
+$stmt->execute($roleParams);
 $chat_rooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Auto-join user to group chats if not already joined
+// Auto-join user to appropriate group chats based on role
 foreach ($chat_rooms as $room) {
     if ($room['type'] === 'group') {
-        $checkParticipant = "SELECT id FROM chat_participants WHERE room_id = ? AND user_id = ?";
-        $stmt = $db->prepare($checkParticipant);
-        $stmt->execute([$room['id'], $_SESSION['user_id']]);
+        $shouldJoin = false;
         
-        if (!$stmt->fetch()) {
-            $insertParticipant = "INSERT INTO chat_participants (room_id, user_id) VALUES (?, ?)";
-            $stmt = $db->prepare($insertParticipant);
+        // Check if user should be in this chat based on role
+        if ($_SESSION['role'] === 'admin') {
+            $shouldJoin = in_array($room['name'], ['All Admins', 'Admins + Risk Owners', 'Admins + Compliance']);
+        } elseif ($_SESSION['role'] === 'risk_owner') {
+            $shouldJoin = in_array($room['name'], ['All Risk Owners', 'Admins + Risk Owners', 'Risk Owners + Compliance']);
+        } elseif ($_SESSION['role'] === 'compliance_officer' || $_SESSION['role'] === 'compliance') {
+            $shouldJoin = in_array($room['name'], ['All Compliance', 'Admins + Compliance', 'Risk Owners + Compliance']);
+        }
+        
+        if ($shouldJoin) {
+            $checkParticipant = "SELECT id FROM chat_participants WHERE room_id = ? AND user_id = ?";
+            $stmt = $db->prepare($checkParticipant);
             $stmt->execute([$room['id'], $_SESSION['user_id']]);
+            
+            if (!$stmt->fetch()) {
+                $insertParticipant = "INSERT INTO chat_participants (room_id, user_id) VALUES (?, ?)";
+                $stmt = $db->prepare($insertParticipant);
+                $stmt->execute([$room['id'], $_SESSION['user_id']]);
+            }
         }
     }
 }
@@ -494,9 +593,9 @@ $getPrivateChats = "SELECT cr.*, cp2.user_id as other_user_id, u.full_name as ot
                    (SELECT COUNT(*) FROM chat_messages WHERE room_id = cr.id) as message_count,
                    (SELECT message FROM chat_messages WHERE room_id = cr.id ORDER BY created_at DESC LIMIT 1) as last_message,
                    (SELECT created_at FROM chat_messages WHERE room_id = cr.id ORDER BY created_at DESC LIMIT 1) as last_message_time,
-                   COALESCE((SELECT COUNT(*) FROM chat_messages cm 
-                            WHERE cm.room_id = cr.id 
-                            AND cm.id > COALESCE(cp1.last_message_read, 0)
+                   COALESCE((SELECT COUNT(*) FROM chat_messages cm
+                             WHERE cm.room_id = cr.id
+                             AND cm.id > COALESCE(cp1.last_message_read, 0)
                             AND cm.sender_id != ?), 0) as unread_count
                    FROM chat_rooms cr
                    JOIN chat_participants cp1 ON cr.id = cp1.room_id
@@ -509,7 +608,6 @@ $stmt = $db->prepare($getPrivateChats);
 $stmt->execute([$_SESSION['user_id'], $_SESSION['user_id'], $_SESSION['user_id']]);
 $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -546,6 +644,7 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             z-index: 1000;
             box-shadow: 0 2px 10px rgba(230, 0, 18, 0.2);
         }
+
         .header-content {
             max-width: 1200px;
             margin: 0 auto;
@@ -553,11 +652,13 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             justify-content: space-between;
             align-items: center;
         }
+
         .header-left {
             display: flex;
             align-items: center;
             gap: 1rem;
         }
+
         .logo-circle {
             width: 55px;
             height: 55px;
@@ -569,16 +670,19 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             overflow: hidden;
             padding: 5px;
         }
+
         .logo-circle img {
             width: 100%;
             height: 100%;
             object-fit: contain;
             border-radius: 50%;
         }
+
         .header-titles {
             display: flex;
             flex-direction: column;
         }
+
         .main-title {
             font-size: 1.5rem;
             font-weight: 700;
@@ -586,6 +690,7 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             margin: 0;
             line-height: 1.2;
         }
+
         .sub-title {
             font-size: 1rem;
             font-weight: 400;
@@ -593,11 +698,13 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             margin: 0;
             line-height: 1.2;
         }
+
         .header-right {
             display: flex;
             align-items: center;
             gap: 1rem;
         }
+
         .user-avatar {
             width: 45px;
             height: 45px;
@@ -610,11 +717,13 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             font-weight: 700;
             font-size: 1.2rem;
         }
+
         .user-details {
             display: flex;
             flex-direction: column;
             align-items: flex-start;
         }
+
         .user-email {
             font-size: 1rem;
             font-weight: 500;
@@ -622,6 +731,7 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             margin: 0;
             line-height: 1.2;
         }
+
         .user-role {
             font-size: 0.9rem;
             font-weight: 400;
@@ -629,6 +739,7 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             margin: 0;
             line-height: 1.2;
         }
+
         .logout-btn {
             background: rgba(255, 255, 255, 0.2);
             color: white;
@@ -641,6 +752,7 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             transition: all 0.3s;
             margin-left: 1rem;
         }
+
         .logout-btn:hover {
             background: rgba(255, 255, 255, 0.3);
             border-color: rgba(255, 255, 255, 0.5);
@@ -659,11 +771,13 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             z-index: 999;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
+
         .nav-content {
             max-width: 1200px;
             margin: 0 auto;
             padding: 0 2rem;
         }
+
         .nav-menu {
             display: flex;
             list-style: none;
@@ -671,9 +785,11 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             padding: 0;
             align-items: center;
         }
+
         .nav-item {
             margin: 0;
         }
+
         .nav-item a {
             display: flex;
             align-items: center;
@@ -686,11 +802,13 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             border-bottom: 3px solid transparent;
             cursor: pointer;
         }
+
         .nav-item a:hover {
             color: #E60012;
             background-color: rgba(230, 0, 18, 0.05);
             text-decoration: none;
         }
+
         .nav-item a.active {
             color: #E60012;
             border-bottom-color: #E60012;
@@ -1496,10 +1614,11 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             color: #999;
         }
 
+        /* Updated delete button styles with white color */
         .message-delete-btn {
             background: none;
             border: none;
-            color: #dc3545;
+            color: white; /* Changed to white */
             cursor: pointer;
             padding: 0.25rem 0.5rem;
             border-radius: 4px;
@@ -1510,12 +1629,32 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             flex-shrink: 0;
         }
 
+        /* For non-own messages, keep the red color */
+        .message:not(.own) .message-delete-btn {
+            color: #dc3545;
+        }
+
+        /* For own messages (red background), use white color */
+        .message.own .message-delete-btn {
+            color: white;
+        }
+
         .message:hover .message-delete-btn {
             opacity: 1;
         }
 
         .message.own:hover .message-delete-btn {
             opacity: 1;
+        }
+
+        /* Hover effect for delete button */
+        .message-delete-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .message:not(.own) .message-delete-btn:hover {
+            background: rgba(220, 53, 69, 0.1);
+            color: #dc3545;
         }
 
         .message-header {
@@ -1542,7 +1681,31 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="user-avatar"><?php echo isset($_SESSION['full_name']) ? strtoupper(substr($_SESSION['full_name'], 0, 1)) : 'R'; ?></div>
                 <div class="user-details">
                     <div class="user-email"><?php echo isset($_SESSION['full_name']) ? $_SESSION['full_name'] : 'No Name'; ?></div>
-                    <div class="user-role">Risk Owner • <?php echo htmlspecialchars($user['department'] ?? $_SESSION['department'] ?? 'No Department'); ?></div>
+                    <div class="user-role">
+                        <?php 
+                        $roleDisplay = '';
+                        switch($_SESSION['role']) {
+                            case 'admin':
+                                $roleDisplay = 'Administrator';
+                                break;
+                            case 'risk_owner':
+                                $roleDisplay = 'Risk Owner';
+                                break;
+                            case 'compliance_officer':
+                            case 'compliance':
+                                $roleDisplay = 'Compliance Officer';
+                                break;
+                            default:
+                                $roleDisplay = ucfirst($_SESSION['role']);
+                        }
+                        echo $roleDisplay;
+                        if (!empty($user['department'])) {
+                            echo ' • ' . htmlspecialchars($user['department']);
+                        } elseif (!empty($_SESSION['department'])) {
+                            echo ' • ' . htmlspecialchars($_SESSION['department']);
+                        }
+                        ?>
+                    </div>
                 </div>
                 <a href="logout.php" class="logout-btn">Logout</a>
             </div>
@@ -1552,31 +1715,100 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <nav class="nav">
         <div class="nav-content">
             <ul class="nav-menu">
-                <li class="nav-item">
-                    <a href="risk_owner_dashboard.php">
-                        🏠 Dashboard
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="report_risk.php">
-                        📝 Report Risk
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="risk_owner_dashboard.php?tab=my-reports">
-                        👀 My Reports
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="risk_owner_dashboard.php?tab=procedures">
-                        📋 Procedures
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="teamchat.php" class="active">
-                        💬 Team Chat
-                    </a>
-                </li>
+                <?php if ($_SESSION['role'] === 'admin'): ?>
+                    <!-- Admin Navigation -->
+                    <li class="nav-item">
+                        <a href="admin_dashboard.php">
+                            📊 Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="admin_dashboard.php?tab=users">
+                            👥 User Management
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="admin_dashboard.php?tab=database">
+                            🗄️ Database Management
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="admin_dashboard.php?tab=notifications">
+                            🔔 Notifications
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="teamchat.php" class="active">
+                            💬 Team Chat
+                        </a>
+                    </li>
+                <?php elseif ($_SESSION['role'] === 'risk_owner'): ?>
+                    <!-- Risk Owner Navigation -->
+                    <li class="nav-item">
+                        <a href="risk_owner_dashboard.php">
+                            🏠 Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="report_risk.php">
+                            📝 Report Risk
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="risk_owner_dashboard.php?tab=my-reports">
+                            👀 My Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="risk_owner_dashboard.php?tab=procedures">
+                            📋 Procedures
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="teamchat.php" class="active">
+                            💬 Team Chat
+                        </a>
+                    </li>
+                <?php elseif ($_SESSION['role'] === 'compliance_officer' || $_SESSION['role'] === 'compliance'): ?>
+                    <!-- Compliance Navigation -->
+                    <li class="nav-item">
+                        <a href="compliance_dashboard.php">
+                            🏠 Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="compliance_dashboard.php?tab=reviews">
+                            📋 Risk Reviews
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="compliance_dashboard.php?tab=reports">
+                            📊 Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="compliance_dashboard.php?tab=audits">
+                            🔍 Audits
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="teamchat.php" class="active">
+                            💬 Team Chat
+                        </a>
+                    </li>
+                <?php else: ?>
+                    <!-- Default Navigation -->
+                    <li class="nav-item">
+                        <a href="dashboard.php">
+                            🏠 Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="teamchat.php" class="active">
+                            💬 Team Chat
+                        </a>
+                    </li>
+                <?php endif; ?>
             </ul>
         </div>
     </nav>
@@ -1721,8 +1953,19 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <input type="text" id="userSearch" class="search-input" placeholder="Search by name, email, or department...">
                     <select id="userFilter" class="filter-select">
                         <option value="all">All Users</option>
-                        <option value="risk_owners">Risk Owners</option>
-                        <option value="compliance">Compliance Team</option>
+                        <?php if ($_SESSION['role'] === 'admin'): ?>
+                            <option value="admins">Administrators</option>
+                            <option value="risk_owners">Risk Owners</option>
+                            <option value="compliance">Compliance Team</option>
+                        <?php elseif ($_SESSION['role'] === 'risk_owner'): ?>
+                            <option value="admins">Administrators</option>
+                            <option value="risk_owners">Risk Owners</option>
+                            <option value="compliance">Compliance Team</option>
+                        <?php elseif ($_SESSION['role'] === 'compliance_officer' || $_SESSION['role'] === 'compliance'): ?>
+                            <option value="admins">Administrators</option>
+                            <option value="risk_owners">Risk Owners</option>
+                            <option value="compliance">Compliance Team</option>
+                        <?php endif; ?>
                         <option value="department">My Department</option>
                     </select>
                 </div>
@@ -1737,6 +1980,7 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <script>
         let currentRoomId = null;
         let currentRoomType = null;
+        let currentRoomName = null; // Added to track room name for mention filtering
         let currentRoomPermanent = false;
         let lastMessageId = 0;
         let messagePolling = null;
@@ -1762,6 +2006,7 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             // Set current room
             currentRoomId = roomId;
             currentRoomType = type;
+            currentRoomName = name; // Store room name for mention filtering
             currentRoomPermanent = isPermanent;
             lastMessageId = 0;
 
@@ -1840,93 +2085,93 @@ $private_chats = $stmt->fetchAll(PDO::FETCH_ASSOC);
             });
         }
 
-function createMessageElement(message) {
-    const messageDiv = document.createElement('div');
-    const isOwn = message.sender_id == <?php echo $_SESSION['user_id']; ?>;
-    const isDeleted = message.is_deleted == 1;
-    messageDiv.className = `message ${isOwn ? 'own' : ''} ${isDeleted ? 'deleted' : ''}`;
+        function createMessageElement(message) {
+            const messageDiv = document.createElement('div');
+            const isOwn = message.sender_id == <?php echo $_SESSION['user_id']; ?>;
+            const isDeleted = message.is_deleted == 1;
+            messageDiv.className = `message ${isOwn ? 'own' : ''} ${isDeleted ? 'deleted' : ''}`;
 
-    const senderInitial = message.full_name ? message.full_name.charAt(0).toUpperCase() : 'U';
-    const messageTime = new Date(message.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-    const senderDepartment = message.department ? ` • ${message.department}` : '';
+            const senderInitial = message.full_name ? message.full_name.charAt(0).toUpperCase() : 'U';
+            const messageTime = new Date(message.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            const senderDepartment = message.department ? ` • ${message.department}` : '';
 
-    let fileContent = '';
-    if (message.message_type === 'file' && message.file_name && !isDeleted) {
-        const fileIcon = getFileIcon(message.file_name);
-        const fileSize = formatFileSize(message.file_size);
-        fileContent = `
-            <div class="message-file">
-                <div class="file-icon">${fileIcon}</div>
-                <div class="file-info">
-                    <div class="file-name">${escapeHtml(message.file_name)}</div>
-                    <div class="file-size">${fileSize}</div>
+            let fileContent = '';
+            if (message.message_type === 'file' && message.file_name && !isDeleted) {
+                const fileIcon = getFileIcon(message.file_name);
+                const fileSize = formatFileSize(message.file_size);
+                fileContent = `
+                    <div class="message-file">
+                        <div class="file-icon">${fileIcon}</div>
+                        <div class="file-info">
+                            <div class="file-name">${escapeHtml(message.file_name)}</div>
+                            <div class="file-size">${fileSize}</div>
+                        </div>
+                        <button class="file-download" onclick="downloadFile('${message.file_path}', '${message.file_name}')" title="Download">
+                            <i class="fas fa-download"></i>
+                        </button>
+                    </div>
+                `;
+            }
+
+            // Process mentions in the message text
+            let processedMessage = message.message;
+            if (!isDeleted) {
+                processedMessage = processedMessage.replace(/\[@([^\]]+)\]/g, '<span class="mention">@$1</span>');
+            }
+
+            // Add delete button for own messages or if user is admin
+            let deleteButton = '';
+            if ((isOwn || <?php echo $_SESSION['role'] == 'admin' ? 'true' : 'false'; ?>) && !isDeleted) {
+                deleteButton = `
+                    <button class="message-delete-btn" onclick="event.stopPropagation(); deleteMessage(${message.id})" title="Delete Message">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                `;
+            }
+
+            messageDiv.innerHTML = `
+                <div class="message-avatar">${senderInitial}</div>
+                <div class="message-content">
+                    <div class="message-header">
+                        <span class="message-sender">${message.full_name}${senderDepartment}</span>
+                        <span class="message-time">${messageTime}</span>
+                        ${deleteButton}
+                    </div>
+                    <div class="message-text">${processedMessage}</div>
+                    ${fileContent}
                 </div>
-                <button class="file-download" onclick="downloadFile('${message.file_path}', '${message.file_name}')" title="Download">
-                    <i class="fas fa-download"></i>
-                </button>
-            </div>
-        `;
-    }
+            `;
 
-    // Process mentions in the message text
-    let processedMessage = message.message;
-    if (!isDeleted) {
-        processedMessage = processedMessage.replace(/\[@([^\]]+)\]/g, '<span class="mention">@$1</span>');
-    }
-
-    // Add delete button for own messages or if user is admin
-    let deleteButton = '';
-    if ((isOwn || <?php echo $_SESSION['role'] == 'admin' ? 'true' : 'false'; ?>) && !isDeleted) {
-    deleteButton = `
-        <button class="message-delete-btn" onclick="event.stopPropagation(); deleteMessage(${message.id})" title="Delete Message">
-            <i class="fas fa-trash"></i>
-        </button>
-    `;
-}
-
-    messageDiv.innerHTML = `
-        <div class="message-avatar">${senderInitial}</div>
-        <div class="message-content">
-            <div class="message-header">
-                <span class="message-sender">${message.full_name}${senderDepartment}</span>
-                <span class="message-time">${messageTime}</span>
-                ${deleteButton}
-            </div>
-            <div class="message-text">${processedMessage}</div>
-            ${fileContent}
-        </div>
-    `;
-
-    return messageDiv;
-}
-
-function deleteMessage(messageId) {
-    if (!confirm('Are you sure you want to delete this message?')) {
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append('action', 'delete_message');
-    formData.append('message_id', messageId);
-
-    fetch('teamchat.php', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            // Reload messages to show the deleted message
-            loadMessages();
-        } else {
-            alert('Error deleting message: ' + (data.error || 'Unknown error'));
+            return messageDiv;
         }
-    })
-    .catch(error => {
-        console.error('Error deleting message:', error);
-        alert('Error deleting message');
-    });
-}
+
+        function deleteMessage(messageId) {
+            if (!confirm('Are you sure you want to delete this message?')) {
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('action', 'delete_message');
+            formData.append('message_id', messageId);
+
+            fetch('teamchat.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Reload messages to show the deleted message
+                    loadMessages();
+                } else {
+                    alert('Error deleting message: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error deleting message:', error);
+                alert('Error deleting message');
+            });
+        }
 
         function sendMessage() {
             if (!currentRoomId) return;
@@ -2211,7 +2456,6 @@ function deleteMessage(messageId) {
                     usersLoading.style.display = 'none';
                     usersList.style.display = 'block';
                     usersList.innerHTML = '';
-
                     displayUsers(data.users);
                 }
             })
@@ -2356,7 +2600,6 @@ function deleteMessage(messageId) {
                                 if (existingBadge) {
                                     existingBadge.remove();
                                 }
-
                                 // Add new badge if there are unread messages
                                 if (chat.unread_count > 0) {
                                     const badge = document.createElement('div');

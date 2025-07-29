@@ -35,8 +35,8 @@ if ($_POST) {
     $username = explode('@', $email)[0];
 
     // Validate email domain - using compatible function
-    if (!endsWith($email, '@airtel.africa')) {
-        $error = "Please use your Airtel email address ending with @airtel.africa";
+    if (!endsWith($email, '@ke.airtel.com')) {
+        $error = "Please use your Airtel email address ending with @ke.airtel.com";
         $database->logActivity(null, 'Registration Failed - Invalid Email Domain', 'Attempt to register with non-Airtel email: ' . $email, $_SERVER['REMOTE_ADDR']);
     } elseif ($password !== $confirm_password) {
         $error = "Passwords do not match.";
@@ -324,7 +324,7 @@ if ($_POST) {
             </div>
             <div class="form-group">
                 <label for="email">Airtel Email Address</label>
-                <input type="email" id="email" name="email" required placeholder="your.name@airtel.africa" value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>">
+                <input type="email" id="email" name="email" required placeholder="your.name@ke.airtel.com" value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>">
             </div>
             <div class="form-group">
                 <label for="department">Department</label>

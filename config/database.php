@@ -29,7 +29,10 @@ class Database {
             $user_stmt->execute();
             $user_info = $user_stmt->fetch(PDO::FETCH_ASSOC);
             if ($user_info) {
-                $user_display_name = htmlspecialchars($user_info['full_name']) . ' (' . ucfirst($user_info['role']) . ')';
+                // Ensure consistent casing for roles in the 'user' column
+                $role_display = str_replace('_', ' ', $user_info['role']); // Replace underscore with space
+                $role_display = ucwords($role_display); // Capitalize first letter of each word
+                $user_display_name = htmlspecialchars($user_info['full_name']) . ' (' . $role_display . ')';
             } else {
                 $user_display_name = 'Unknown User (ID: ' . $user_id . ')';
             }
