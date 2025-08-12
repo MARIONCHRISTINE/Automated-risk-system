@@ -126,6 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             if ($severity) {
                 $query .= " HAVING severity = :severity";
                 $params[':severity'] = $severity;
+                $params[':severity'] = $severity;
             }
             
             $query .= " ORDER BY sal.timestamp DESC LIMIT :limit OFFSET :offset";
@@ -257,7 +258,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             foreach ($logs as $log) {
                 fputcsv($output, [
                     $log['id'],
-                    date('Y-m-d H:i:s', strtotime($log['timestamp'])), // Format timestamp properly
+                    date('Y-m-d H:i:s', strtotime($log['timestamp'])),
                     $log['user'],
                     $log['full_name'] ?? 'Unknown',
                     $log['email'] ?? 'Unknown',
@@ -367,6 +368,16 @@ $login_history_query = "SELECT
 $login_history_stmt = $db->prepare($login_history_query);
 $login_history_stmt->execute();
 $login_history_logs = $login_history_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get last 5 risks for Database Management -> All Risks section
+$recent_risks_query = "SELECT ri.risk_name, ri.department, u.full_name as reported_by_name
+                       FROM risk_incidents ri
+                       JOIN users u ON ri.reported_by = u.id
+                       ORDER BY ri.created_at DESC
+                       LIMIT 5";
+$recent_risks_stmt = $db->prepare($recent_risks_query);
+$recent_risks_stmt->execute();
+$recent_risks = $recent_risks_stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Get all risks for Database Management -> View All Risks
 $all_risks_query = "SELECT ri.*, u.full_name as reported_by_name
@@ -1130,6 +1141,91 @@ $user_info = getCurrentUser();
             cursor: not-allowed;
         }
         
+        /* View All Modal Styles */
+        .view-all-modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .view-all-modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .view-all-modal-content {
+            background: white;
+            border-radius: 10px;
+            width: 95%;
+            max-width: 1200px;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+        
+        .view-all-modal-header {
+            background: #E60012;
+            color: white;
+            padding: 1rem 1.5rem;
+            border-radius: 10px 10px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .view-all-modal-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin: 0;
+        }
+        
+        .view-all-close {
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            background: none;
+            border: none;
+        }
+        
+        .view-all-modal-body {
+            padding: 1.5rem;
+        }
+        
+        .filter-section {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .filter-group label {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 0.25rem;
+        }
+        
+        .filter-group input,
+        .filter-group select {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        
         /* Responsive adjustments */
         @media (max-width: 768px) {
             body {
@@ -1235,6 +1331,10 @@ $user_info = getCurrentUser();
                 grid-template-columns: 1fr;
                 gap: 1rem;
             }
+            .filter-section {
+                flex-direction: column;
+                align-items: stretch;
+            }
         }
     </style>
 </head>
@@ -1244,6 +1344,7 @@ $user_info = getCurrentUser();
         <div class="header-content">
             <div class="header-left">
                 <div class="logo-circle">
+                    <!-- Updated logo source to image.png from root folder -->
                     <img src="image.png" alt="Airtel Logo" />
                 </div>
                 <div class="header-titles">
@@ -1451,71 +1552,51 @@ $user_info = getCurrentUser();
         <!-- 2. Database Management Tab -->
         <div id="database-tab" class="tab-content">
             <div class="card">
-                <h2>View All Risks</h2>
-                <p>Browse and manage all reported risk incidents.</p>
-                <input type="text" id="riskSearchInput" class="search-input" onkeyup="filterRiskTable()" placeholder="Search risks by name, department, or status...">
-                <div style="margin-bottom: 1.5rem;">
-                    <label for="riskFilterCategory">Filter by Category:</label>
-                    <select id="riskFilterCategory" onchange="filterRiskTable()">
-                        <option value="">All Categories</option>
-                        <option value="Financial">Financial</option>
-                        <option value="Operational">Operational</option>
-                        <option value="Compliance">Compliance</option>
-                        <option value="Strategic">Strategic</option>
-                    </select>
-                    <label for="riskFilterLevel" style="margin-left: 1rem;">Filter by Level:</label>
-                    <select id="riskFilterLevel" onchange="filterRiskTable()">
-                        <option value="">All Levels</option>
-                        <option value="High">High</option>
-                        <option value="Medium">Medium</option>
-                        <option value="Low">Low</option>
-                    </select>
+                <div class="card-header">
+                    <h2>All Risks</h2>
+                    <button class="btn btn-primary" onclick="showViewAllModal()">
+                        <i class="fas fa-eye"></i> View All
+                    </button>
                 </div>
-                <table class="risk-table" id="riskTable">
+                <p>Last 5 reported risk incidents.</p>
+                <table class="risk-table">
                     <thead>
                         <tr>
                             <th>Risk Name</th>
                             <th>Department</th>
-                            <th>Status</th>
                             <th>Reported By</th>
-                            <th>Date</th>
-                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php if (count($all_risks) > 0): ?>
-                            <?php foreach ($all_risks as $risk): ?>
+                        <?php if (count($recent_risks) > 0): ?>
+                            <?php foreach ($recent_risks as $risk): ?>
                                 <tr>
                                     <td><?php echo htmlspecialchars($risk['risk_name']); ?></td>
                                     <td><?php echo htmlspecialchars($risk['department']); ?></td>
-                                    <td><span class="status-badge status-<?php echo strtolower(str_replace(' ', '-', $risk['status'])); ?>"><?php echo htmlspecialchars($risk['status']); ?></span></td>
                                     <td><?php echo htmlspecialchars($risk['reported_by_name']); ?></td>
-                                    <td><?php echo date('M d, Y', strtotime($risk['created_at'])); ?></td>
-                                    <td>
-                                        <div class="action-group">
-                                            <button class="btn btn-info btn-sm">Edit</button>
-                                            <button class="btn btn-danger btn-sm">Delete</button>
-                                        </div>
-                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         <?php else: ?>
-                            <tr><td colspan="6" style="text-align: center;">No risks found.</td></tr>
+                            <tr><td colspan="3" style="text-align: center;">No risks found.</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>
             </div>
+            
             <div id="bulk-upload-section" class="card">
                 <h2>Bulk Upload Risk Data</h2>
                 <p>Upload historical risk data from CSV or Excel files.</p>
                 
                 <div class="bulk-upload">
-                    <form method="POST" enctype="multipart/form-data" id="bulkUploadForm">
+                    <!-- Enhanced form with better error handling and success feedback -->
+                    <form action="upload_risk_data.php" method="POST" enctype="multipart/form-data" id="bulkUploadForm" onsubmit="return validateUpload()">
                         <h3>📁 Upload Risk Data</h3>
                         <p>Supported formats: CSV, XLS, XLSX</p>
-                        <input type="file" name="bulk_file" accept=".csv,.xls,.xlsx" required style="margin: 1rem 0;">
+                        <input type="file" name="bulk_file" id="bulk_file" accept=".csv,.xls,.xlsx" required style="margin: 1rem 0;">
                         <br>
-                        <button type="submit" name="bulk_upload" class="btn">Upload Data</button>
+                        <button type="submit" name="bulk_upload" class="btn" style="background-color: #E60012; color: white; padding: 10px 20px;">
+                            <i class="fas fa-upload"></i> Upload Data
+                        </button>
                     </form>
                 </div>
                 
@@ -1531,61 +1612,17 @@ $user_info = getCurrentUser();
                         <li>impact (1-5)</li>
                         <li>status (Open, In Progress, Mitigated, Closed)</li>
                     </ul>
-                    <a href="download_template.php" class="btn" style="margin-top: 1rem;">Download Template</a>
+                    <!-- Updated download template button to match theme with proper styling and functionality -->
+                    <a href="download_template.php" class="btn" style="background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; display: inline-block; margin-top: 1rem;" target="_blank" onclick="return confirmTemplateDownload()">
+                        <i class="fas fa-download"></i> Download Template
+                    </a>
                 </div>
             </div>
-            <div class="card">
-                <h2>Recycle Bin (Deleted Risk Reports)</h2>
-                <p>Deleted risk reports can be restored or permanently deleted.</p>
-                <table class="risk-table">
-                    <thead>
-                        <tr>
-                            <th>Risk Name</th>
-                            <th>Department</th>
-                            <th>Deleted At</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (count($deleted_risks) > 0): ?>
-                            <?php foreach ($deleted_risks as $risk): ?>
-                                <tr>
-                                    <td><?php echo htmlspecialchars($risk['risk_name']); ?></td>
-                                    <td><?php echo htmlspecialchars($risk['department']); ?></td>
-                                    <td><?php echo date('M d, Y H:i', strtotime($risk['updated_at'])); ?></td>
-                                    <td>
-                                        <div class="action-group">
-                                            <button class="btn btn-info btn-sm">Restore</button>
-                                            <button class="btn btn-danger btn-sm">Permanent Delete</button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php else: ?>
-                            <tr><td colspan="4" style="text-align: center;">Risk recycle bin is empty.</td></tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-            <div class="card">
-                <h2>Track Aging Risks</h2>
-                <p>List of risks that have been unresolved for a specified number of days.</p>
-                <button class="btn btn-primary" onclick="alert('Simulating Aging Risks Report...');">View Aging Risks</button>
-            </div>
-            <div class="card">
-                <h2>Export Data</h2>
-                <p>Export risk data in various formats.</p>
-                <div class="action-group">
-                    <button class="btn btn-info">Export to PDF</button>
-                    <button class="btn btn-info">Export to CSV</button>
-                    <button class="btn btn-info">Export to Excel</button>
-                </div>
-            </div>
-            <div class="card">
-                <h2>Risk Categories</h2>
-                <p>Manage risk categories and classifications.</p>
-                <a href="manage_categories.php" class="btn">Manage Categories</a>
-            </div>
+            
+            <!-- Removed Recycle Bin section entirely as requested -->
+            <!-- Removed Track Aging Risks section as requested -->
+            <!-- Removed Export Data section as requested -->
+            <!-- Removed Risk Categories section as requested -->
         </div>
         
         <!-- 3. Notifications Tab -->
@@ -1663,7 +1700,6 @@ $user_info = getCurrentUser();
             </div>
         </div>
     </div>
-</div>
 
 <!-- Login History Modal -->
 <div id="loginHistoryModal" class="modal">
@@ -1770,6 +1806,77 @@ $user_info = getCurrentUser();
     </div>
 </div>
 
+<!-- View All Risks Modal -->
+<div id="viewAllModal" class="view-all-modal">
+    <div class="view-all-modal-content">
+        <div class="view-all-modal-header">
+            <h3 class="view-all-modal-title">All Risks</h3>
+            <button class="view-all-close" onclick="closeViewAllModal()">&times;</button>
+        </div>
+        <div class="view-all-modal-body">
+            <div class="filter-section">
+                <div class="filter-group">
+                    <label for="modalDateFrom">From Date:</label>
+                    <input type="date" id="modalDateFrom" onchange="filterModalRisks()">
+                </div>
+                <div class="filter-group">
+                    <label for="modalDateTo">To Date:</label>
+                    <input type="date" id="modalDateTo" onchange="filterModalRisks()">
+                </div>
+                <div class="filter-group">
+                    <label for="modalDepartmentFilter">Department:</label>
+                    <select id="modalDepartmentFilter" onchange="filterModalRisks()">
+                        <option value="">All Departments</option>
+                        <option value="IT">IT</option>
+                        <option value="Finance">Finance</option>
+                        <option value="HR">HR</option>
+                        <option value="Operations">Operations</option>
+                        <option value="Marketing">Marketing</option>
+                        <option value="Legal">Legal</option>
+                    </select>
+                </div>
+                <!-- Added clear filters button and improved download button styling -->
+                <div class="filter-group" style="align-self: flex-end;">
+                    <button type="button" onclick="clearFilters()" class="btn" style="background-color: #6c757d; color: white; padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+                        <i class="fas fa-times"></i> Clear Filters
+                    </button>
+                    <button type="button" onclick="downloadFilteredRisks()" id="downloadBtn" class="btn" style="background-color: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
+                        <i class="fas fa-download"></i> Download Filtered Data
+                    </button>
+                </div>
+            </div>
+            <div class="audit-table-container">
+                <table class="audit-table" id="modalRiskTable">
+                    <thead>
+                        <tr>
+                            <th>Risk Name</th>
+                            <th>Department</th>
+                            <th>Status</th>
+                            <th>Reported By</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="modalRiskTableBody">
+                        <?php if (count($all_risks) > 0): ?>
+                            <?php foreach ($all_risks as $risk): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($risk['risk_name']); ?></td>
+                                    <td><?php echo htmlspecialchars($risk['department']); ?></td>
+                                    <td><span class="status-badge status-<?php echo strtolower(str_replace(' ', '-', $risk['status'])); ?>"><?php echo htmlspecialchars($risk['status']); ?></span></td>
+                                    <td><?php echo htmlspecialchars($risk['reported_by_name']); ?></td>
+                                    <td><?php echo date('M d, Y', strtotime($risk['created_at'])); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr><td colspan="5" style="text-align: center;">No risks found.</td></tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     function showTab(event, tabName) {
         event.preventDefault();
@@ -1809,6 +1916,57 @@ $user_info = getCurrentUser();
     
     function closeLoginHistoryModal() {
         document.getElementById('loginHistoryModal').classList.remove('show');
+    }
+    
+    function showViewAllModal() {
+        document.getElementById('viewAllModal').classList.add('show');
+    }
+    
+    function closeViewAllModal() {
+        document.getElementById('viewAllModal').classList.remove('show');
+    }
+    
+    function filterModalRisks() {
+        const dateFrom = document.getElementById('modalDateFrom').value;
+        const dateTo = document.getElementById('modalDateTo').value;
+        const department = document.getElementById('modalDepartmentFilter').value.toLowerCase();
+        const table = document.getElementById('modalRiskTable');
+        const rows = table.getElementsByTagName('tr');
+        
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            const cells = row.getElementsByTagName('td');
+            
+            if (cells.length === 0) continue;
+            
+            const riskDepartment = cells[1].textContent.toLowerCase();
+            const riskDate = cells[4].textContent;
+            const riskDateObj = new Date(riskDate);
+            
+            let showRow = true;
+            
+            // Filter by department
+            if (department && !riskDepartment.includes(department)) {
+                showRow = false;
+            }
+            
+            // Filter by date range
+            if (dateFrom) {
+                const fromDate = new Date(dateFrom);
+                if (riskDateObj < fromDate) {
+                    showRow = false;
+                }
+            }
+            
+            if (dateTo) {
+                const toDate = new Date(dateTo);
+                if (riskDateObj > toDate) {
+                    showRow = false;
+                }
+            }
+            
+            row.style.display = showRow ? '' : 'none';
+        }
     }
     
     // Updated export function to use current filters
@@ -2053,7 +2211,7 @@ $user_info = getCurrentUser();
     }
     
     window.onclick = function(event) {
-        const modals = document.querySelectorAll('.modal, .audit-modal');
+        const modals = document.querySelectorAll('.modal, .audit-modal, .view-all-modal');
         modals.forEach(modal => {
             if (event.target === modal) {
                 modal.classList.remove('show');
@@ -2125,6 +2283,107 @@ $user_info = getCurrentUser();
             
             row.style.display = (matchesSearch && matchesUserRole && matchesAction && matchesDate) ? "" : "none";
         }
+    }
+
+    function confirmTemplateDownload() {
+        return confirm('This will download the CSV template file. Continue?');
+    }
+
+    function clearFilters() {
+        document.getElementById('modalDateFrom').value = '';
+        document.getElementById('modalDateTo').value = '';
+        document.getElementById('modalDepartmentFilter').value = '';
+        filterModalRisks(); // Refresh the table to show all risks
+    }
+
+    function downloadFilteredRisks() {
+        const dateFrom = document.getElementById('modalDateFrom').value;
+        const dateTo = document.getElementById('modalDateTo').value;
+        const department = document.getElementById('modalDepartmentFilter').value;
+        const button = document.getElementById('downloadBtn');
+
+        // Validate date range
+        if (dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo)) {
+            alert('From Date cannot be later than To Date. Please correct the date range.');
+            return;
+        }
+
+        // Show loading state
+        const originalText = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Downloading...';
+        button.disabled = true;
+
+        // Get visible rows data for CSV export
+        const table = document.getElementById('modalRiskTable');
+        const rows = table.getElementsByTagName('tr');
+        let csvContent = 'Risk Name,Department,Status,Reported By,Date\n';
+        
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            if (row.style.display !== 'none') {
+                const cells = row.getElementsByTagName('td');
+                if (cells.length > 0) {
+                    const rowData = [];
+                    for (let j = 0; j < cells.length; j++) {
+                        // Clean the cell content and escape commas
+                        let cellText = cells[j].textContent.trim();
+                        if (cellText.includes(',')) {
+                            cellText = '"' + cellText + '"';
+                        }
+                        rowData.push(cellText);
+                    }
+                    csvContent += rowData.join(',') + '\n';
+                }
+            }
+        }
+
+        // Create and download the CSV file
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', 'filtered_risks_' + new Date().toISOString().split('T')[0] + '.csv');
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        // Reset button state
+        setTimeout(() => {
+            button.innerHTML = originalText;
+            button.disabled = false;
+        }, 1500);
+    }
+
+    function validateUpload() {
+        const fileInput = document.getElementById('bulk_file');
+        const file = fileInput.files[0];
+        
+        if (!file) {
+            alert('Please select a file to upload.');
+            return false;
+        }
+        
+        const allowedTypes = ['text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+        const fileExtension = file.name.split('.').pop().toLowerCase();
+        const allowedExtensions = ['csv', 'xls', 'xlsx'];
+        
+        if (!allowedExtensions.includes(fileExtension)) {
+            alert('Please upload a valid CSV, XLS, or XLSX file.');
+            return false;
+        }
+        
+        if (file.size > 10 * 1024 * 1024) { // 10MB limit
+            alert('File size must be less than 10MB.');
+            return false;
+        }
+        
+        // Show loading state on upload button
+        const submitBtn = document.querySelector('#bulkUploadForm button[type="submit"]');
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+        submitBtn.disabled = true;
+        
+        return true;
     }
 </script>
 </body>
