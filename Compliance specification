@@ -1,0 +1,76 @@
+Compliance Dashboard Specification
+2. Ownership & Assignment Changes
+•	Historical Ownership Timeline: Visualize the complete history of a risk's ownership, showing all individuals or teams, it has been assigned to, along with the duration of each assignment. This helps in understanding accountability over time.
+3. Risk Evaluation & Scoring
+•	Trend Analysis of Risk Scores: Display historical trends of individual risk scores and overall risk posture. This can highlight risks that are consistently increasing or decreasing in severity, enabling proactive intervention.
+4. Mitigation & Control Actions
+•	Control Performance Metrics: Track key performance indicators (KPIs) for each control, such as the number of times it was triggered, its success rate, and the time taken to execute. This moves beyond simple effectiveness review to quantifiable performance.
+5. Documentation
+•	Track document uploads: uploader, file name, timestamp
+•	Evidence Linkage to Controls/Risks: Directly link specific pieces of evidence to the controls they support or the risks they mitigate, providing a clear audit trail and simplifying evidence collection during an audit.
+6. Document & Communication Tracking
+•	View uploaded/downloaded file metadata
+•	Preview documents directly in dashboard
+•	Monitor notifications: sender, recipient, timestamp
+
+7. Compliance Insights & Alerts
+•	Policy Violation Alerts (e.g., overdue mitigation):
+•	Automated Triggering: Implement rules engines that automatically trigger alerts based on predefined criteria. For instance, if a mitigation action's due date passes without status update, an alert is sent to the risk owner and their manager. If a required document for a control effectiveness review is not uploaded by a deadline, an alert is generated.
+•	Escalation Matrix: Define escalation paths for unaddressed alerts. If an alert remains unacknowledged or unresolved after a certain period, it automatically escalates to higher management levels.
+•	Risk Aging Tracker:
+•	Visual Cues: Use color-coding (e.g., green for new, yellow for maturing, red for aged/overdue) on the dashboard to quickly identify risks that have been open for extended periods.
+•	Customizable Aging Thresholds: Allow administrators to define what constitutes "aged" for different risk categories or types (e.g., financial risks might have shorter aging thresholds than operational risks).
+•	Root Cause Analysis Prompt: When a risk ages beyond a critical threshold, the system could prompt the risk owner to conduct a root cause analysis for the delay and document findings.
+•	Compliance Health Score by Department/Team:
+•	Weighted Scoring Model: Develop a configurable scoring model that aggregates various compliance metrics (e.g., percentage of risks mitigated, control effectiveness ratings, policy attestation completion into a single, digestible score.
+•	Trend Analysis: Display historical trends of the compliance health score to show improvement or deterioration over time.
+•	Drill-Down Capability: Enable users to click on a department's score to see the underlying metrics contributing to it, identifying areas of strength and weakness.
+8. Review Workflow & Scheduling
+Efficient management of reviews is key to continuous compliance.
+•	Review Calendar with Upcoming Deadlines:
+•	Integrated Calendar View: Provide a calendar view that displays all upcoming compliance-related deadlines, including risk reviews, control effectiveness assessments, policy reviews, and audit follow-ups.
+•	Automated Reminders: Send automated reminders to assigned personnel prior to deadlines, with configurable lead times (e.g., 7 days, 3 days, 1 day before).
+•	Dependency Mapping: For complex reviews, allow the mapping of dependencies, so that if one review is delayed, dependent reviews are automatically flagged or rescheduled.
+•	Dynamic Workflow Assignment: Based on the type of review or risk, automatically assign the review task to the appropriate individual or team, leveraging pre-defined roles and responsibilities.
+9. Reporting & Export Tools
+Powerful reporting is essential for insights and stakeholder communication.
+•	Generate Custom Reports (e.g., flagged risks by department):
+•	Drag-and-Drop Report Builder: Provide a user-friendly interface that allows non-technical users to create custom reports by selecting fields, applying filters, and choosing visualization types.
+•	Report Templates: Offer a library of pre-built report templates for common compliance needs (e.g., "Top 10 Risks by Impact," "Control Effectiveness Summary," "Audit Findings Status").
+•	Schedule Recurring Exports (weekly/monthly summaries):
+•	Multiple Export Formats: Support export to common formats like PDF, Excel, CSV, and potentially even direct integration with business intelligence (BI) tools via API.[2]
+•	Automated Distribution: Configure scheduled reports to be automatically emailed to predefined recipient lists.
+•	Version Control for Exports: Maintain a log of all scheduled and manual exports, including who exported what, when, and in what format, for audit purposes.
+10. Risk Calculator Change Monitoring
+Maintaining the integrity and transparency of risk evaluation is paramount.
+•	Log Changes to Calculator Values:
+•	Detailed Change Log: For every change to likelihood scales, impact thresholds, or scoring formulas, record:
+•	Who made the change.
+•	When the change was made (timestamp).
+•	What was changed (e.g., "Likelihood scale 'Low' changed from 1 to 2").
+•	Why the change was made (mandatory comment field).
+•	Before and After Values: Crucially, capture the previous and new values for complete transparency.
+•	Approval Workflow for Changes: Implement a mandatory approval workflow for any changes to the risk calculator's underlying values or formulas, requiring sign-off from designated compliance or risk management personnel.
+11. Risk Heatmap & Dashboard Visuals
+Visualizations are key to quick understanding and decision-making.
+•	Interactive Heatmap by Department, Category, or Severity:
+•	Multi-Dimensional Filtering: Allow users to dynamically filter the heatmap by various dimensions (e.g., show only IT risks, or risks impacting a specific business unit).
+•	Customizable Axes: Enable configuration of the heatmap axes (e.g., Likelihood vs. Impact, Inherent Risk vs. Residual Risk).
+•	Color-Coding Customization: Allow administrators to define the color scheme for different risk levels (e.g., green for low, amber for medium, red for high).
+•	Risk Distribution Charts (e.g., pie, bar, trend lines):
+•	Dynamic Chart Generation: Automatically generate charts based on selected data points (e.g., pie chart of risks by category, bar chart of risks by owner, trend line of overall risk exposure over time).
+•	"Overdue Risks" Specific Visual: A dedicated widget showing the number and percentage of risks that are past their mitigation due dates, potentially broken down by severity.
+•	Drill-Down Capability from Charts to Individual Risk Records: This is a critical feature. Clicking on a segment of a pie chart or a bar in a bar chart should immediately take the user to a filtered list of the specific risk records represented by that segment/bar, allowing for immediate investigation.
+12. Risk Lifecycle Tracker
+A clear view of a risk's journey provides valuable insights into process efficiency.
+•	Timeline View of Each Risk’s Journey: creation → review → mitigation → closure:
+•	Gantt Chart Representation: Visualize the risk lifecycle as a mini-Gantt chart for each risk, showing the duration of each stage and key milestones.
+•	Audit Trail Integration: Each point on the timeline should be clickable, linking directly to the relevant audit trail entries (e.g., when it was created, when it was reviewed, when mitigation actions were logged).
+•	Status Aging Indicators (e.g., “Open for 90+ days”):
+•	Configurable Thresholds: Allow setting different aging thresholds for various risk types or severities.
+•	Visual Alerts: Use clear visual indicators (e.g., red flags, bold text) for risks exceeding aging thresholds.
+•	Alerts for Stalled or Inactive Risks:
+•	Automated Identification: The system should automatically identify risks that have had no activity (e.g., no status updates, no new mitigation actions logged) for a predefined period.
+•	Proactive Notifications: Send alerts to risk owners and their managers, prompting them to review and update the stalled risk.
+•	Stalled Risk Report: A dedicated report or dashboard widget showing all currently stalled risks.
+
