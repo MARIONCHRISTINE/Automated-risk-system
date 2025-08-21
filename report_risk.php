@@ -2,7 +2,7 @@
 include_once 'includes/auth.php';
 requireRole('risk_owner');
 include_once 'config/database.php';
-include_once 'includes/shared_notifications.php'; // Include shared notifications
+include_once 'includes/shared_notifications.php';
 
 // Verify session data exists
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['email'])) {
@@ -44,7 +44,6 @@ if (isset($_GET['success']) && $_GET['success'] == '1') {
 function handleFileUploads($files, $risk_id, $section_type, $db) {
     $upload_dir = 'uploads/risk_documents/';
     
-    // Create directory if it doesn't exist
     if (!file_exists($upload_dir)) {
         mkdir($upload_dir, 0755, true);
     }
@@ -61,22 +60,18 @@ function handleFileUploads($files, $risk_id, $section_type, $db) {
                 $file_size = $files['size'][$i];
                 $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
                 
-                // Validate file type
                 if (!in_array($file_ext, $allowed_types)) {
                     throw new Exception("File type not allowed: $file_name");
                 }
                 
-                // Validate file size
                 if ($file_size > $max_size) {
                     throw new Exception("File too large: $file_name (max 10MB)");
                 }
                 
-                // Generate unique filename
                 $unique_name = $risk_id . '_' . $section_type . '_' . time() . '_' . $i . '.' . $file_ext;
                 $file_path = $upload_dir . $unique_name;
                 
                 if (move_uploaded_file($file_tmp, $file_path)) {
-                    // Save to database
                     $query = "INSERT INTO risk_documents (risk_id, section_type, original_filename, stored_filename, file_path, file_size, uploaded_by, uploaded_at)
                                VALUES (:risk_id, :section_type, :original_filename, :stored_filename, :file_path, :file_size, :uploaded_by, NOW())";
                     $stmt = $db->prepare($query);
@@ -105,67 +100,112 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
     try {
         $db->beginTransaction();
         
-        // Validation
-        if (empty($_POST['risk_name']) || empty($_POST['risk_description']) || empty($_POST['cause_of_risk'])) {
-            throw new Exception('Risk Name, Description, and Cause are required fields');
+        if (empty($_POST['risk_description']) || empty($_POST['cause_of_risk'])) {
+            throw new Exception('Risk Description and Cause are required fields');
         }
+        
+        if (empty($_POST['risk_categories']) || !is_array($_POST['risk_categories'])) {
+            throw new Exception('At least one risk category must be selected');
+        }
+        
+        $risk_name = implode(', ', $_POST['risk_categories']) . ' - ' . substr($_POST['risk_description'], 0, 50) . '...';
+        
+        $risk_categories_json = json_encode($_POST['risk_categories']);
+        
+        $category_details = [];
+        foreach ($_POST['risk_categories'] as $category) {
+            $category_key = str_replace(' ', '_', strtolower($category));
+            
+            // Check for dropdown values instead of text inputs
+            if (isset($_POST['category_value_' . $category_key]) && !empty($_POST['category_value_' . $category_key])) {
+                $category_details[$category] = $_POST['category_value_' . $category_key];
+            } elseif (isset($_POST['category_desc_' . $category_key]) && !empty($_POST['category_desc_' . $category_key])) {
+                $category_details[$category] = $_POST['category_desc_' . $category_key];
+            }
+        }
+        
+        $category_details_json = json_encode($category_details);
         
         $query = "INSERT INTO risk_incidents (
             risk_name, risk_description, cause_of_risk, department, reported_by, risk_owner_id,
-            existing_or_new, to_be_reported_to_board, risk_category,
-            inherent_likelihood, inherent_consequence, inherent_rating,
-            residual_likelihood, residual_consequence, residual_rating,
+            existing_or_new, risk_categories, category_details,
+            risk_rating,
             treatment_action, controls_action_plans, target_completion_date,
             progress_update, treatment_status, risk_status,
+            involves_money_loss, money_amount,
             created_at, updated_at
         ) VALUES (
             :risk_name, :risk_description, :cause_of_risk, :department, :reported_by, :risk_owner_id,
-            :existing_or_new, :to_be_reported_to_board, :risk_category,
-            :inherent_likelihood, :inherent_consequence, :inherent_rating,
-            :residual_likelihood, :residual_consequence, :residual_rating,
+            :existing_or_new, :risk_categories, :category_details,
+            :risk_rating,
             :treatment_action, :controls_action_plans, :target_completion_date,
             :progress_update, :treatment_status, :risk_status,
+            :involves_money_loss, :money_amount,
             NOW(), NOW()
         )";
         
         $stmt = $db->prepare($query);
-        $stmt->bindParam(':risk_name', $_POST['risk_name']);
+        $stmt->bindParam(':risk_name', $risk_name);
         $stmt->bindParam(':risk_description', $_POST['risk_description']);
         $stmt->bindParam(':cause_of_risk', $_POST['cause_of_risk']);
-        $stmt->bindParam(':department', $_POST['department']);
+        $stmt->bindParam(':department', $user['department']);
         $stmt->bindParam(':reported_by', $_SESSION['user_id']);
-        $stmt->bindParam(':risk_owner_id', $_SESSION['user_id']); // Auto-assign to self
+        $stmt->bindParam(':risk_owner_id', $_SESSION['user_id']);
         $stmt->bindParam(':existing_or_new', $_POST['existing_or_new']);
-        $stmt->bindParam(':to_be_reported_to_board', $_POST['to_be_reported_to_board']);
-        $stmt->bindParam(':risk_category', $_POST['risk_category']);
-        $stmt->bindParam(':inherent_likelihood', $_POST['inherent_likelihood']);
-        $stmt->bindParam(':inherent_consequence', $_POST['inherent_consequence']);
-        $stmt->bindParam(':inherent_rating', $_POST['inherent_rating']);
-        $stmt->bindParam(':residual_likelihood', $_POST['residual_likelihood']);
-        $stmt->bindParam(':residual_consequence', $_POST['residual_consequence']);
-        $stmt->bindParam(':residual_rating', $_POST['residual_rating']);
+        $stmt->bindParam(':risk_categories', $risk_categories_json);
+        $stmt->bindParam(':category_details', $category_details_json);
+        $stmt->bindParam(':risk_rating', $_POST['risk_rating']);
         $stmt->bindParam(':treatment_action', $_POST['treatment_action']);
         $stmt->bindParam(':controls_action_plans', $_POST['controls_action_plans']);
         $stmt->bindParam(':target_completion_date', $_POST['target_completion_date']);
         $stmt->bindParam(':progress_update', $_POST['progress_update']);
         $stmt->bindParam(':treatment_status', $_POST['treatment_status']);
         $stmt->bindParam(':risk_status', $_POST['risk_status']);
+        $stmt->bindParam(':involves_money_loss', $_POST['involves_money_loss']);
+        $stmt->bindParam(':money_amount', $_POST['money_amount']);
         
         if ($stmt->execute()) {
             $risk_id = $db->lastInsertId();
             
-            // Handle file uploads for Controls/Action Plans
+            foreach ($_POST['risk_categories'] as $category) {
+                $category_value = null;
+                $category_description = null;
+                $category_type = null;
+                
+                $category_key = str_replace(' ', '_', strtolower($category));
+                
+                // Check if it's a value-based category (Financial Exposure, Fraud, etc.)
+                if (isset($_POST['category_value_' . $category_key]) && !empty($_POST['category_value_' . $category_key])) {
+                    $category_description = $_POST['category_value_' . $category_key]; // Store dropdown selection as description
+                    $category_type = 'text';
+                } elseif (isset($_POST['category_desc_' . $category_key]) && !empty($_POST['category_desc_' . $category_key])) {
+                    $category_description = $_POST['category_desc_' . $category_key];
+                    $category_type = 'text';
+                }
+                
+                if ($category_description) {
+                    $category_query = "INSERT INTO risk_category_details (
+                        risk_id, risk_category, category_value, category_description, category_type
+                    ) VALUES (?, ?, ?, ?, ?)";
+                    
+                    $category_stmt = $db->prepare($category_query);
+                    $category_stmt->execute([$risk_id, $category, $category_value, $category_description, $category_type]);
+                }
+            }
+            
             if (isset($_FILES['controls_documents']) && !empty($_FILES['controls_documents']['name'][0])) {
                 $controls_files = handleFileUploads($_FILES['controls_documents'], $risk_id, 'controls_action_plans', $db);
             }
             
-            // Handle file uploads for Progress Update
             if (isset($_FILES['progress_documents']) && !empty($_FILES['progress_documents']['name'][0])) {
                 $progress_files = handleFileUploads($_FILES['progress_documents'], $risk_id, 'progress_update', $db);
             }
             
+            if (isset($_FILES['supporting_document']) && $_FILES['supporting_document']['error'] == UPLOAD_ERR_OK) {
+                $supporting_files = handleFileUploads($_FILES['supporting_document'], $risk_id, 'supporting_document', $db);
+            }
+            
             $db->commit();
-            // Redirect to clear form and show success message
             header("Location: report_risk.php?success=1");
             exit();
         } else {
@@ -174,11 +214,10 @@ if ($_POST && isset($_POST['submit_comprehensive_risk'])) {
         }
     } catch (Exception $e) {
         $db->rollback();
-        $error = 'Error: ' . $e->getMessage();
+        $error = $e->getMessage();
     }
 }
 
-// Get notifications using shared component
 $all_notifications = getNotifications($db, $_SESSION['user_id']);
 ?>
 <!DOCTYPE html>
@@ -204,7 +243,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             padding-top: 150px;
         }
         
-        /* Header */
         .header {
             background: #E60012;
             padding: 1.5rem 2rem;
@@ -316,7 +354,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             border-color: rgba(255, 255, 255, 0.5);
         }
         
-        /* Navigation Bar */
         .nav {
             background: #f8f9fa;
             border-bottom: 1px solid #dee2e6;
@@ -363,232 +400,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             background-color: rgba(230, 0, 18, 0.05);
         }
         
-        /* Notification styles */
-        .notification-nav-item {
-            position: relative;
-        }
-        .nav-notification-container {
-            position: relative;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            cursor: pointer;
-            padding: 1rem 1.5rem;
-            border-radius: 0.25rem;
-            transition: all 0.3s ease;
-            color: #6c757d;
-            text-decoration: none;
-        }
-        .nav-notification-container:hover {
-            background-color: rgba(230, 0, 18, 0.05);
-            color: #E60012;
-            text-decoration: none;
-        }
-        .nav-notification-container.nav-notification-empty {
-            opacity: 0.6;
-            cursor: default;
-        }
-        .nav-notification-container.nav-notification-empty:hover {
-            background-color: transparent;
-            color: #6c757d;
-        }
-        .nav-notification-bell {
-            font-size: 1.1rem;
-            transition: all 0.3s ease;
-        }
-        .nav-notification-container:hover .nav-notification-bell {
-            transform: scale(1.1);
-        }
-        .nav-notification-bell.has-notifications {
-            color: #ffc107;
-            animation: navBellRing 2s infinite;
-        }
-        @keyframes navBellRing {
-            0%, 50%, 100% { transform: rotate(0deg); }
-            10%, 30% { transform: rotate(-10deg); }
-            20%, 40% { transform: rotate(10deg); }
-        }
-        .nav-notification-text {
-            font-size: 0.9rem;
-            font-weight: 500;
-        }
-        .nav-notification-badge {
-            background: #dc3545;
-            color: white;
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            font-size: 0.7rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            animation: navPulse 2s infinite;
-            margin-left: auto;
-        }
-        @keyframes navPulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.2); }
-            100% { transform: scale(1); }
-        }
-        
-        /* Notification Dropdown Styles */
-        .nav-notification-dropdown {
-            position: fixed !important;
-            background: white;
-            border: 1px solid #dee2e6;
-            border-radius: 0.5rem;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-            width: 400px;
-            max-height: 500px;
-            z-index: 1000;
-            display: none;
-            transition: all 0.3s ease;
-            transform: translateY(-10px);
-        }
-        .nav-notification-dropdown.show {
-            display: block;
-            transform: translateY(0);
-            opacity: 1;
-        }
-        .nav-notification-header {
-            padding: 1rem;
-            border-bottom: 1px solid #dee2e6;
-            font-weight: bold;
-            color: #495057;
-            background: #f8f9fa;
-            border-radius: 0.5rem 0.5rem 0 0;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
-        .nav-notification-content {
-            max-height: 350px;
-            overflow-y: auto;
-            overflow-x: hidden;
-            transition: max-height 0.3s ease;
-            scrollbar-width: thin;
-            scrollbar-color: #cbd5e0 #f7fafc;
-            -webkit-overflow-scrolling: touch;
-            scroll-behavior: smooth;
-        }
-        .nav-notification-content::-webkit-scrollbar {
-            width: 8px;
-        }
-        .nav-notification-content::-webkit-scrollbar-track {
-            background: #f7fafc;
-            border-radius: 4px;
-        }
-        .nav-notification-content::-webkit-scrollbar-thumb {
-            background: #cbd5e0;
-            border-radius: 4px;
-            transition: background 0.3s ease;
-        }
-        .nav-notification-content::-webkit-scrollbar-thumb:hover {
-            background: #a0aec0;
-        }
-        .nav-notification-item {
-            padding: 1rem;
-            border-bottom: 1px solid #f8f9fa;
-            transition: all 0.3s ease;
-            position: relative;
-        }
-        .nav-notification-item:hover {
-            background-color: #f8f9fa;
-        }
-        .nav-notification-item:last-child {
-            border-bottom: none;
-        }
-        .nav-notification-item.read {
-            display: none !important;
-        }
-        .nav-notification-item.unread {
-            background-color: #fff3cd;
-            border-left: 4px solid #ffc107;
-        }
-        .nav-notification-title {
-            font-weight: bold;
-            color: #495057;
-            margin-bottom: 0.25rem;
-        }
-        .nav-notification-risk {
-            color: #6c757d;
-            font-size: 0.9rem;
-            margin-bottom: 0.25rem;
-        }
-        .nav-notification-message {
-            color: #495057;
-            font-size: 0.85rem;
-            margin-bottom: 0.25rem;
-            background: #f8f9fa;
-            padding: 0.5rem;
-            border-radius: 0.25rem;
-            border-left: 3px solid #007bff;
-        }
-        .nav-notification-date {
-            color: #6c757d;
-            font-size: 0.8rem;
-            margin-bottom: 0.5rem;
-        }
-        .nav-notification-actions {
-            margin-top: 0.5rem;
-            display: flex;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-        }
-        .nav-notification-actions .btn {
-            font-size: 0.8rem;
-            padding: 0.25rem 0.5rem;
-        }
-        .flex {
-            display: flex;
-        }
-        .justify-between {
-            justify-content: space-between;
-        }
-        .items-center {
-            align-items: center;
-        }
-        .btn-sm {
-            padding: 0.4rem 0.8rem;
-            font-size: 0.8rem;
-        }
-        .btn-primary {
-            background: #007bff;
-        }
-        .btn-primary:hover {
-            background: #0056b3;
-        }
-        .btn-outline {
-            background: transparent;
-            color: #E60012;
-            border: 1px solid #E60012;
-        }
-        .btn-outline:hover {
-            background: #E60012;
-            color: white;
-        }
-        .btn-secondary {
-            background: #6c757d;
-        }
-        .btn-secondary:hover {
-            background: #545b62;
-        }
-        .btn-warning {
-            background: #ffc107;
-            color: #212529;
-        }
-        .btn-warning:hover {
-            background: #e0a800;
-        }
-        .btn-success {
-            background: #28a745;
-        }
-        .btn-success:hover {
-            background: #218838;
-        }
-        
-        /* Main Content */
         .main-content {
             max-width: 1200px;
             margin: 0 auto;
@@ -698,97 +509,105 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             resize: vertical;
         }
         
-        /* File Upload Styles */
-        .file-upload-section {
+        /* Updated styling for 2x2 grid layout and better visual distinction */
+        .risk-categories-container {
             background: #f8f9fa;
-            border: 2px dashed #dee2e6;
-            border-radius: 0.25rem;
-            padding: 0.5rem;
-            margin-top: 0.5rem;
-            transition: all 0.3s;
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 5px;
+            max-height: 400px;
+            overflow-y: auto;
         }
-        .file-upload-section:hover {
-            border-color: #E60012;
-            background: #fff5f5;
+
+        .category-item {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 2px solid #e3f2fd;
+            border-radius: 8px;
+            background: #fafafa;
         }
-        .file-upload-section.dragover {
-            border-color: #E60012;
-            background: #fff5f5;
-            transform: scale(1.01);
+
+        .category-item:last-child {
+            border-bottom: 2px solid #e3f2fd;
         }
-        .file-input-wrapper {
-            position: relative;
-            display: inline-block;
-            width: 100%;
-        }
-        .file-input {
-            position: absolute;
-            opacity: 0;
-            width: 100%;
-            height: 100%;
+
+        /* Enhanced category name styling with color distinction */
+        .checkbox-label {
+            display: flex;
+            align-items: center;
             cursor: pointer;
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 0;
+            padding: 12px;
+            border-radius: 6px;
+            background: linear-gradient(135deg,rgb(231, 9, 28),rgb(235, 152, 159));
+            color: white;
+            transition: all 0.3s ease;
         }
-        .file-input-label {
+
+        .checkbox-label:hover {
+            background: linear-gradient(135deg,rgb(248, 4, 4),rgb(241, 2, 2));
+            transform: translateY(-1px);
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            margin-right: 12px;
+            transform: scale(1.4);
+            accent-color: white;
+        }
+
+        /* 2x2 grid layout for impact levels */
+        .impact-levels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 12px;
+            margin-top: 15px;
+            padding: 10px;
+        }
+
+        /* Square-styled radio buttons with distinct colors */
+        .radio-label {
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 0.5rem;
-            padding: 0.4rem;
-            border: 1px dashed #ccc;
-            border-radius: 0.25rem;
-            background: white;
+            padding: 15px;
+            border: 2px solid #4caf50;
+            border-radius: 8px;
             cursor: pointer;
-            transition: all 0.3s;
+            transition: all 0.3s ease;
+            background: linear-gradient(135deg, #e8f5e8, #f1f8e9);
+            min-height: 80px;
             text-align: center;
-            font-size: 0.85rem;
+            font-size: 13px;
+            line-height: 1.3;
         }
-        .file-input-label:hover {
-            border-color: #E60012;
-            background: #fff5f5;
+
+        .radio-label:hover {
+            background: linear-gradient(135deg, #c8e6c9, #dcedc8);
+            border-color: #388e3c;
+            transform: scale(1.02);
+            box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
         }
-        .file-list {
-            margin-top: 0.5rem;
+
+        .radio-label input[type="radio"] {
+            margin-right: 8px;
+            transform: scale(1.3);
+            accent-color: #4caf50;
         }
-        .file-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0.4rem;
-            background: white;
-            border: 1px solid #dee2e6;
-            border-radius: 0.25rem;
-            margin-bottom: 0.4rem;
-            font-size: 0.85rem;
+
+        .radio-label input[type="radio"]:checked + span {
+            font-weight: 600;
+            color: #2e7d32;
         }
-        .file-info {
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-        }
-        .file-name {
-            font-weight: 500;
-        }
-        .file-size {
-            color: #666;
-            font-size: 0.8rem;
-        }
-        .file-remove {
-            background: #dc3545;
-            color: white;
-            border: none;
-            padding: 0.2rem 0.4rem;
-            border-radius: 0.2rem;
-            cursor: pointer;
-            font-size: 0.75rem;
-        }
-        .file-remove:hover {
-            background: #c82333;
-        }
-        .file-types-info {
-            font-size: 0.75rem;
-            color: #666;
-            margin-top: 0.4rem;
-            text-align: center;
+
+        /* Responsive design for smaller screens */
+        @media (max-width: 768px) {
+            .impact-levels {
+                grid-template-columns: 1fr;
+                grid-template-rows: repeat(4, 1fr);
+            }
         }
         
         .risk-matrix {
@@ -864,115 +683,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             border-left: 4px solid #dc3545;
         }
         
-        /* Responsive */
         @media (max-width: 768px) {
-            body {
-                padding-top: 200px;
-            }
-            
-            .header {
-                padding: 1.2rem 1.5rem;
-            }
-            
-            .header-content {
-                flex-direction: column;
-                gap: 1rem;
-                align-items: flex-start;
-            }
-            
-            .header-right {
-                align-self: flex-end;
-            }
-            
-            .main-title {
-                font-size: 1.3rem;
-            }
-            
-            .sub-title {
-                font-size: 0.9rem;
-            }
-            
-            .logout-btn {
-                margin-left: 0;
-                margin-top: 0.5rem;
-            }
-            
-            .nav {
-                top: 120px;
-                padding: 0.25rem 0;
-            }
-            
-            .nav-content {
-                padding: 0 0.5rem;
-                overflow-x: auto;
-                -webkit-overflow-scrolling: touch;
-            }
-            
-            .nav-menu {
-                flex-wrap: nowrap;
-                justify-content: flex-start;
-                gap: 0;
-                min-width: max-content;
-                padding: 0 0.5rem;
-            }
-            
-            .nav-item {
-                flex: 0 0 auto;
-                min-width: 80px;
-            }
-            
-            .nav-item a {
-                padding: 0.75rem 0.5rem;
-                font-size: 0.75rem;
-                text-align: center;
-                border-bottom: 3px solid transparent;
-                border-left: none;
-                width: 100%;
-                white-space: nowrap;
-                min-height: 44px;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                gap: 0.25rem;
-            }
-            
-            .nav-item a.active {
-                border-bottom-color: #E60012;
-                border-left-color: transparent;
-                background-color: rgba(230, 0, 18, 0.1);
-            }
-            
-            .nav-item a:hover {
-                background-color: rgba(230, 0, 18, 0.05);
-            }
-            
-            .nav-notification-container {
-                padding: 0.75rem 0.5rem;
-                font-size: 0.75rem;
-                min-width: 80px;
-            }
-            
-            .nav-notification-text {
-                font-size: 0.65rem;
-            }
-            
-            .nav-notification-bell {
-                font-size: 1rem;
-            }
-            
-            .nav-notification-badge {
-                width: 16px;
-                height: 16px;
-                font-size: 0.6rem;
-            }
-            
-            .nav-notification-dropdown {
-                width: 95vw;
-                left: 2.5vw !important;
-                right: 2.5vw !important;
-            }
-            
             .form-row {
                 grid-template-columns: 1fr;
             }
@@ -981,10 +692,35 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                 grid-template-columns: 1fr;
             }
         }
+
+        .impact-levels {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .radio-label {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .radio-label:hover {
+            background-color: rgba(230, 0, 18, 0.05);
+        }
+
+        .radio-label input[type="radio"] {
+            margin-right: 8px;
+            transform: scale(1.2);
+            accent-color: #E60012;
+        }
     </style>
 </head>
 <body>
-    <!-- Header -->
     <header class="header">
         <div class="header-content">
             <div class="header-left">
@@ -1007,7 +743,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
         </div>
     </header>
     
-    <!-- Navigation Bar -->
     <nav class="nav">
         <div class="nav-content">
             <ul class="nav-menu">
@@ -1033,7 +768,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                 </li>
                 <li class="nav-item notification-nav-item">
                     <?php
-                    // Use shared notifications component
                     if (isset($_SESSION['user_id'])) {
                         renderNotificationBar($all_notifications);
                     }
@@ -1043,7 +777,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
         </div>
     </nav>
     
-    <!-- Main Content -->
     <div class="main-content">
         <div class="card">
             <div class="card-header">
@@ -1054,7 +787,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             </div>
             <div class="card-body">
                 
-                <!-- Progress Indicator -->
                 <div class="progress-indicator">
                     <div class="progress-step active">1. Identify</div>
                     <div class="progress-step">2. Assess</div>
@@ -1071,14 +803,117 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                 <?php endif; ?>
                 
                 <form method="POST" enctype="multipart/form-data">
-                    <!-- Section 1: Risk Identification -->
                     <div class="section-header">
                         <i class="fas fa-search"></i> Section 1: Risk Identification
                     </div>
                     
+                    <!-- Removed A. tag from Risk Categories label -->
                     <div class="form-group">
-                        <label class="form-label">Risk Name *</label>
-                        <input type="text" name="risk_name" class="form-control" required placeholder="Enter a clear, concise risk name">
+                        <label class="form-label">Risk Categories * <small>(Select all that apply)</small></label>
+                        <div class="risk-categories-container">
+                            <div class="category-item">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="risk_categories[]" value="Financial Exposure">
+                                    <span class="checkmark">Financial Exposure [Revenue, Operating Expenditure, Book value]</span>
+                                </label>
+                            </div>
+                            
+                            <div class="category-item">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="risk_categories[]" value="Decrease in market share">
+                                    <span class="checkmark">Decrease in market share</span>
+                                </label>
+                            </div>
+                            
+                            <div class="category-item">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="risk_categories[]" value="Customer Experience">
+                                    <span class="checkmark">Customer Experience</span>
+                                </label>
+                            </div>
+                            
+                            <div class="category-item">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="risk_categories[]" value="Compliance">
+                                    <span class="checkmark">Compliance</span>
+                                </label>
+                            </div>
+                            
+                            <div class="category-item">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="risk_categories[]" value="Reputation">
+                                    <span class="checkmark">Reputation</span>
+                                </label>
+                            </div>
+                            
+                            <div class="category-item">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="risk_categories[]" value="Fraud">
+                                    <span class="checkmark">Fraud</span>
+                                </label>
+                            </div>
+                            
+                            <div class="category-item">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="risk_categories[]" value="Operations">
+                                    <span class="checkmark">Operations (Business continuity)</span>
+                                </label>
+                            </div>
+                            
+                            <div class="category-item">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="risk_categories[]" value="Networks">
+                                    <span class="checkmark">Networks</span>
+                                </label>
+                            </div>
+                            
+                            <div class="category-item">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="risk_categories[]" value="People">
+                                    <span class="checkmark">People</span>
+                                </label>
+                            </div>
+                            
+                            <div class="category-item">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="risk_categories[]" value="IT">
+                                    <span class="checkmark">IT (Cybersecurity & Data Privacy)</span>
+                                </label>
+                            </div>
+                            
+                            <div class="category-item">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="risk_categories[]" value="Other">
+                                    <span class="checkmark">Other</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Removed B. tag and changed text to sentence case -->
+                    <div class="form-group">
+                        <label class="form-label">Does your risk involves loss of money? *</label>
+                        <div class="risk-categories-container">
+                            <div class="category-item">
+                                <label class="checkbox-label">
+                                    <input type="radio" name="involves_money_loss" value="yes" onchange="toggleMoneyAmount(this)">
+                                    <span class="checkmark">Yes</span>
+                                </label>
+                            </div>
+                            
+                            <div class="category-item">
+                                <label class="checkbox-label">
+                                    <input type="radio" name="involves_money_loss" value="no" onchange="toggleMoneyAmount(this)">
+                                    <span class="checkmark">No</span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- Amount input field that shows when Yes is selected -->
+                        <div id="money-amount-section" style="display: none; margin-top: 15px;">
+                            <label class="form-label">Amount (in your local currency) *</label>
+                            <input type="number" name="money_amount" class="form-control" placeholder="Enter the estimated amount" step="0.01" min="0">
+                        </div>
                     </div>
                     
                     <div class="form-group">
@@ -1091,126 +926,156 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                         <textarea name="cause_of_risk" class="form-control" required placeholder="What causes this risk to occur?"></textarea>
                     </div>
                     
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Department *</label>
-                            <select name="department" class="form-control" required>
-                                <option value="">Select Department</option>
-                                <option value="Finance & Accounting" <?php echo ($user['department'] == 'Finance & Accounting') ? 'selected' : ''; ?>>Finance & Accounting</option>
-                                <option value="Operations" <?php echo ($user['department'] == 'Operations') ? 'selected' : ''; ?>>Operations</option>
-                                <option value="Technology & Security" <?php echo ($user['department'] == 'Technology & Security') ? 'selected' : ''; ?>>Technology & Security</option>
-                                <option value="Human Resources" <?php echo ($user['department'] == 'Human Resources') ? 'selected' : ''; ?>>Human Resources</option>
-                                <option value="Legal & Compliance" <?php echo ($user['department'] == 'Legal & Compliance') ? 'selected' : ''; ?>>Legal & Compliance</option>
-                                <option value="Marketing & Sales" <?php echo ($user['department'] == 'Marketing & Sales') ? 'selected' : ''; ?>>Marketing & Sales</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label class="form-label">Risk Category *</label>
-                            <select name="risk_category" class="form-control" required>
-                                <option value="">Select Category</option>
-                                <option value="Strategic">Strategic</option>
-                                <option value="Operational">Operational</option>
-                                <option value="Financial">Financial</option>
-                                <option value="Compliance">Compliance</option>
-                                <option value="Technology">Technology</option>
-                                <option value="Reputational">Reputational</option>
-                                <option value="Environmental">Environmental</option>
-                                <option value="Human Resources">Human Resources</option>
-                            </select>
-                        </div>
+                    <!-- Added optional upload supporting document field after Cause of Risk -->
+                    <div class="form-group">
+                        <label class="form-label">Upload supporting document <small>(Optional)</small></label>
+                        <input type="file" name="supporting_document" class="form-control" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.txt">
+                        <small class="form-text text-muted">Accepted formats: PDF, DOC, DOCX, JPG, JPEG, PNG, TXT (Max size: 10MB)</small>
                     </div>
                     
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Existing or New Risk *</label>
-                            <select name="existing_or_new" class="form-control" required>
-                                <option value="">Select Type</option>
-                                <option value="New">New Risk</option>
-                                <option value="Existing">Existing Risk</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label class="form-label">Report to Board *</label>
-                            <select name="to_be_reported_to_board" class="form-control" required>
-                                <option value="">Select Option</option>
-                                <option value="Yes">Yes</option>
-                                <option value="No">No</option>
-                            </select>
-                        </div>
-                    </div>
-                    
-                    <!-- Section 2: Risk Assessment -->
                     <div class="section-header">
                         <i class="fas fa-calculator"></i> Section 2: Risk Assessment
                     </div>
                     
-                    <div class="risk-matrix">
-                        <div class="matrix-section">
-                            <div class="matrix-title">Inherent Risk (Before Controls)</div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Likelihood (1-5) *</label>
-                                <select name="inherent_likelihood" class="form-control" required onchange="calculateRating('inherent')">
-                                    <option value="">Select</option>
-                                    <option value="1">1 - Rare (0-5%)</option>
-                                    <option value="2">2 - Unlikely (6-25%)</option>
-                                    <option value="3">3 - Possible (26-50%)</option>
-                                    <option value="4">4 - Likely (51-75%)</option>
-                                    <option value="5">5 - Almost Certain (76-100%)</option>
-                                </select>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Consequence (1-5) *</label>
-                                <select name="inherent_consequence" class="form-control" required onchange="calculateRating('inherent')">
-                                    <option value="">Select</option>
-                                    <option value="1">1 - Insignificant</option>
-                                    <option value="2">2 - Minor</option>
-                                    <option value="3">3 - Moderate</option>
-                                    <option value="4">4 - Major</option>
-                                    <option value="5">5 - Catastrophic</option>
-                                </select>
-                            </div>
-                            
-                            <input type="hidden" name="inherent_rating" id="inherent_rating">
-                            <div id="inherent_display" class="rating-display">Rating will appear here</div>
-                        </div>
-                        
-                        <div class="matrix-section">
-                            <div class="matrix-title">Residual Risk (After Controls)</div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Likelihood (1-5) *</label>
-                                <select name="residual_likelihood" class="form-control" required onchange="calculateRating('residual')">
-                                    <option value="">Select</option>
-                                    <option value="1">1 - Rare (0-5%)</option>
-                                    <option value="2">2 - Unlikely (6-25%)</option>
-                                    <option value="3">3 - Possible (26-50%)</option>
-                                    <option value="4">4 - Likely (51-75%)</option>
-                                    <option value="5">5 - Almost Certain (76-100%)</option>
-                                </select>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Consequence (1-5) *</label>
-                                <select name="residual_consequence" class="form-control" required onchange="calculateRating('residual')">
-                                    <option value="">Select</option>
-                                    <option value="1">1 - Insignificant</option>
-                                    <option value="2">2 - Minor</option>
-                                    <option value="3">3 - Moderate</option>
-                                    <option value="4">4 - Major</option>
-                                    <option value="5">5 - Catastrophic</option>
-                                </select>
-                            </div>
-                            
-                            <input type="hidden" name="residual_rating" id="residual_rating">
-                            <div id="residual_display" class="rating-display">Rating will appear here</div>
-                        </div>
+                    <!-- Moved Existing or New Risk field to Section 2 -->
+                    <div class="form-group">
+                        <label class="form-label">Existing or New Risk *</label>
+                        <select name="existing_or_new" class="form-control" required>
+                            <option value="">Select Type</option>
+                            <option value="New">New Risk</option>
+                            <option value="Existing">Existing Risk</option>
+                        </select>
                     </div>
                     
-                    <!-- Section 3: Risk Treatment -->
+                    <!-- Simplified risk assessment with likelihood and impact side by side -->
+                    <div class="risk-matrix">
+                        <div class="matrix-title">Risk Rating</div>
+                        
+                        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                            <!-- Replaced dropdown with clickable colored boxes for likelihood -->
+                            <div style="flex: 1; min-width: 300px;">
+                                <div class="form-group">
+                                    <label class="form-label">Likelihood *</label>
+                                    <div class="likelihood-boxes" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                                        
+                                        <div class="likelihood-box" 
+                                             style="background-color: #ff4444; color: white; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                             onclick="selectLikelihood(this, 4)"
+                                             data-value="4">
+                                            <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">ALMOST CERTAIN</div>
+                                            <div style="font-size: 12px; line-height: 1.3;">
+                                                1. Guaranteed to happen<br>
+                                                2. Has been happening<br>
+                                                3. Continues to happen
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="likelihood-box" 
+                                             style="background-color: #ff8800; color: white; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                             onclick="selectLikelihood(this, 3)"
+                                             data-value="3">
+                                            <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">LIKELY</div>
+                                            <div style="font-size: 12px; line-height: 1.3;">
+                                                A history of happening at certain intervals/seasons/events
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="likelihood-box" 
+                                             style="background-color: #ffdd00; color: black; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                             onclick="selectLikelihood(this, 2)"
+                                             data-value="2">
+                                            <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">POSSIBLE</div>
+                                            <div style="font-size: 12px; line-height: 1.3;">
+                                                1. More than 1 year from last occurrence<br>
+                                                2. Circumstances indicating or allowing possibility of happening
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="likelihood-box" 
+                                             style="background-color: #88dd88; color: black; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                             onclick="selectLikelihood(this, 1)"
+                                             data-value="1">
+                                            <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">UNLIKELY</div>
+                                            <div style="font-size: 12px; line-height: 1.3;">
+                                                1. Not occurred before<br>
+                                                2. This is the first time its happening<br>
+                                                3. Not expected to happen for sometime
+                                            </div>
+                                        </div>
+                                        
+                                    </div>
+                                    <input type="hidden" name="likelihood" id="likelihood_value" required>
+                                </div>
+                            </div>
+                            
+                            <div style="flex: 1; min-width: 300px;">
+                                <div class="form-group">
+                                    <label class="form-label">Impact *</label>
+                                    
+                                    <!-- Added category dropdown for impact assessment -->
+                                    <!-- Updated dropdown to match exact 10 categories from matrix -->
+                                    <div class="form-group" style="margin-bottom: 15px;">
+                                        <label class="form-label" style="font-size: 14px; margin-bottom: 8px;">Select Impact Category:</label>
+                                        <select id="impact_category" onchange="updateImpactBoxes()" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                                            <option value="">-- Select Category --</option>
+                                            <option value="financial">Financial Exposure (Revenue, Operating Expenditure, Book value)</option>
+                                            <option value="market_share">Decrease in market share</option>
+                                            <option value="customer">Customer Experience</option>
+                                            <option value="compliance">Compliance</option>
+                                            <option value="reputation">Reputation</option>
+                                            <option value="fraud">Fraud</option>
+                                            <option value="operations">Operations (Business continuity)</option>
+                                            <option value="networks">Networks</option>
+                                            <option value="people">People</option>
+                                            <option value="it_cyber">IT (Cybersecurity & Data Privacy)</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <!-- Made impact boxes dynamic based on category selection -->
+                                    <div class="impact-boxes" id="impact_boxes_container" style="display: none; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                                        
+                                        <div class="impact-box" id="extreme_box"
+                                             style="background-color: #ff4444; color: white; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                             onclick="selectImpact(this, 4)"
+                                             data-value="4">
+                                            <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">EXTREME</div>
+                                            <div id="extreme_text" style="font-size: 12px; line-height: 1.3;"></div>
+                                        </div>
+                                        
+                                        <div class="impact-box" id="significant_box"
+                                             style="background-color: #ff8800; color: white; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                             onclick="selectImpact(this, 3)"
+                                             data-value="3">
+                                            <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">SIGNIFICANT</div>
+                                            <div id="significant_text" style="font-size: 12px; line-height: 1.3;"></div>
+                                        </div>
+                                        
+                                        <div class="impact-box" id="moderate_box"
+                                             style="background-color: #ffdd00; color: black; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                             onclick="selectImpact(this, 2)"
+                                             data-value="2">
+                                            <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">MODERATE</div>
+                                            <div id="moderate_text" style="font-size: 12px; line-height: 1.3;"></div>
+                                        </div>
+                                        
+                                        <div class="impact-box" id="minor_box"
+                                             style="background-color: #88dd88; color: black; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                             onclick="selectImpact(this, 1)"
+                                             data-value="1">
+                                            <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">MINOR</div>
+                                            <div id="minor_text" style="font-size: 12px; line-height: 1.3;"></div>
+                                        </div>
+                                        
+                                    </div>
+                                    <input type="hidden" name="impact" id="impact_value" required>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <input type="hidden" name="risk_rating" id="risk_rating">
+                        <div id="risk_display" class="rating-display">Rating will appear here</div>
+                    </div>
+
                     <div class="section-header">
                         <i class="fas fa-tools"></i> Section 3: Risk Treatment
                     </div>
@@ -1229,21 +1094,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                     <div class="form-group">
                         <label class="form-label">Controls/Action Plans *</label>
                         <textarea name="controls_action_plans" class="form-control" required placeholder="Describe the controls and action plans to manage this risk"></textarea>
-                        
-                        <!-- File Upload for Controls -->
-                        <div class="file-upload-section">
-                            <div class="file-input-wrapper">
-                                <input type="file" name="controls_documents[]" class="file-input" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png" onchange="handleFileSelect(this, 'controls-files')">
-                                <label class="file-input-label">
-                                    <i class="fas fa-upload"></i>
-                                    Upload Supporting Documents (Optional)
-                                </label>
-                            </div>
-                            <div id="controls-files" class="file-list"></div>
-                            <div class="file-types-info">
-                                Supported: PDF, DOC, XLS, PPT, TXT, JPG, PNG (Max 10MB each)
-                            </div>
-                        </div>
                     </div>
                     
                     <div class="form-row">
@@ -1264,7 +1114,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                         </div>
                     </div>
                     
-                    <!-- Section 4: Progress Update -->
                     <div class="section-header">
                         <i class="fas fa-chart-line"></i> Section 4: Progress Update
                     </div>
@@ -1272,21 +1121,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                     <div class="form-group">
                         <label class="form-label">Progress Update</label>
                         <textarea name="progress_update" class="form-control" placeholder="Provide updates on the progress of risk treatment activities"></textarea>
-                        
-                        <!-- File Upload for Progress -->
-                        <div class="file-upload-section">
-                            <div class="file-input-wrapper">
-                                <input type="file" name="progress_documents[]" class="file-input" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png" onchange="handleFileSelect(this, 'progress-files')">
-                                <label class="file-input-label">
-                                    <i class="fas fa-upload"></i>
-                                    Upload Progress Documents (Optional)
-                                </label>
-                            </div>
-                            <div id="progress-files" class="file-list"></div>
-                            <div class="file-types-info">
-                                Supported: PDF, DOC, XLS, PPT, TXT, JPG, PNG (Max 10MB each)
-                            </div>
-                        </div>
                     </div>
                     
                     <div class="form-group">
@@ -1300,7 +1134,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                         </select>
                     </div>
                     
-                    <!-- Submit Button -->
                     <div style="text-align: center; margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #dee2e6;">
                         <button type="submit" name="submit_comprehensive_risk" class="btn" style="padding: 1rem 3rem; font-size: 1.1rem;">
                             <i class="fas fa-save"></i> Submit Risk Report
@@ -1312,110 +1145,159 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
     </div>
     
     <script>
-        // Risk rating calculation
-        function calculateRating(type) {
-            const likelihood = document.querySelector(`select[name="${type}_likelihood"]`).value;
-            const consequence = document.querySelector(`select[name="${type}_consequence"]`).value;
+        function selectLikelihood(element, value) {
+            // Remove selection from all likelihood boxes
+            document.querySelectorAll('.likelihood-box').forEach(box => {
+                box.style.border = '3px solid transparent';
+            });
             
-            if (likelihood && consequence) {
-                const rating = parseInt(likelihood) * parseInt(consequence);
-                document.getElementById(`${type}_rating`).value = rating;
+            // Highlight selected box
+            element.style.border = '3px solid #333';
+            
+            // Set the hidden input value
+            document.getElementById('likelihood_value').value = value;
+            
+            // Recalculate risk rating
+            calculateRiskRating();
+        }
+        
+        function selectImpact(element, value) {
+            // Remove selection from all impact boxes
+            document.querySelectorAll('.impact-box').forEach(box => {
+                box.style.border = '3px solid transparent';
+            });
+            
+            // Highlight selected box
+            element.style.border = '3px solid #333';
+            
+            // Set the hidden input value
+            document.getElementById('impact_value').value = value;
+            
+            // Recalculate risk rating
+            calculateRiskRating();
+        }
+        
+        function calculateRiskRating() {
+            const likelihood = document.getElementById('likelihood_value').value;
+            const impact = document.getElementById('impact_value').value;
+            
+            if (likelihood && impact) {
+                const rating = parseInt(likelihood) * parseInt(impact);
+                let level = 'Low';
+                let className = 'rating-low';
                 
-                let ratingText = '';
-                let ratingClass = '';
-                
-                if (rating >= 15) {
-                    ratingText = `Critical (${rating})`;
-                    ratingClass = 'rating-critical';
-                } else if (rating >= 9) {
-                    ratingText = `High (${rating})`;
-                    ratingClass = 'rating-high';
+                if (rating >= 12) {
+                    level = 'Critical';
+                    className = 'rating-critical';
+                } else if (rating >= 8) {
+                    level = 'High';
+                    className = 'rating-high';
                 } else if (rating >= 4) {
-                    ratingText = `Medium (${rating})`;
-                    ratingClass = 'rating-medium';
-                } else {
-                    ratingText = `Low (${rating})`;
-                    ratingClass = 'rating-low';
+                    level = 'Medium';
+                    className = 'rating-medium';
                 }
                 
-                const display = document.getElementById(`${type}_display`);
-                display.textContent = ratingText;
-                display.className = `rating-display ${ratingClass}`;
+                document.getElementById('risk_rating').value = rating + ' - ' + level;
+                document.getElementById('risk_display').innerHTML = 'Risk Rating: ' + rating + ' (' + level + ')';
+                document.getElementById('risk_display').className = 'rating-display ' + className;
             }
         }
         
-        // File handling
-        function handleFileSelect(input, containerId) {
-            const container = document.getElementById(containerId);
-            container.innerHTML = '';
+        function toggleMoneyAmount(radio) {
+            const moneySection = document.getElementById('money-amount-section');
+            const moneyInput = document.querySelector('input[name="money_amount"]');
             
-            if (input.files.length > 0) {
-                for (let i = 0; i < input.files.length; i++) {
-                    const file = input.files[i];
-                    const fileItem = document.createElement('div');
-                    fileItem.className = 'file-item';
-                    
-                    const fileInfo = document.createElement('div');
-                    fileInfo.className = 'file-info';
-                    
-                    const fileName = document.createElement('span');
-                    fileName.className = 'file-name';
-                    fileName.textContent = file.name;
-                    
-                    const fileSize = document.createElement('span');
-                    fileSize.className = 'file-size';
-                    fileSize.textContent = `(${(file.size / 1024 / 1024).toFixed(2)} MB)`;
-                    
-                    const removeBtn = document.createElement('button');
-                    removeBtn.className = 'file-remove';
-                    removeBtn.textContent = '×';
-                    removeBtn.type = 'button';
-                    removeBtn.onclick = function() {
-                        // Reset the input
-                        input.value = '';
-                        container.innerHTML = '';
-                    };
-                    
-                    fileInfo.appendChild(fileName);
-                    fileInfo.appendChild(fileSize);
-                    fileItem.appendChild(fileInfo);
-                    fileItem.appendChild(removeBtn);
-                    container.appendChild(fileItem);
-                }
+            if (radio.value === 'yes') {
+                moneySection.style.display = 'block';
+                moneyInput.required = true;
+            } else {
+                moneySection.style.display = 'none';
+                moneyInput.required = false;
+                moneyInput.value = '';
             }
         }
-        
-        // Drag and drop functionality
-        document.querySelectorAll('.file-upload-section').forEach(section => {
-            section.addEventListener('dragover', function(e) {
-                e.preventDefault();
-                this.classList.add('dragover');
-            });
+
+        function updateImpactBoxes() {
+            const category = document.getElementById('impact_category').value;
+            const container = document.getElementById('impact_boxes_container');
             
-            section.addEventListener('dragleave', function(e) {
-                e.preventDefault();
-                this.classList.remove('dragover');
-            });
+            if (!category) {
+                container.style.display = 'none';
+                return;
+            }
             
-            section.addEventListener('drop', function(e) {
-                e.preventDefault();
-                this.classList.remove('dragover');
-                
-                const input = this.querySelector('.file-input');
-                const files = e.dataTransfer.files;
-                
-                // Create a new FileList-like object
-                const dt = new DataTransfer();
-                for (let i = 0; i < files.length; i++) {
-                    dt.items.add(files[i]);
+            const impactData = {
+                financial: {
+                    extreme: "Claims >5% of Company Revenue, Penalty >$50M-$1M",
+                    significant: "Claims 1-5% of Company Revenue, Penalty $5M-$50M", 
+                    moderate: "Claims 0.5%-1% of Company Revenue, Penalty $0.5M-$5M",
+                    minor: "Claims <0.5% of Company Revenue"
+                },
+                market_share: {
+                    extreme: "Decrease >5%",
+                    significant: "Decrease 1%-5%",
+                    moderate: "Decrease 0.5%-1%", 
+                    minor: "Decrease <0.5%"
+                },
+                customer: {
+                    extreme: "Breach of Customer Experience, Sanctions, Potential for legal action",
+                    significant: "Sanctions, Potential for legal action",
+                    moderate: "Sanctions, Potential for legal action",
+                    minor: "Claims or Compliance"
+                },
+                compliance: {
+                    extreme: "Breach of Regulatory Requirements, Sanctions, Potential for legal action, Penalty >$50M-$1M",
+                    significant: "National Impact, Limited (social) media coverage",
+                    moderate: "Isolated Impact",
+                    minor: "No impact on brand"
+                },
+                reputation: {
+                    extreme: "Reputation Impact, $1M Code of conduct for >2-3 days",
+                    significant: "$1M Code of conduct for <2-3 days", 
+                    moderate: "Isolated Impact",
+                    minor: "No impact on brand"
+                },
+                fraud: {
+                    extreme: "Capability Outage, System downtime >24hrs, System downtime from 1-5 days",
+                    significant: "Network availability >36% but <50%, System downtime from 1-5 days, Frustration exceeds 30% threshold by 30%",
+                    moderate: "Network availability >36% but <50%, Brief operational downtime <1 day, data loss averted due to timely intervention", 
+                    minor: "Limited operational downtime, immediately resolved, Brief outage of business discipline"
+                },
+                operations: {
+                    extreme: "Capability Outage, System downtime >24hrs, System downtime from 1-5 days",
+                    significant: "Network availability >36% but <50%, System downtime from 1-5 days, Frustration exceeds 30% threshold by 30%",
+                    moderate: "Network availability >36% but <50%, Brief operational downtime <1 day, data loss averted due to timely intervention",
+                    minor: "Limited operational downtime, immediately resolved, Brief outage of business discipline"
+                },
+                networks: {
+                    extreme: "Breach of cyber security and data privacy attempted and prevented, Breach that affects all users, 16% of customers",
+                    significant: "Breach of cyber security and data privacy attempted and prevented, Any cyberattack and data",
+                    moderate: "Network availability >36% but <50%, Frustration exceeds 30% threshold by 30%",
+                    minor: "Network availability >36% but <50%, Frustration exceeds 30% threshold by 30%"
+                },
+                people: {
+                    extreme: "1 Fatality, 4 Accidents",
+                    significant: "1 Total employee turnover 5-15%, Succession planning for EC & critical positions 2 Accidents",
+                    moderate: "1 Total employee turnover 5-15%, Succession planning for EC & critical positions 2 Accidents", 
+                    minor: "1 Total employee turnover <5%, 1 Heavily injured 1 Accident"
+                },
+                it_cyber: {
+                    extreme: "Breach of cyber security and data privacy attempted and prevented, Breach that affects all users, 16% of customers",
+                    significant: "Breach of cyber security and data privacy attempted and prevented, Any cyberattack and data",
+                    moderate: "Breach of cyber security and data privacy attempted and prevented, Any cyberattack and data",
+                    minor: "Network availability >36% but <50%, Frustration exceeds 30% threshold by 30%"
                 }
-                input.files = dt.files;
+            };
+            
+            if (impactData[category]) {
+                document.getElementById('extreme_text').textContent = impactData[category].extreme;
+                document.getElementById('significant_text').textContent = impactData[category].significant;
+                document.getElementById('moderate_text').textContent = impactData[category].moderate;
+                document.getElementById('minor_text').textContent = impactData[category].minor;
                 
-                // Trigger the change event
-                const containerId = input.getAttribute('onchange').match(/'([^']+)'/)[1];
-                handleFileSelect(input, containerId);
-            });
-        });
+                container.style.display = 'grid';
+            }
+        }
     </script>
 </body>
 </html>
