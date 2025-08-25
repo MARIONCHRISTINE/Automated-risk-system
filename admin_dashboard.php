@@ -1,6 +1,4 @@
 <?php
-
-
 // Session timeout (30 minutes)
 if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > 1800)) {
     session_unset();
@@ -9,7 +7,6 @@ if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > 
     exit();
 }
 $_SESSION['last_activity'] = time();
-
 // IP validation for security
 if (isset($_SESSION['ip_address'])) {
     if ($_SESSION['ip_address'] !== $_SERVER['REMOTE_ADDR']) {
@@ -21,14 +18,11 @@ if (isset($_SESSION['ip_address'])) {
 } else {
     $_SESSION['ip_address'] = $_SERVER['REMOTE_ADDR'];
 }
-
 include_once 'includes/auth.php';
 requireRole('admin');
 include_once 'config/database.php';
-
 $database = new Database();
 $db = $database->getConnection();
-
 try {
     // Check if system_settings table exists, if not create it
     $check_settings_table = "CREATE TABLE IF NOT EXISTS system_settings (
@@ -64,11 +58,15 @@ try {
     // Check if audit logs table exists and get last backup
     $check_audit_table = "CREATE TABLE IF NOT EXISTS system_audit_logs (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT,
-        action VARCHAR(255),
-        details TEXT,
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        ip_address VARCHAR(45)
+        timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        user VARCHAR(255) NOT NULL,
+        action VARCHAR(255) NOT NULL,
+        details TEXT DEFAULT NULL,
+        ip_address VARCHAR(45) DEFAULT NULL,
+        user_id INT DEFAULT NULL,
+        resolved TINYINT(1) DEFAULT 0,
+        resolved_at TIMESTAMP NULL DEFAULT NULL,
+        resolved_by INT DEFAULT NULL
     )";
     $db->exec($check_audit_table);
     
@@ -133,7 +131,6 @@ try {
     $last_backup = 'Unable to check';
     $storage_used = 'Unable to calculate';
 }
-
 if (isset($_POST['perform_backup'])) {
     try {
         $backup_format = $_POST['backup_format'] ?? 'sql';
@@ -195,7 +192,6 @@ if (isset($_POST['perform_backup'])) {
         $error_message = "Backup failed: " . $e->getMessage();
     }
 }
-
 if (isset($_GET['download_backup']) && isset($_GET['file'])) {
     $file_path = 'backups/' . basename($_GET['file']);
     if (file_exists($file_path)) {
@@ -210,7 +206,6 @@ if (isset($_GET['download_backup']) && isset($_GET['file'])) {
         exit;
     }
 }
-
 function createCSVBackup($db, $backup_file, $backup_tables) {
     $zip = new ZipArchive();
     $zip->open($backup_file, ZipArchive::CREATE);
@@ -244,7 +239,6 @@ function createCSVBackup($db, $backup_file, $backup_tables) {
     
     $zip->close();
 }
-
 function createJSONBackup($db, $backup_file, $backup_tables) {
     $backup_data = [];
     
@@ -261,7 +255,6 @@ function createJSONBackup($db, $backup_file, $backup_tables) {
     
     file_put_contents($backup_file, json_encode($backup_data, JSON_PRETTY_PRINT));
 }
-
 function createXMLBackup($db, $backup_file, $backup_tables) {
     $xml = new DOMDocument('1.0', 'UTF-8');
     $xml->formatOutput = true;
@@ -296,7 +289,6 @@ function createXMLBackup($db, $backup_file, $backup_tables) {
     
     $xml->save($backup_file);
 }
-
 if (isset($_POST['clear_cache'])) {
     try {
         // Log cache clear action
@@ -313,7 +305,6 @@ if (isset($_POST['clear_cache'])) {
         $error_message = "Cache clear failed: " . $e->getMessage();
     }
 }
-
 if (isset($_GET['ajax_download_template']) && $_GET['ajax_download_template'] == '1') {
     header('Content-Type: text/csv');
     header('Content-Disposition: attachment; filename="risk_data_template.csv"');
@@ -328,7 +319,6 @@ if (isset($_GET['ajax_download_template']) && $_GET['ajax_download_template'] ==
     echo $template_data;
     exit();
 }
-
 if (isset($_POST['ajax_upload']) && isset($_FILES['bulk_file'])) {
     header('Content-Type: application/json');
     
@@ -422,7 +412,6 @@ if (isset($_POST['ajax_upload']) && isset($_FILES['bulk_file'])) {
     echo json_encode($response);
     exit();
 }
-
 if (isset($_GET['download_template']) && $_GET['download_template'] == '1') {
     header('Content-Type: text/csv');
     header('Content-Disposition: attachment; filename="risk_data_template.csv"');
@@ -437,7 +426,6 @@ if (isset($_GET['download_template']) && $_GET['download_template'] == '1') {
     echo $template_data;
     exit();
 }
-
 if (isset($_POST['bulk_upload']) && isset($_FILES['bulk_file'])) {
     $upload_message = '';
     $upload_success = false;
@@ -543,7 +531,6 @@ if (isset($_POST['bulk_upload']) && isset($_FILES['bulk_file'])) {
         $upload_success = false;
     }
 }
-
 // Handle upload success/error messages
 $upload_message = '';
 $upload_type = '';
@@ -553,7 +540,6 @@ if (isset($_SESSION['upload_message'])) {
     unset($_SESSION['upload_message']);
     unset($_SESSION['upload_type']);
 }
-
 // Handle AJAX requests for audit functionality
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
     header('Content-Type: application/json');
@@ -592,6 +578,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
                 $log['table_name'] = '';
                 $log['record_id'] = '';
                 $log['user_agent'] = '';
+                
+                // Add severity based on action
+                $log['severity'] = getSeverityFromAction($log['action']);
             }
             
             echo json_encode(['success' => true, 'logs' => $logs]);
@@ -673,7 +662,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             
             if ($severity) {
                 $query .= " HAVING severity = :severity";
-                $params[':severity'] = $severity;
                 $params[':severity'] = $severity;
             }
             
@@ -788,7 +776,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             
             // CSV headers
             fputcsv($output, [
-                'ID', 'Date & Time', 'User', 'Full Name', 'Email', 'Role', 'Action', 'Details', 'IP Address'
+                'ID', 'Date & Time', 'User', 'Full Name', 'Email', 'Role', 'Action', 'Details', 'IP Address', 'Severity'
             ]);
             
             // Add filter information as comments in CSV
@@ -813,7 +801,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
                     $log['role'] ?? 'Unknown',
                     $log['action'],
                     $log['details'] ?? '',
-                    $log['ip_address'] ?? ''
+                    $log['ip_address'] ?? '',
+                    getSeverityFromAction($log['action'])
                 ]);
             }
             
@@ -821,7 +810,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             exit();
     }
 }
-
 // Handle Broadcast Message
 if ($_POST && isset($_POST['send_broadcast'])) {
     $broadcast_message = $_POST['broadcast_message'];
@@ -833,14 +821,13 @@ if ($_POST && isset($_POST['send_broadcast'])) {
     $log_query = "INSERT INTO system_audit_logs (user, action, details, ip_address, user_id) VALUES (?, ?, ?, ?, ?)";
     $log_stmt = $db->prepare($log_query);
     $log_stmt->execute([
-        $_SESSION['user_email'] ?? 'Admin',
+        $_SESSION['admin_email'] ?? 'Admin',
         'Broadcast Message Sent',
         'Broadcast message: "' . $broadcast_message . '"',
         $ip_address,
-        $_SESSION['user_id']
+        $_SESSION['admin_id']
     ]);
 }
-
 // --- Data Fetching for Dashboards ---
 // Get system statistics (expanded)
 $stats_query = "SELECT
@@ -861,10 +848,8 @@ $stats_query = "SELECT
 $stats_stmt = $db->prepare($stats_query);
 $stats_stmt->execute();
 $system_stats = $stats_stmt->fetch(PDO::FETCH_ASSOC);
-
 // Handle View All Audit Logs request
 $show_all_logs = isset($_GET['show_all_logs']) && $_GET['show_all_logs'] == '1';
-
 // Get Audit Logs from database (using system_audit_logs table)
 if ($show_all_logs) {
     $audit_logs_query = "SELECT
@@ -894,12 +879,16 @@ $audit_logs_stmt = $db->prepare($audit_logs_query);
 $audit_logs_stmt->execute();
 $audit_logs = $audit_logs_stmt->fetchAll(PDO::FETCH_ASSOC);
 
+// Add severity to each audit log
+foreach ($audit_logs as &$log) {
+    $log['severity'] = getSeverityFromAction($log['action']);
+}
+
 // Get total count for "View All" functionality
 $total_logs_query = "SELECT COUNT(*) as total FROM system_audit_logs";
 $total_logs_stmt = $db->prepare($total_logs_query);
 $total_logs_stmt->execute();
 $total_logs_count = $total_logs_stmt->fetch(PDO::FETCH_ASSOC)['total'];
-
 // Get Login History Logs from database (using system_audit_logs table)
 $login_history_query = "SELECT
                                 sal.timestamp,
@@ -916,7 +905,6 @@ $login_history_query = "SELECT
 $login_history_stmt = $db->prepare($login_history_query);
 $login_history_stmt->execute();
 $login_history_logs = $login_history_stmt->fetchAll(PDO::FETCH_ASSOC);
-
 // Get recent risks for dashboard display
 $recent_risks_query = "SELECT ri.id, ri.risk_name, ri.risk_description, ri.cause_of_risk, ri.department, 
                        ri.probability, ri.impact, ri.status, ri.created_at, ri.updated_at,
@@ -935,7 +923,6 @@ $recent_risks_query = "SELECT ri.id, ri.risk_name, ri.risk_description, ri.cause
 $recent_risks_stmt = $db->prepare($recent_risks_query);
 $recent_risks_stmt->execute();
 $recent_risks = $recent_risks_stmt->fetchAll(PDO::FETCH_ASSOC);
-
 // Get all risks for Database Management -> View All Risks with complete data
 $all_risks_query = "SELECT ri.id, ri.risk_name, ri.risk_description, ri.cause_of_risk, ri.department,
                     ri.probability, ri.impact, ri.status, ri.created_at, ri.updated_at,
@@ -950,7 +937,6 @@ $all_risks_query = "SELECT ri.id, ri.risk_name, ri.risk_description, ri.cause_of
                     LEFT JOIN users u ON ri.reported_by = u.id
                     WHERE ri.status != 'Deleted'
                     ORDER BY ri.created_at DESC";
-
 try {
     $all_risks_stmt = $db->prepare($all_risks_query);
     $all_risks_stmt->execute();
@@ -968,7 +954,6 @@ try {
     $all_risks = [];
     error_log("Error fetching all risks: " . $e->getMessage());
 }
-
 // Get deleted risks for Database Management -> Recycle Bin (for risks)
 $deleted_risks_query = "SELECT ri.*, u.full_name as reported_by_name
                         FROM risk_incidents ri
@@ -978,10 +963,8 @@ $deleted_risks_query = "SELECT ri.*, u.full_name as reported_by_name
 $deleted_risks_stmt = $db->prepare($deleted_risks_query);
 $deleted_risks_stmt->execute();
 $deleted_risks = $deleted_risks_stmt->fetchAll(PDO::FETCH_ASSOC);
-
 // Get current user info for header
 $user_info = getCurrentUser();
-
 // System Information
 $system_info = [
     'version' => $system_version,
@@ -989,6 +972,46 @@ $system_info = [
     'last_backup' => $last_backup,
     'storage_used' => $storage_used
 ];
+
+// Function to determine severity based on action
+function getSeverityFromAction($action) {
+    $criticalActions = [
+        'Risk Escalated',
+        'Risk Assessment Updated',
+        'Risk Status Changed'
+    ];
+    
+    $highActions = [
+        'Risk Treatment Plan Updated',
+        'Risk Classification Updated'
+    ];
+    
+    $mediumActions = [
+        'Risk Self-Assigned',
+        'Risk Assignment Accepted',
+        'Bulk Upload Completed'
+    ];
+    
+    foreach ($criticalActions as $criticalAction) {
+        if (strpos($action, $criticalAction) !== false) {
+            return 'critical';
+        }
+    }
+    
+    foreach ($highActions as $highAction) {
+        if (strpos($action, $highAction) !== false) {
+            return 'high';
+        }
+    }
+    
+    foreach ($mediumActions as $mediumAction) {
+        if (strpos($action, $mediumAction) !== false) {
+            return 'medium';
+        }
+    }
+    
+    return 'low';
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1816,6 +1839,35 @@ $system_info = [
             font-size: 0.9rem;
         }
         
+        /* Severity badge styles */
+        .severity-badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .severity-low {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .severity-medium {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .severity-high {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .severity-critical {
+            background: #721c24;
+            color: white;
+        }
+        
         /* Responsive adjustments */
         @media (max-width: 768px) {
             body {
@@ -2200,6 +2252,13 @@ $system_info = [
                         <label for="auditLogFilterAction">Filter by Action:</label>
                         <select id="auditLogFilterAction" onchange="filterAuditLogTable()">
                             <option value="">All Actions</option>
+                            <option value="Risk Self-Assigned">Risk Assignment</option>
+                            <option value="Risk Assessment Updated">Assessment Updates</option>
+                            <option value="Risk Classification Updated">Classification Updates</option>
+                            <option value="Risk Assignment Accepted">Assignment Acceptance</option>
+                            <option value="Risk Status Changed">Status Changes</option>
+                            <option value="Risk Treatment Plan Updated">Treatment Updates</option>
+                            <option value="Risk Escalated">Risk Escalations</option>
                             <option value="User Approved">Approved user</option>
                             <option value="User Suspended">Suspended user</option>
                             <option value="User Restored">Restored user</option>
@@ -2209,6 +2268,16 @@ $system_info = [
                             <option value="Failed Login">Failed login attempt</option>
                             <option value="Successful Logout">Successful log out</option>
                             <option value="Successful Login">Successful log in</option>
+                        </select>
+                    </div>
+                    <div class="audit-filters-group">
+                        <label for="auditLogFilterSeverity">Filter by Severity:</label>
+                        <select id="auditLogFilterSeverity" onchange="filterAuditLogTable()">
+                            <option value="">All Severities</option>
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                            <option value="critical">Critical</option>
                         </select>
                     </div>
                     <div class="audit-filters-group">
@@ -2227,6 +2296,7 @@ $system_info = [
                             <th>User</th>
                             <th>Action</th>
                             <th>Details</th>
+                            <th>Severity</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -2237,10 +2307,19 @@ $system_info = [
                                     <td><?php echo htmlspecialchars($log['user']); ?></td>
                                     <td><?php echo htmlspecialchars($log['action']); ?></td>
                                     <td><?php echo htmlspecialchars($log['details']); ?></td>
+                                    <td>
+                                        <?php if (!empty($log['severity'])): ?>
+                                            <span class="severity-badge severity-<?php echo strtolower($log['severity']); ?>">
+                                                <?php echo htmlspecialchars($log['severity']); ?>
+                                            </span>
+                                        <?php else: ?>
+                                            <span>-</span>
+                                        <?php endif; ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         <?php else: ?>
-                            <tr><td colspan="4" style="text-align: center;">No audit logs available.</td></tr>
+                            <tr><td colspan="5" style="text-align: center;">No audit logs available.</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>
@@ -2333,11 +2412,7 @@ $system_info = [
                     </button>
                 </div>
             </div>
-            
-            <!-- Removed Recycle Bin, Track Aging Risks, Export Data, and Risk Categories sections as requested -->
         </div>
-
-
 <!-- View All Risks Modal -->
 <div id="viewAllModal" class="view-all-modal">
     <div class="view-all-modal-content">
@@ -2413,7 +2488,6 @@ $system_info = [
         </div>
     </div>
 </div>
-
         <!-- 3. Notifications Tab -->
         <div id="notifications-tab" class="tab-content">
             <div class="card">
@@ -2460,7 +2534,6 @@ $system_info = [
                         </tr>
                     </table>
                 </div>
-
                 <div style="margin-top: 2rem;">
                     <h3>Database Backup</h3>
                     
@@ -2536,7 +2609,6 @@ $system_info = [
         </div>
     </div>
 </div>
-
 <!-- Audit Logs Modal -->
 <div id="auditModal" class="audit-modal">
     <div class="audit-modal-content">
@@ -2566,6 +2638,7 @@ $system_info = [
                             <th>User</th>
                             <th>Action</th>
                             <th>Details</th>
+                            <th>Severity</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -2577,7 +2650,6 @@ $system_info = [
         </div>
     </div>
 </div>
-
 <!-- Suspicious Activities Modal -->
 <div id="suspiciousActivitiesModal" class="audit-modal">
     <div class="audit-modal-content">
@@ -2617,7 +2689,6 @@ $system_info = [
         </div>
     </div>
 </div>
-
 <!-- Login History Modal -->
 <div id="loginHistoryModal" class="audit-modal">
     <div class="audit-modal-content">
@@ -2646,7 +2717,6 @@ $system_info = [
         </div>
     </div>
 </div>
-
 <script>
 function showTab(event, tabId) {
     event.preventDefault();
@@ -2662,39 +2732,38 @@ function showTab(event, tabId) {
     document.getElementById(tabId + "-tab").classList.add("active");
     event.currentTarget.classList.add("active");
 }
-
 function filterAuditLogTable() {
     var searchTerm = document.getElementById("auditLogSearchInput").value.toLowerCase();
     var userRoleFilter = document.getElementById("auditLogFilterUser").value.toLowerCase();
     var actionFilter = document.getElementById("auditLogFilterAction").value.toLowerCase();
+    var severityFilter = document.getElementById("auditLogFilterSeverity").value.toLowerCase();
     var fromDate = document.getElementById("auditLogFilterFromDate").value;
     var toDate = document.getElementById("auditLogFilterToDate").value;
     var table = document.getElementById("auditLogTable");
     var tr = table.getElementsByTagName("tr");
-
     for (var i = 1; i < tr.length; i++) {
         var td = tr[i].getElementsByTagName("td");
         var timestamp = td[0].textContent.toLowerCase();
         var user = td[1].textContent.toLowerCase();
         var action = td[2].textContent.toLowerCase();
         var details = td[3].textContent.toLowerCase();
+        var severity = td[4] ? td[4].textContent.toLowerCase() : '';
         var userRole = document.getElementById("auditLogFilterUser").value.toLowerCase();
         var actionType = document.getElementById("auditLogFilterAction").value.toLowerCase();
-
+        var severityLevel = document.getElementById("auditLogFilterSeverity").value.toLowerCase();
         var showRow = true;
-
         if (searchTerm && !(user.includes(searchTerm) || action.includes(searchTerm) || details.includes(searchTerm) || timestamp.includes(searchTerm))) {
             showRow = false;
         }
-
         if (userRoleFilter && !user.includes(userRoleFilter)) {
             showRow = false;
         }
-
         if (actionFilter && !action.includes(actionFilter)) {
             showRow = false;
         }
-
+        if (severityFilter && !severity.includes(severityFilter)) {
+            showRow = false;
+        }
         if (fromDate) {
             var logDate = new Date(timestamp);
             var from = new Date(fromDate);
@@ -2702,7 +2771,6 @@ function filterAuditLogTable() {
                 showRow = false;
             }
         }
-
         if (toDate) {
             var logDate = new Date(timestamp);
             var to = new Date(toDate);
@@ -2710,7 +2778,6 @@ function filterAuditLogTable() {
                 showRow = false;
             }
         }
-
         if (showRow) {
             tr[i].style.display = "";
         } else {
@@ -2718,97 +2785,86 @@ function filterAuditLogTable() {
         }
     }
 }
-
 function exportAuditLogsWithFilters() {
     var searchTerm = document.getElementById("auditLogSearchInput").value;
     var userRoleFilter = document.getElementById("auditLogFilterUser").value;
     var actionFilter = document.getElementById("auditLogFilterAction").value;
+    var severityFilter = document.getElementById("auditLogFilterSeverity").value;
     var fromDate = document.getElementById("auditLogFilterFromDate").value;
     var toDate = document.getElementById("auditLogFilterToDate").value;
-
     // Create a form dynamically
     var form = document.createElement('form');
     form.method = 'POST';
     form.action = 'admin_dashboard.php'; // Ensure this is the correct path to your script
     form.style.display = 'none';
-
     // Add the action to trigger the export
     var actionInput = document.createElement('input');
     actionInput.type = 'hidden';
     actionInput.name = 'ajax_action';
     actionInput.value = 'export_audit_logs';
     form.appendChild(actionInput);
-
     // Add filter parameters
     var searchTermInput = document.createElement('input');
     searchTermInput.type = 'hidden';
     searchTermInput.name = 'search_term';
     searchTermInput.value = searchTerm;
     form.appendChild(searchTermInput);
-
     var userRoleFilterInput = document.createElement('input');
     userRoleFilterInput.type = 'hidden';
     userRoleFilterInput.name = 'user_role_filter';
     userRoleFilterInput.value = userRoleFilter;
     form.appendChild(userRoleFilterInput);
-
     var actionFilterInput = document.createElement('input');
     actionFilterInput.type = 'hidden';
     actionFilterInput.name = 'action_filter';
     actionFilterInput.value = actionFilter;
     form.appendChild(actionFilterInput);
-
+    var severityFilterInput = document.createElement('input');
+    severityFilterInput.type = 'hidden';
+    severityFilterInput.name = 'severity_filter';
+    severityFilterInput.value = severityFilter;
+    form.appendChild(severityFilterInput);
     var fromDateInput = document.createElement('input');
     fromDateInput.type = 'hidden';
     fromDateInput.name = 'from_date';
     fromDateInput.value = fromDate;
     form.appendChild(fromDateInput);
-
     var toDateInput = document.createElement('input');
     toDateInput.type = 'hidden';
     toDateInput.name = 'to_date';
     toDateInput.value = toDate;
     form.appendChild(toDateInput);
-
     // Append the form to the document and submit it
     document.body.appendChild(form);
     form.submit();
 }
-
 function openAuditModal() {
     document.getElementById('auditModal').classList.add('show');
 }
-
 function closeAuditModal() {
     document.getElementById('auditModal').classList.remove('show');
 }
-
 function showSuspiciousActivitiesModal() {
     document.getElementById('suspiciousActivitiesModal').classList.add('show');
     loadSuspiciousActivities();
 }
-
 function closeSuspiciousActivitiesModal() {
     document.getElementById('suspiciousActivitiesModal').classList.remove('show');
 }
-
 function showLoginHistoryModal() {
     document.getElementById('loginHistoryModal').classList.add('show');
     loadLoginHistory();
 }
-
 function closeLoginHistoryModal() {
     document.getElementById('loginHistoryModal').classList.remove('show');
 }
-
 function loadSuspiciousActivities(limit = 50, offset = 0, severity = '') {
     var table = document.getElementById('suspiciousActivitiesTable');
     var tbody = table.querySelector('tbody');
     var loadingDiv = document.querySelector('#suspiciousActivitiesModal .audit-loading');
-
     tbody.innerHTML = '';
     loadingDiv.style.display = 'block';
-
+    
     var xhr = new XMLHttpRequest();
     xhr.open('POST', 'admin_dashboard.php', true);
     xhr.setRequestHeader('Content-Type', 'application/json');
@@ -2824,14 +2880,12 @@ function loadSuspiciousActivities(limit = 50, offset = 0, severity = '') {
                         row.insertCell().textContent = activity.user;
                         row.insertCell().textContent = activity.action;
                         row.insertCell().textContent = activity.details;
-
                         // Severity cell
                         var severityCell = row.insertCell();
                         var severityBadge = document.createElement('span');
                         severityBadge.className = 'audit-badge audit-badge-' + activity.severity;
                         severityBadge.textContent = activity.severity;
                         severityCell.appendChild(severityBadge);
-
                         // Actions cell
                         var actionsCell = row.insertCell();
                         if (activity.is_resolved == 0) {
@@ -2884,7 +2938,6 @@ function loadSuspiciousActivities(limit = 50, offset = 0, severity = '') {
         severity: document.getElementById('severityFilter').value
     }));
 }
-
 function resolveSuspiciousActivity(activityId, row) {
     var xhr = new XMLHttpRequest();
     xhr.open('POST', 'admin_dashboard.php', true);
@@ -2910,15 +2963,13 @@ function resolveSuspiciousActivity(activityId, row) {
         activity_id: activityId
     }));
 }
-
 function loadLoginHistory(limit = 50, offset = 0) {
     var table = document.getElementById('loginHistoryTable');
     var tbody = table.querySelector('tbody');
     var loadingDiv = document.querySelector('#loginHistoryModal .audit-loading');
-
     tbody.innerHTML = '';
     loadingDiv.style.display = 'block';
-
+    
     var xhr = new XMLHttpRequest();
     xhr.open('POST', 'admin_dashboard.php', true);
     xhr.setRequestHeader('Content-Type', 'application/json');
@@ -2973,37 +3024,28 @@ function loadLoginHistory(limit = 50, offset = 0) {
         offset: offset
     }));
 }
-
 function openViewAllModal() {
     document.getElementById('viewAllModal').classList.add('show');
 }
-
 function closeViewAllModal() {
     document.getElementById('viewAllModal').classList.remove('show');
 }
-
 function handleAjaxUpload(event) {
     event.preventDefault();
-
     var form = document.getElementById('bulkUploadForm');
     var fileInput = document.getElementById('bulk_file');
     var uploadStatus = document.getElementById('uploadStatus');
-
     if (fileInput.files.length === 0) {
         uploadStatus.innerHTML = '<div class="error">Please select a file to upload.</div>';
         return false;
     }
-
     var file = fileInput.files[0];
     var formData = new FormData();
     formData.append('bulk_file', file);
     formData.append('ajax_upload', '1');
-
     uploadStatus.innerHTML = '<div class="info">Uploading...</div>';
-
     var xhr = new XMLHttpRequest();
     xhr.open('POST', 'admin_dashboard.php', true);
-    xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.onload = function() {
         if (xhr.status === 200) {
             var response = JSON.parse(xhr.responseText);
@@ -3020,51 +3062,40 @@ function handleAjaxUpload(event) {
         uploadStatus.innerHTML = '<div class="error">Upload failed. Please check your connection.</div>';
     };
     xhr.send(formData);
-
     return false;
 }
-
 function downloadTemplate() {
     window.location.href = '?ajax_download_template=1';
 }
-
 function filterModalRisks() {
     var fromDate = document.getElementById("modalDateFrom").value;
     var toDate = document.getElementById("modalDateTo").value;
     var department = document.getElementById("modalDepartmentFilter").value;
-
     var table = document.getElementById("modalRiskTable");
     var rows = table.getElementsByTagName("tr");
-
     for (var i = 1; i < rows.length; i++) {
         var row = rows[i];
         var dateCell = row.getElementsByTagName("td")[7];
         var departmentCell = row.getElementsByTagName("td")[2];
-
         if (dateCell && departmentCell) {
             var rowDate = new Date(dateCell.textContent);
             var rowDepartment = departmentCell.textContent;
-
             var showRow = true;
-
             if (fromDate) {
                 var from = new Date(fromDate);
                 if (rowDate < from) {
                     showRow = false;
                 }
             }
-
             if (toDate) {
                 var to = new Date(toDate);
                 if (rowDate > to) {
                     showRow = false;
                 }
             }
-
             if (department && rowDepartment !== department) {
                 showRow = false;
             }
-
             if (showRow) {
                 row.style.display = "";
             } else {
@@ -3073,26 +3104,21 @@ function filterModalRisks() {
         }
     }
 }
-
 function clearFilters() {
     document.getElementById("modalDateFrom").value = "";
     document.getElementById("modalDateTo").value = "";
     document.getElementById("modalDepartmentFilter").value = "";
     filterModalRisks();
 }
-
 function downloadFilteredRisks() {
     var fromDate = document.getElementById("modalDateFrom").value;
     var toDate = document.getElementById("modalDateTo").value;
     var department = document.getElementById("modalDepartmentFilter").value;
-
     // Prepare data for download
     var csvContent = "data:text/csv;charset=utf-8,";
     csvContent += "Risk ID,Risk Name,Department,Risk Score,Risk Level,Status,Reported By,Date\n";
-
     var table = document.getElementById("modalRiskTable");
     var rows = table.getElementsByTagName("tr");
-
     for (var i = 1; i < rows.length; i++) {
         var row = rows[i];
         if (row.style.display !== "none") {
@@ -3104,17 +3130,14 @@ function downloadFilteredRisks() {
             csvContent += rowData.join(",") + "\n";
         }
     }
-
     // Create download link
     var encodedUri = encodeURI(csvContent);
     var link = document.createElement("a");
     link.setAttribute("href", encodedUri);
     link.setAttribute("download", "filtered_risks.csv");
     document.body.appendChild(link); // Required for FF
-
     link.click(); // This will download the CSV file
 }
-
 function handleBackupSubmit(event) {
     // Add hidden input to maintain settings tab after form submission
     var form = event.target;
@@ -3125,55 +3148,52 @@ function handleBackupSubmit(event) {
     form.appendChild(hiddenInput);
     return true;
 }
-
 document.addEventListener('DOMContentLoaded', function() {
     <?php if (isset($_POST['stay_in_settings']) || isset($success_message) || isset($error_message)): ?>
         // Stay in settings tab after backup operation
-        showTab({preventDefault: function(){}}, 'settings');
+        showTab({preventDefault: function(){}, currentTarget: document.querySelector('.nav-item a[href="#"]')}, 'settings');
     <?php endif; ?>
 });
-
 function showDatabaseTab() {
     window.location.href = 'admin_dashboard.php';
     setTimeout(function() {
         if (window.showTab) {
-            showTab({preventDefault: function(){}}, 'database');
+            showTab({preventDefault: function(){}, currentTarget: document.querySelector('.nav-item a[href="#"]')}, 'database');
         }
     }, 100);
 }
-
 function showNotificationsTab() {
     window.location.href = 'admin_dashboard.php';
     setTimeout(function() {
         if (window.showTab) {
-            showTab({preventDefault: function(){}}, 'notifications');
+            showTab({preventDefault: function(){}, currentTarget: document.querySelector('.nav-item a[href="#"]')}, 'notifications');
         }
     }, 100);
 }
-
 function showSettingsTab() {
     window.location.href = 'admin_dashboard.php';
     setTimeout(function() {
         if (window.showTab) {
-            showTab({preventDefault: function(){}}, 'settings');
+            showTab({preventDefault: function(){}, currentTarget: document.querySelector('.nav-item a[href="#"]')}, 'settings');
         }
     }, 100);
 }
-
 function handleBackupSubmit(event) {
     // Let the form submit normally, but ensure we stay in settings tab
     setTimeout(function() {
-        showTab('settings');
+        showTab({preventDefault: function(){}, currentTarget: document.querySelector('.nav-item a[href="#"]')}, 'settings');
     }, 100);
     return true;
 }
-
 function downloadLatestBackup() {
     <?php if (isset($backup_filename)): ?>
         window.location.href = '?download_backup=1&file=<?php echo urlencode($backup_filename); ?>';
     <?php else: ?>
         alert('No backup file available. Please create a backup first.');
     <?php endif; ?>
+}
+function openChatBot() {
+    window.open('chatbot.php', '_blank');
 }
 </script>
 </body>
