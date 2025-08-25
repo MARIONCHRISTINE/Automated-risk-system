@@ -8,6 +8,7 @@ requireRole('admin');
 include_once 'config/database.php';
 $database = new Database();
 $db = $database->getConnection();
+
 // Email Configuration Class - FIXED GMAIL SMTP SETTINGS
 class EmailConfig {
     // Basic Email Settings
@@ -15,20 +16,24 @@ class EmailConfig {
     const FROM_NAME = 'Airtel Risk Management System';
     const SUPPORT_EMAIL = 'support@yourcompany.com';
     const COMPANY_NAME = 'Airtel Risk Management';
+    
     // System URLs
     const LOGIN_URL = 'http://localhost/Automated-risk-system-1/login.php';
     const SYSTEM_URL = 'http://localhost/Automated-risk-system-1';
+    
     // SMTP Settings - CORRECTED FOR GMAIL
     const SMTP_HOST = 'smtp.gmail.com';
     const SMTP_PORT = 587;
     const SMTP_USERNAME = 'mauriceokoth952@gmail.com';
     const SMTP_PASSWORD = 'dein nmuj btpc cxoe'; // Your Gmail App Password
     const SMTP_ENCRYPTION = 'tls';
+    
     // Email Templates Settings
     const COMPANY_LOGO = 'src link rel href="image.png"';
     const PRIMARY_COLOR = '#E60012';
     const SECONDARY_COLOR = '#f8f9fa';
 }
+
 // Create necessary tables for session management and account locking
 try {
     // Active Sessions Table
@@ -53,6 +58,7 @@ try {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )";
     $db->exec($create_sessions_table);
+    
     // Account Lockouts Table
     $create_lockouts_table = "
     CREATE TABLE IF NOT EXISTS account_lockouts (
@@ -74,6 +80,7 @@ try {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )";
     $db->exec($create_lockouts_table);
+    
     // Security Settings Table
     $create_security_settings_table = "
     CREATE TABLE IF NOT EXISTS security_settings (
@@ -86,6 +93,7 @@ try {
         FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
     )";
     $db->exec($create_security_settings_table);
+    
     // Insert default security settings
     $default_settings = [
         ['max_failed_attempts', '5', 'Maximum failed login attempts before account lockout'],
@@ -94,6 +102,7 @@ try {
         ['session_timeout', '30', 'Session timeout in minutes'],
         ['max_concurrent_sessions', '3', 'Maximum concurrent sessions per user']
     ];
+    
     foreach ($default_settings as $setting) {
         $check_setting = $db->prepare("SELECT COUNT(*) FROM security_settings WHERE setting_name = ?");
         $check_setting->execute([$setting[0]]);
@@ -105,6 +114,90 @@ try {
 } catch (Exception $e) {
     error_log("Database setup error: " . $e->getMessage());
 }
+
+// Track user session function
+function trackUserSession($db, $user_id) {
+    // Get user details
+    $user_query = "SELECT id, email, full_name, role FROM users WHERE id = ?";
+    $user_stmt = $db->prepare($user_query);
+    $user_stmt->execute([$user_id]);
+    $user = $user_stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$user) {
+        return false;
+    }
+    
+    $session_id = session_id();
+    $ip_address = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+    $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown';
+    
+    // Check if session already exists
+    $check_query = "SELECT id FROM active_sessions WHERE session_id = ?";
+    $check_stmt = $db->prepare($check_query);
+    $check_stmt->execute([$session_id]);
+    
+    if ($check_stmt->rowCount() > 0) {
+        // Update existing session
+        $update_query = "UPDATE active_sessions SET 
+                        user_id = ?, 
+                        user_email = ?, 
+                        user_name = ?, 
+                        user_role = ?, 
+                        ip_address = ?,
+                        user_agent = ?,
+                        last_activity = NOW(),
+                        is_active = 1,
+                        logout_time = NULL
+                        WHERE session_id = ?";
+        $update_stmt = $db->prepare($update_query);
+        return $update_stmt->execute([
+            $user['id'],
+            $user['email'],
+            $user['full_name'],
+            $user['role'],
+            $ip_address,
+            $user_agent,
+            $session_id
+        ]);
+    } else {
+        // Insert new session record
+        $insert_query = "INSERT INTO active_sessions 
+                        (user_id, session_id, user_email, user_name, user_role, ip_address, user_agent, login_time, last_activity) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+        $insert_stmt = $db->prepare($insert_query);
+        return $insert_stmt->execute([
+            $user['id'],
+            $session_id,
+            $user['email'],
+            $user['full_name'],
+            $user['role'],
+            $ip_address,
+            $user_agent
+        ]);
+    }
+}
+
+// Clean up expired sessions
+function cleanupExpiredSessions($db) {
+    $timeout_minutes = getSecuritySetting($db, 'session_timeout', 30);
+    
+    // Mark expired sessions as inactive
+    $update_query = "UPDATE active_sessions SET 
+                    is_active = 0, 
+                    logout_time = NOW() 
+                    WHERE logout_time IS NULL 
+                    AND TIMESTAMPDIFF(MINUTE, last_activity, NOW()) > ?";
+    $update_stmt = $db->prepare($update_query);
+    $update_stmt->execute([$timeout_minutes]);
+    
+    // Delete old session records (keep for 30 days)
+    $delete_query = "DELETE FROM active_sessions 
+                    WHERE (logout_time IS NOT NULL AND TIMESTAMPDIFF(DAY, logout_time, NOW()) > 30)
+                    OR (is_active = 0 AND TIMESTAMPDIFF(DAY, last_activity, NOW()) > 30)";
+    $delete_stmt = $db->prepare($delete_query);
+    return $delete_stmt->execute();
+}
+
 // Get real session and lockout data
 function getActiveSessions($db) {
     $timeout_minutes = getSecuritySetting($db, 'session_timeout', 30);
@@ -124,6 +217,7 @@ function getActiveSessions($db) {
     $stmt->execute([$timeout_minutes]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
+
 function getLockedAccounts($db) {
     $query = "SELECT al.*, u.full_name,
                      TIMESTAMPDIFF(MINUTE, al.locked_at, NOW()) as locked_minutes,
@@ -137,6 +231,7 @@ function getLockedAccounts($db) {
     $stmt->execute();
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
+
 function getSecuritySetting($db, $setting_name, $default_value) {
     $query = "SELECT setting_value FROM security_settings WHERE setting_name = ?";
     $stmt = $db->prepare($query);
@@ -144,6 +239,17 @@ function getSecuritySetting($db, $setting_name, $default_value) {
     $result = $stmt->fetchColumn();
     return $result !== false ? (int)$result : $default_value;
 }
+
+// Track current user session
+if (isset($_SESSION['user_id']) && !empty($_SESSION['user_id'])) {
+    trackUserSession($db, $_SESSION['user_id']);
+}
+
+// Clean up expired sessions (1% chance on each page load)
+if (rand(1, 100) <= 1) {
+    cleanupExpiredSessions($db);
+}
+
 // Handle AJAX requests for session management
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
     header('Content-Type: application/json');
@@ -203,6 +309,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             exit;
     }
 }
+
 // Get current stats for display
 $active_sessions = getActiveSessions($db);
 $locked_accounts = getLockedAccounts($db);
@@ -212,6 +319,7 @@ $locked_accounts_count = count($locked_accounts);
 $max_failed_attempts = getSecuritySetting($db, 'max_failed_attempts', 5);
 $lockout_duration = getSecuritySetting($db, 'lockout_duration', 15);
 $auto_unlock = getSecuritySetting($db, 'auto_unlock', 1);
+
 // Download and install PHPMailer automatically if not present
 function ensurePHPMailerExists() {
     $phpmailerPath = __DIR__ . '/PHPMailer';
@@ -242,7 +350,8 @@ function ensurePHPMailerExists() {
     }
     return false;
 }
-// COMPLETELY REWRITTEN Email sending function - CRITICAL FIX FOR RECIPIENT EMAIL
+
+// Email sending function - CRITICAL FIX FOR RECIPIENT EMAIL
 function sendInvitationEmail($recipientEmail, $recipientName, $role, $department, $defaultPassword) {
     // CRITICAL DEBUG: Log all parameters at the start
     error_log("=== EMAIL SENDING DEBUG START ===");
@@ -270,6 +379,7 @@ function sendInvitationEmail($recipientEmail, $recipientName, $role, $department
         error_log("PHPMailer not available, using native PHP mail");
         return sendWithNativePHP($recipientEmail, $recipientName, $role, $department, $defaultPassword);
     }
+    
     // Create a new PHPMailer instance
     $mail = new PHPMailer(true);
     try {
@@ -290,52 +400,47 @@ function sendInvitationEmail($recipientEmail, $recipientName, $role, $department
         $mail->Password = EmailConfig::SMTP_PASSWORD;
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port = EmailConfig::SMTP_PORT;
-       
-        // Enable debug output for troubleshooting
-        $mail->SMTPDebug = 2; // Enable verbose debug output
-        $mail->Debugoutput = function($str, $level) {
-            error_log("PHPMailer DEBUG: " . $str);
-        };
-       
-        // CRITICAL: Set sender information
-        $mail->setFrom(EmailConfig::FROM_EMAIL, EmailConfig::FROM_NAME);
-        error_log("SENDER SET TO: " . EmailConfig::FROM_EMAIL . " (" . EmailConfig::FROM_NAME . ")");
-       
+        
+        // CRITICAL FIX: Set sender information properly to prevent Gmail from sending copy to sender
+        $mail->Sender = EmailConfig::FROM_EMAIL; // Set envelope sender
+        $mail->From = EmailConfig::FROM_EMAIL;
+        $mail->FromName = EmailConfig::FROM_NAME;
+        
         // CRITICAL: Add recipient - THIS IS THE KEY FIX
         error_log("DEBUG: About to add recipient: $recipientEmail ($recipientName)");
         $mail->addAddress($recipientEmail, $recipientName);
         error_log("RECIPIENT ADDED TO PHPMAILER: " . $recipientEmail . " (" . $recipientName . ")");
-       
+        
         // Set reply-to
         $mail->addReplyTo(EmailConfig::SUPPORT_EMAIL, EmailConfig::COMPANY_NAME . ' Support');
-       
+        
         // CRITICAL: Verify the recipient was added correctly
         $recipients = $mail->getToAddresses();
         error_log("PHPMAILER TO ADDRESSES: " . print_r($recipients, true));
-       
+        
         // Content settings
         $mail->isHTML(true);
         $mail->Subject = "Invitation to " . EmailConfig::COMPANY_NAME . " System";
         $mail->CharSet = 'UTF-8';
-       
+        
         // Create email body
         $mail->Body = createEmailTemplate($recipientName, $recipientEmail, $role, $department, $defaultPassword);
-       
+        
         // CRITICAL: Add custom headers to ensure proper delivery
         $mail->addCustomHeader('X-Recipient-Email', $recipientEmail);
         $mail->addCustomHeader('X-Recipient-Name', $recipientName);
         $mail->addCustomHeader('X-Mailer', 'Airtel Risk Management System');
-       
+        
         // Log final email details before sending
         error_log("FINAL EMAIL DETAILS BEFORE SENDING:");
         error_log("- Subject: " . $mail->Subject);
         error_log("- From: " . $mail->From . " (" . $mail->FromName . ")");
         error_log("- To: " . $recipientEmail . " (" . $recipientName . ")");
         error_log("- Reply-To: " . EmailConfig::SUPPORT_EMAIL);
-       
+        
         // Send the email
         $result = $mail->send();
-       
+        
         if ($result) {
             error_log("SUCCESS - Email sent successfully to: " . $recipientEmail);
             error_log("=== EMAIL SENDING DEBUG END (SUCCESS) ===");
@@ -345,100 +450,433 @@ function sendInvitationEmail($recipientEmail, $recipientName, $role, $department
             error_log("=== EMAIL SENDING DEBUG END (FAILED) ===");
             return false;
         }
-       
+        
     } catch (Exception $e) {
         error_log("PHPMailer Exception: " . $e->getMessage());
         error_log("PHPMailer ErrorInfo: " . $mail->ErrorInfo);
         error_log("Failed recipient: " . $recipientEmail);
         error_log("=== EMAIL SENDING DEBUG END (EXCEPTION) ===");
-       
+        
         // Fallback to native PHP mail
         return sendWithNativePHP($recipientEmail, $recipientName, $role, $department, $defaultPassword);
     }
 }
-// Create email template
+
+// Create email template - MODERN PROFESSIONAL DESIGN
 function createEmailTemplate($recipientName, $recipientEmail, $role, $department, $defaultPassword) {
-    return "
-    <html>
+    return '
+    <!DOCTYPE html>
+    <html lang="en">
     <head>
-        <title>Welcome to " . EmailConfig::COMPANY_NAME . "</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Welcome to ' . EmailConfig::COMPANY_NAME . '</title>
         <style>
-            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; }
-            .header { background: " . EmailConfig::PRIMARY_COLOR . "; color: white; padding: 20px; text-align: center; }
-            .content { padding: 20px; background: " . EmailConfig::SECONDARY_COLOR . "; }
-            .credentials { background: #fff; padding: 15px; border-left: 4px solid " . EmailConfig::PRIMARY_COLOR . "; margin: 20px 0; border-radius: 5px; }
-            .footer { background: #333; color: white; padding: 15px; text-align: center; font-size: 12px; }
-            .btn { background: " . EmailConfig::PRIMARY_COLOR . "; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px 0; }
-            .btn:hover { background: #B8000E; }
-            .password-box { background: #f8f9fa; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 16px; font-weight: bold; color: #E60012; }
-            .debug-info { background: #e7f3ff; border: 1px solid #b3d9ff; padding: 10px; margin: 10px 0; font-size: 12px; }
+            /* Modern Professional Email Template Styles */
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+                background-color: #f5f7fa;
+                color: #2c3e50;
+                line-height: 1.6;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }
+            
+            .email-container {
+                max-width: 600px;
+                margin: 20px auto;
+                background-color: #ffffff;
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            }
+            
+            .email-header {
+                background: linear-gradient(135deg, ' . EmailConfig::PRIMARY_COLOR . ' 0%, #c7000f 100%);
+                color: white;
+                padding: 40px 30px;
+                text-align: center;
+                position: relative;
+            }
+            
+            .email-header::before {
+                content: "";
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: url("data:image/svg+xml,%3Csvg width=\'100\' height=\'100\' viewBox=\'0 0 100 100\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z\' fill=\'rgba(255,255,255,0.1)\' fill-rule=\'evenodd\'/%3E%3C/svg%3E") no-repeat;
+                opacity: 0.2;
+            }
+            
+            .email-header h1 {
+                font-size: 28px;
+                font-weight: 700;
+                margin-bottom: 10px;
+                position: relative;
+                z-index: 1;
+            }
+            
+            .email-header p {
+                font-size: 16px;
+                opacity: 0.9;
+                position: relative;
+                z-index: 1;
+            }
+            
+            .email-body {
+                padding: 40px 30px;
+            }
+            
+            .welcome-message {
+                font-size: 24px;
+                font-weight: 600;
+                color: #2c3e50;
+                margin-bottom: 20px;
+            }
+            
+            .intro-text {
+                font-size: 16px;
+                color: #5a6c7d;
+                margin-bottom: 30px;
+            }
+            
+            .credentials-card {
+                background-color: #f8f9fa;
+                border-radius: 10px;
+                padding: 25px;
+                margin-bottom: 30px;
+                border-left: 4px solid ' . EmailConfig::PRIMARY_COLOR . ';
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            }
+            
+            .credentials-card h3 {
+                font-size: 18px;
+                font-weight: 600;
+                color: #2c3e50;
+                margin-bottom: 20px;
+                display: flex;
+                align-items: center;
+            }
+            
+            .credentials-card h3 i {
+                margin-right: 10px;
+                color: ' . EmailConfig::PRIMARY_COLOR . ';
+            }
+            
+            .credential-item {
+                display: flex;
+                margin-bottom: 15px;
+                align-items: flex-start;
+            }
+            
+            .credential-label {
+                font-weight: 600;
+                color: #5a6c7d;
+                width: 120px;
+                flex-shrink: 0;
+            }
+            
+            .credential-value {
+                color: #2c3e50;
+                flex-grow: 1;
+            }
+            
+            .password-box {
+                background-color: #ffffff;
+                border: 1px solid #e1e5e9;
+                border-radius: 6px;
+                padding: 12px 15px;
+                font-family: "Courier New", monospace;
+                font-size: 16px;
+                font-weight: bold;
+                color: ' . EmailConfig::PRIMARY_COLOR . ';
+                letter-spacing: 1px;
+                margin-top: 5px;
+            }
+            
+            .steps-section {
+                margin-bottom: 30px;
+            }
+            
+            .steps-section h3 {
+                font-size: 18px;
+                font-weight: 600;
+                color: #2c3e50;
+                margin-bottom: 20px;
+                display: flex;
+                align-items: center;
+            }
+            
+            .steps-section h3 i {
+                margin-right: 10px;
+                color: ' . EmailConfig::PRIMARY_COLOR . ';
+            }
+            
+            .steps-list {
+                counter-reset: step-counter;
+                list-style-type: none;
+                padding-left: 0;
+            }
+            
+            .step-item {
+                position: relative;
+                padding-left: 40px;
+                margin-bottom: 15px;
+                counter-increment: step-counter;
+            }
+            
+            .step-item::before {
+                content: counter(step-counter);
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 28px;
+                height: 28px;
+                background-color: ' . EmailConfig::PRIMARY_COLOR . ';
+                color: white;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            
+            .cta-button {
+                display: inline-block;
+                background: linear-gradient(135deg, ' . EmailConfig::PRIMARY_COLOR . ' 0%, #c7000f 100%);
+                color: white;
+                text-decoration: none;
+                padding: 14px 28px;
+                border-radius: 50px;
+                font-weight: 600;
+                font-size: 16px;
+                text-align: center;
+                margin: 20px 0;
+                box-shadow: 0 4px 15px rgba(230, 0, 18, 0.3);
+                transition: all 0.3s ease;
+            }
+            
+            .cta-button:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(230, 0, 18, 0.4);
+            }
+            
+            .security-notice {
+                background-color: #fff8e1;
+                border-left: 4px solid #ffc107;
+                border-radius: 8px;
+                padding: 20px;
+                margin-bottom: 30px;
+            }
+            
+            .security-notice h4 {
+                font-size: 16px;
+                font-weight: 600;
+                color: #856404;
+                margin-bottom: 15px;
+                display: flex;
+                align-items: center;
+            }
+            
+            .security-notice h4 i {
+                margin-right: 10px;
+            }
+            
+            .security-notice ul {
+                padding-left: 20px;
+                margin: 0;
+            }
+            
+            .security-notice li {
+                margin-bottom: 8px;
+                color: #856404;
+            }
+            
+            .contact-info {
+                font-size: 16px;
+                color: #5a6c7d;
+                margin-bottom: 30px;
+            }
+            
+            .contact-info a {
+                color: ' . EmailConfig::PRIMARY_COLOR . ';
+                text-decoration: none;
+                font-weight: 500;
+            }
+            
+            .contact-info a:hover {
+                text-decoration: underline;
+            }
+            
+            .email-footer {
+                background-color: #2c3e50;
+                color: rgba(255, 255, 255, 0.7);
+                padding: 30px;
+                text-align: center;
+                font-size: 14px;
+            }
+            
+            .email-footer p {
+                margin-bottom: 10px;
+            }
+            
+            .email-footer a {
+                color: rgba(255, 255, 255, 0.9);
+                text-decoration: none;
+            }
+            
+            .email-footer a:hover {
+                text-decoration: underline;
+            }
+            
+            .email-footer .company-name {
+                font-weight: 600;
+                color: white;
+            }
+            
+            .email-footer .system-url {
+                color: rgba(255, 255, 255, 0.7);
+                font-size: 12px;
+                margin-top: 15px;
+            }
+            
+            .email-footer .recipient-info {
+                color: rgba(255, 255, 255, 0.7);
+                font-size: 12px;
+                margin-top: 10px;
+            }
+            
+            /* Responsive styles */
+            @media only screen and (max-width: 600px) {
+                .email-container {
+                    width: 100%;
+                    border-radius: 0;
+                }
+                
+                .email-header {
+                    padding: 30px 20px;
+                }
+                
+                .email-header h1 {
+                    font-size: 24px;
+                }
+                
+                .email-body {
+                    padding: 30px 20px;
+                }
+                
+                .credential-item {
+                    flex-direction: column;
+                }
+                
+                .credential-label {
+                    width: 100%;
+                    margin-bottom: 5px;
+                }
+            }
         </style>
     </head>
     <body>
-        <div class='debug-info'>
-            <strong>DEBUG INFO:</strong><br>
-            This email should be delivered to: " . htmlspecialchars($recipientEmail) . "<br>
-            Recipient Name: " . htmlspecialchars($recipientName) . "<br>
-            Generated at: " . date('Y-m-d H:i:s') . "
-        </div>
-       
-        <div class='header'>
-            <h1>🎉 Welcome to " . EmailConfig::COMPANY_NAME . "</h1>
-        </div>
-       
-        <div class='content'>
-            <h2>Hello " . htmlspecialchars($recipientName) . ",</h2>
-           
-            <p>Congratulations! You have been successfully invited to join the " . EmailConfig::COMPANY_NAME . " system.</p>
-           
-            <div class='credentials'>
-                <h3>📋 Your Account Details:</h3>
-                <p><strong>👤 Name:</strong> " . htmlspecialchars($recipientName) . "</p>
-                <p><strong>📧 Email:</strong> " . htmlspecialchars($recipientEmail) . "</p>
-                <p><strong>🏷️ Role:</strong> " . ucfirst(str_replace('_', ' ', $role)) . "</p>
-                <p><strong>🏢 Department:</strong> " . htmlspecialchars($department) . "</p>
-                <p><strong>🔑 Temporary Password:</strong></p>
-                <div class='password-box'>" . htmlspecialchars($defaultPassword) . "</div>
+        <div class="email-container">
+            <div class="email-header">
+                <h1>Welcome to ' . EmailConfig::COMPANY_NAME . '</h1>
+                <p>Your account has been successfully created</p>
             </div>
-           
-            <h3>🚀 Getting Started:</h3>
-            <ol>
-                <li>Click the login button below to access the system</li>
-                <li>Use your email address and the temporary password provided above</li>
-                <li>You will be required to change your password on first login for security</li>
-            </ol>
-           
-            <p style='text-align: center;'>
-                <a href='" . EmailConfig::LOGIN_URL . "' class='btn'>🔐 Login to System</a>
-            </p>
-           
-            <div style='background: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0;'>
-                <h4>🔒 Important Security Notes:</h4>
-                <ul>
-                    <li>Please change your password immediately after first login</li>
-                    <li>Do not share your login credentials with anyone</li>
-                    <li>If you did not expect this invitation, please contact the system administrator</li>
-                    <li>This email contains sensitive information - please delete it after logging in</li>
-                </ul>
+            
+            <div class="email-body">
+                <h2 class="welcome-message">Hello ' . htmlspecialchars($recipientName) . ',</h2>
+                <p class="intro-text">
+                    Congratulations! You have been successfully invited to join the ' . EmailConfig::COMPANY_NAME . ' system. 
+                    Your account is now ready and you can access the platform using the credentials provided below.
+                </p>
+                
+                <div class="credentials-card">
+                    <h3><i class="fas fa-user-shield"></i> Your Account Details</h3>
+                    
+                    <div class="credential-item">
+                        <div class="credential-label">Full Name:</div>
+                        <div class="credential-value">' . htmlspecialchars($recipientName) . '</div>
+                    </div>
+                    
+                    <div class="credential-item">
+                        <div class="credential-label">Email Address:</div>
+                        <div class="credential-value">' . htmlspecialchars($recipientEmail) . '</div>
+                    </div>
+                    
+                    <div class="credential-item">
+                        <div class="credential-label">Role:</div>
+                        <div class="credential-value">' . ucfirst(str_replace('_', ' ', $role)) . '</div>
+                    </div>
+                    
+                    <div class="credential-item">
+                        <div class="credential-label">Department:</div>
+                        <div class="credential-value">' . htmlspecialchars($department) . '</div>
+                    </div>
+                    
+                    <div class="credential-item">
+                        <div class="credential-label">Temporary Password:</div>
+                        <div class="credential-value">
+                            <div class="password-box">' . htmlspecialchars($defaultPassword) . '</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="steps-section">
+                    <h3><i class="fas fa-rocket"></i> Getting Started</h3>
+                    <ol class="steps-list">
+                        <li class="step-item">Click the login button below to access the system</li>
+                        <li class="step-item">Use your email address and the temporary password provided above</li>
+                        <li class="step-item">You will be required to change your password on first login for security</li>
+                    </ol>
+                    
+                    <div style="text-align: center;">
+                        <a href="' . EmailConfig::LOGIN_URL . '" class="cta-button">
+                            <i class="fas fa-sign-in-alt"></i> Login to System
+                        </a>
+                    </div>
+                </div>
+                
+                <div class="security-notice">
+                    <h4><i class="fas fa-shield-alt"></i> Important Security Notes</h4>
+                    <ul>
+                        <li>Please change your password immediately after first login</li>
+                        <li>Do not share your login credentials with anyone</li>
+                        <li>If you did not expect this invitation, please contact the system administrator</li>
+                        <li>This email contains sensitive information - please delete it after logging in</li>
+                    </ul>
+                </div>
+                
+                <div class="contact-info">
+                    If you have any questions or need assistance, please contact us at 
+                    <a href="mailto:' . EmailConfig::SUPPORT_EMAIL . '">' . EmailConfig::SUPPORT_EMAIL . '</a>
+                </div>
+                
+                <p>Best regards,<br>
+                <strong>' . EmailConfig::COMPANY_NAME . ' Team</strong></p>
             </div>
-           
-            <p>If you have any questions or need assistance, please contact us at <a href='mailto:" . EmailConfig::SUPPORT_EMAIL . "'>" . EmailConfig::SUPPORT_EMAIL . "</a></p>
-           
-            <p>Best regards,<br>
-            <strong>" . EmailConfig::COMPANY_NAME . " Team</strong></p>
-        </div>
-       
-        <div class='footer'>
-            <p>&copy; " . date('Y') . " " . EmailConfig::COMPANY_NAME . ". All rights reserved.</p>
-            <p>This is an automated message. Please do not reply to this email.</p>
-            <p>System URL: " . EmailConfig::SYSTEM_URL . "</p>
-            <p><strong>This email was sent to: " . htmlspecialchars($recipientEmail) . "</strong></p>
+            
+            <div class="email-footer">
+                <p>&copy; ' . date('Y') . ' <span class="company-name">' . EmailConfig::COMPANY_NAME . '</span>. All rights reserved.</p>
+                <p>This is an automated message. Please do not reply to this email.</p>
+                <div class="system-url">System URL: ' . EmailConfig::SYSTEM_URL . '</div>
+                <div class="recipient-info">This email was sent to: ' . htmlspecialchars($recipientEmail) . '</div>
+            </div>
         </div>
     </body>
     </html>
-    ";
+    ';
 }
-// CORRECTED Fallback function using native PHP mail
+
+// Fallback function using native PHP mail
 function sendWithNativePHP($recipientEmail, $recipientName, $role, $department, $defaultPassword) {
     error_log("=== NATIVE PHP MAIL DEBUG START ===");
     error_log("NATIVE PHP - Recipient: " . $recipientEmail);
@@ -451,12 +889,12 @@ function sendWithNativePHP($recipientEmail, $recipientName, $role, $department, 
    
     $subject = "Invitation to " . EmailConfig::COMPANY_NAME . " System";
     $message = createEmailTemplate($recipientName, $recipientEmail, $role, $department, $defaultPassword);
-    // CRITICAL: Proper email headers with explicit To header
+    
+    // CRITICAL: Proper email headers with NO explicit To header (mail() function handles this)
     $headers = array(
         'MIME-Version: 1.0',
         'Content-type: text/html; charset=UTF-8',
         'From: ' . EmailConfig::FROM_NAME . ' <' . EmailConfig::FROM_EMAIL . '>',
-        'To: ' . $recipientName . ' <' . $recipientEmail . '>',
         'Reply-To: ' . EmailConfig::SUPPORT_EMAIL,
         'X-Mailer: PHP/' . phpversion(),
         'X-Priority: 1',
@@ -469,6 +907,7 @@ function sendWithNativePHP($recipientEmail, $recipientName, $role, $department, 
     error_log("NATIVE PHP MAIL HEADERS: " . $headerString);
     error_log("NATIVE PHP MAIL TO: " . $recipientEmail);
     error_log("NATIVE PHP MAIL SUBJECT: " . $subject);
+    
     // Try to send email
     $result = mail($recipientEmail, $subject, $message, $headerString);
     if ($result) {
@@ -502,6 +941,7 @@ function sendWithNativePHP($recipientEmail, $recipientName, $role, $department, 
         return false;
     }
 }
+
 // First, let's check if is_active column exists and add it if it doesn't
 try {
     $check_column = $db->query("SHOW COLUMNS FROM users LIKE 'is_active'");
@@ -513,6 +953,7 @@ try {
 } catch (Exception $e) {
     error_log("Column check error: " . $e->getMessage());
 }
+
 // --- Data Fetching for User Management (Define queries first) ---
 // Get all users (excluding current admin)
 $users_query = "SELECT id, username, email, full_name, role, department, phone, is_active, created_at, updated_at, status, area_of_responsibility, assigned_risk_owner_id FROM users WHERE id != :current_user_id ORDER BY created_at DESC";
@@ -528,6 +969,7 @@ $deleted_users_stmt->execute();
 $deleted_users = $deleted_users_stmt->fetchAll(PDO::FETCH_ASSOC);
 // Get current user info for header
 $user_info = getCurrentUser();
+
 // --- PHP Logic for User Management Features ---
 // CRITICAL FIX: Handle individual "Send Invitation" button clicks
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_invitation'])) {
@@ -560,6 +1002,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_invitation'])) {
        
         if ($updateStmt->execute()) {
             error_log("Password updated successfully for User ID: " . $userId);
+           
+            // Refetch the user to get the latest data
+            $refetch_query = "SELECT id, full_name, email, role, department FROM users WHERE id = :id LIMIT 1";
+            $refetch_stmt = $db->prepare($refetch_query);
+            $refetch_stmt->bindParam(':id', $userId, PDO::PARAM_INT);
+            $refetch_stmt->execute();
+            $user = $refetch_stmt->fetch(PDO::FETCH_ASSOC);
            
             // Extract user details
             $recipientEmail = trim($user['email']);
@@ -608,89 +1057,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_invitation'])) {
    
     error_log("=== INDIVIDUAL SEND INVITATION REQUEST END ===");
 }
-// Handle Send Invitation to Existing User - CORRECTED WITH PROPER DATABASE FETCH
-if ($_POST && isset($_POST['send_invitation']) && !isset($_POST['user_id'])) {
-    // This is for the old bulk invitation system - keeping for backward compatibility
-    $user_id = $_POST['user_id'] ?? null;
-    if ($user_id) {
-        $ip_address = $_SERVER['REMOTE_ADDR'] ?? 'N/A';
-        error_log("=== LEGACY SINGLE INVITATION REQUEST START ===");
-        error_log("Requested User ID: " . $user_id);
-        // CORRECTED: Get user details FROM DATABASE using proper SELECT query
-        $user_query = "SELECT id, full_name, email, role, department FROM users WHERE id = :user_id LIMIT 1";
-        $user_stmt = $db->prepare($user_query);
-        $user_stmt->bindParam(':user_id', $user_id, PDO::PARAM_INT);
-        $user_stmt->execute();
-        $user_data = $user_stmt->fetch(PDO::FETCH_ASSOC);
-        // DEBUG: Log the fetched user data
-        error_log("DATABASE QUERY RESULT for User ID $user_id: " . print_r($user_data, true));
-        if ($user_data && !empty($user_data['email'])) {
-            // Generate a new default password for the invitation
-            $default_password = 'Welcome@' . date('Y');
-            $hashed_password = password_hash($default_password, PASSWORD_DEFAULT);
-           
-            // Update user's password with the new default password
-            $update_password_query = "UPDATE users SET password = :password, updated_at = NOW() WHERE id = :user_id";
-            $update_stmt = $db->prepare($update_password_query);
-            $update_stmt->bindParam(':password', $hashed_password);
-            $update_stmt->bindParam(':user_id', $user_id, PDO::PARAM_INT);
-           
-            if ($update_stmt->execute()) {
-                error_log("Password updated successfully for User ID: " . $user_id);
-               
-                // CRITICAL: Clean and validate email before sending
-                $clean_recipient_email = trim($user_data['email']);
-                $clean_recipient_name = trim($user_data['full_name']);
-                $clean_role = trim($user_data['role']);
-                $clean_department = trim($user_data['department'] ?? 'General');
-               
-                error_log("CLEANED EMAIL DATA:");
-                error_log("- Email: '" . $clean_recipient_email . "'");
-                error_log("- Name: '" . $clean_recipient_name . "'");
-                error_log("- Role: '" . $clean_role . "'");
-                error_log("- Department: '" . $clean_department . "'");
-               
-                // Send invitation email - USING CLEANED DATABASE EMAIL
-                $emailSent = sendInvitationEmail(
-                    $clean_recipient_email,
-                    $clean_recipient_name,
-                    $clean_role,
-                    $clean_department,
-                    $default_password
-                );
-               
-                if ($emailSent === true) {
-                    $success_message = "✅ Invitation email sent successfully to " . $clean_recipient_email . " (User ID: $user_id) via Gmail SMTP!";
-                    error_log("SUCCESS MESSAGE: " . $success_message);
-                } elseif ($emailSent === 'manual_required') {
-                    $success_message = "⚠️ Email server unavailable. Invitation saved to 'emails' folder for manual sending to " . $clean_recipient_email . ". Please check the folder and send manually.";
-                } else {
-                    $error_message = "❌ Failed to send invitation email to " . $clean_recipient_email . ". Please check your email configuration and server logs.";
-                    error_log("ERROR MESSAGE: " . $error_message);
-                }
-               
-                // Log successful invitation
-                $log_query = "INSERT INTO system_audit_logs (user, action, details, ip_address, user_id) VALUES (?, ?, ?, ?, ?)";
-                $log_stmt = $db->prepare($log_query);
-                $log_stmt->execute([
-                    $_SESSION['user_email'] ?? 'Admin',
-                    'Invitation Created',
-                    'Invitation created for ' . $clean_recipient_email . ' (User ID: ' . $user_id . ') with new credentials',
-                    $ip_address,
-                    $_SESSION['user_id']
-                ]);
-            } else {
-                $error_message = "Failed to update user password for invitation.";
-                error_log("ERROR: Failed to update password for User ID: " . $user_id);
-            }
-        } else {
-            $error_message = "User not found or email is empty for User ID: $user_id";
-            error_log("ERROR - User data issue for ID $user_id: " . print_r($user_data, true));
-        }
-       
-        error_log("=== LEGACY SINGLE INVITATION REQUEST END ===");
-    }
-}
+
 // Handle Bulk User Actions - CORRECTED WITH PROPER DATABASE FETCH
 if ($_POST && isset($_POST['bulk_action']) && !empty($_POST['bulk_action']) && isset($_POST['selected_users']) && !empty($_POST['selected_users'])) {
     $action = $_POST['bulk_action'];
@@ -960,15 +1327,6 @@ if ($_POST && isset($_POST['bulk_action']) && !empty($_POST['bulk_action']) && i
        
         $db->commit();
         
-        // if ($success_count > 0) {
-        //     $success_message = "Bulk action '{$action}' completed successfully for {$success_count} users.";
-        //     if ($failed_count > 0) {
-        //         $success_message .= " {$failed_count} users failed to update.";
-        //     }
-        // } else {
-        //     $error_message = "Bulk action '{$action}' failed for all selected users.";
-        // }
-        
         // FORCE REFRESH DATA after bulk actions
         $users_stmt->execute();
         $all_users = $users_stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -986,6 +1344,7 @@ if ($_POST && isset($_POST['bulk_action']) && !empty($_POST['bulk_action']) && i
    
     error_log("=== BULK ACTION REQUEST END ===");
 }
+
 // Handle individual user actions (reset password, change role, toggle status)
 if ($_POST && isset($_POST['single_action_user_id'])) {
     $user_id = $_POST['single_action_user_id'];
@@ -1086,6 +1445,7 @@ if ($_POST && isset($_POST['single_action_user_id'])) {
         error_log("Individual user action error: " . $e->getMessage());
     }
 }
+
 // Handle permanent delete from recycle bin
 if ($_POST && isset($_POST['delete_permanent_user'])) {
     $deleted_user_id = $_POST['user_id'];
@@ -1136,6 +1496,7 @@ if ($_POST && isset($_POST['delete_permanent_user'])) {
         error_log("Permanent deletion error: " . $e->getMessage());
     }
 }
+
 // Handle restore from recycle bin
 if ($_POST && isset($_POST['restore_user'])) {
     $deleted_user_id = $_POST['user_id'];
@@ -1205,6 +1566,7 @@ if ($_POST && isset($_POST['restore_user'])) {
         $error_message = "Failed to restore user - user not found in recycle bin.";
     }
 }
+
 // DEBUG: Final logging
 error_log("DEBUG - Total active users: " . count($all_users));
 error_log("DEBUG - Total deleted users: " . count($deleted_users));
@@ -1482,7 +1844,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
         .section-content.active {
             display: block;
         }
-
         .user-table {
             width: 100%;
             border-collapse: collapse;
@@ -1936,6 +2297,42 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             line-height: 1.4;
         }
        
+        /* Session management enhancements */
+        .session-role-badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            color: white;
+        }
+        .session-role-admin {
+            background-color: #17a2b8;
+        }
+        .session-role-other {
+            background-color: #28a745;
+        }
+        .session-stats {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .session-stat {
+            background: #f8f9fa;
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            text-align: center;
+            flex: 1;
+        }
+        .session-stat-number {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #E60012;
+        }
+        .session-stat-label {
+            font-size: 0.85rem;
+            color: #666;
+        }
+       
         /* Responsive adjustments */
         @media (max-width: 768px) {
             body {
@@ -2133,17 +2530,12 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
     </div>
 </nav>
 <div class="main-content">
-    
-    
-    <?php /* 
-    if (isset($success_message)): ?>
+    <?php if (isset($success_message)): ?>
         <div class="success">✅ <?php echo $success_message; ?></div>
     <?php endif; ?>
     <?php if (isset($error_message)): ?>
         <div class="error">❌ <?php echo $error_message; ?></div>
-    <?php endif;
-    */ ?>
-
+    <?php endif; ?>
     
     <div class="card">
         
@@ -2165,7 +2557,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                 Account Locking (<?php echo $locked_accounts_count; ?>)
             </button>
         </div>
-
         
         <div id="all-users" class="section-content active">
             <div class="section-header" style="background: linear-gradient(135deg, #E60012 0%, #B8000E 100%); color: white; padding: 1.5rem 2rem; border-radius: 8px; margin-bottom: 2rem;">
@@ -2174,7 +2565,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                     <h2 style="color: white; margin: 0;">All Users (<?php echo count($all_users); ?>)</h2>
                 </div>
                 <div class="section-description" style="color: rgba(255,255,255,0.9); margin-top: 0.5rem;">
-                
                 </div>
             </div>
             
@@ -2332,7 +2722,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                     <h2 style="color: white; margin: 0;">Register & Invite User</h2>
                 </div>
                 <div class="section-description" style="color: rgba(255,255,255,0.9); margin-top: 0.5rem;">
-                    
                 </div>
             </div>
             
@@ -2439,8 +2828,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             </div>
            
             <div class="info-box">
-                
-            
             </div>
         </div>
        
@@ -2456,14 +2843,18 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                 </div>
             </div>
            
-            <div class="stats-mini-grid">
-                <div class="mini-stat">
-                    <div class="mini-stat-number"><?php echo $active_sessions_count; ?></div>
-                    <div class="mini-stat-label">Active Sessions</div>
+            <div class="session-stats">
+                <div class="session-stat">
+                    <div class="session-stat-number"><?php echo $active_sessions_count; ?></div>
+                    <div class="session-stat-label">Total Sessions</div>
                 </div>
-                <div class="mini-stat">
-                    <div class="mini-stat-number"><?php echo $admin_sessions_count; ?></div>
-                    <div class="mini-stat-label">Admin Sessions</div>
+                <div class="session-stat">
+                    <div class="session-stat-number"><?php echo $admin_sessions_count; ?></div>
+                    <div class="session-stat-label">Admin Sessions</div>
+                </div>
+                <div class="session-stat">
+                    <div class="session-stat-number"><?php echo $active_sessions_count - $admin_sessions_count; ?></div>
+                    <div class="session-stat-label">Other Sessions</div>
                 </div>
             </div>
            
@@ -2542,7 +2933,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
         </div>
     </div>
 </div>
-
 <script>
     
     function showSection(sectionId) {
@@ -2564,7 +2954,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
         
         event.target.classList.add('active');
     }
-
     
     function validateBulkAction() {
         const selectedAction = document.getElementById('bulkActionSelect').value;
@@ -2764,12 +3153,31 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
         });
     }
     function displayActiveSessionsModal(sessions) {
+        // Count sessions by role
+        let adminCount = 0;
+        let otherCount = 0;
+        sessions.forEach(session => {
+            if (session.user_role === 'admin') {
+                adminCount++;
+            } else {
+                otherCount++;
+            }
+        });
+
         let modalHtml = `
             <div id="sessionsModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;">
                 <div style="background: white; padding: 2rem; border-radius: 10px; max-width: 90%; max-height: 90%; overflow-y: auto; width: 800px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                         <h3>Active Sessions (${sessions.length})</h3>
-                        <button onclick="closeModal('sessionsModal')" style="background: #dc3545; color: white; border: none; padding: 0.5rem 1rem; border-radius: 5px; cursor: pointer;">×</button>
+                        <div style="display: flex; gap: 1rem; align-items: center;">
+                            <span style="background: #17a2b8; color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.8rem;">
+                                Admin: ${adminCount}
+                            </span>
+                            <span style="background: #28a745; color: white; padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.8rem;">
+                                Other Users: ${otherCount}
+                            </span>
+                            <button onclick="closeModal('sessionsModal')" style="background: #dc3545; color: white; border: none; padding: 0.5rem 1rem; border-radius: 5px; cursor: pointer;">×</button>
+                        </div>
                     </div>
                     <div style="overflow-x: auto;">
                         <table style="width: 100%; border-collapse: collapse;">
@@ -2784,19 +3192,24 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                                 </tr>
                             </thead>
                             <tbody>`;
-       
+
         sessions.forEach(session => {
             const loginTime = new Date(session.login_time).toLocaleString();
             const statusColor = session.status === 'Active' ? '#28a745' :
                                session.status === 'Expired' ? '#dc3545' : '#ffc107';
-           
+            const roleColor = session.user_role === 'admin' ? '#17a2b8' : '#28a745';
+            
             modalHtml += `
                 <tr>
                     <td style="padding: 0.75rem; border: 1px solid #ddd;">
                         <div><strong>${session.user_name}</strong></div>
                         <div style="font-size: 0.8rem; color: #666;">${session.user_email}</div>
                     </td>
-                    <td style="padding: 0.75rem; border: 1px solid #ddd;">${session.user_role}</td>
+                    <td style="padding: 0.75rem; border: 1px solid #ddd;">
+                        <span class="session-role-badge ${session.user_role === 'admin' ? 'session-role-admin' : 'session-role-other'}">
+                            ${session.user_role}
+                        </span>
+                    </td>
                     <td style="padding: 0.75rem; border: 1px solid #ddd;">${session.ip_address}</td>
                     <td style="padding: 0.75rem; border: 1px solid #ddd;">${loginTime}</td>
                     <td style="padding: 0.75rem; border: 1px solid #ddd;">
@@ -2812,7 +3225,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                     </td>
                 </tr>`;
         });
-       
+
         modalHtml += `
                             </tbody>
                         </table>
@@ -2823,7 +3236,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                     </div>
                 </div>
             </div>`;
-       
+
         document.body.insertAdjacentHTML('beforeend', modalHtml);
     }
     function forceLogoutSession(sessionId) {
