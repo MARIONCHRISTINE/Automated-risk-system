@@ -2,73 +2,66 @@
 session_start();
 include_once 'config/database.php';
 
+// Email Configuration
+class EmailConfig {
+    const COMPANY_NAME = 'Airtel Risk Management';
+}
+
 $message = '';
 $error = '';
-$valid_token = false;
-$user_id = null;
 
-// Check if token is provided and valid
-if (isset($_GET['token'])) {
+if ($_GET && isset($_GET['token']) && isset($_GET['email'])) {
     $token = $_GET['token'];
+    $email = $_GET['email'];
+    $token_salt = 'your-secret-salt-here'; // Must match the salt used in the reset form
     
-    $database = new Database();
-    $db = $database->getConnection();
-    
-    // Verify token
-    $query = "SELECT user_id FROM password_reset_tokens WHERE token = :token AND expires_at > NOW()";
-    $stmt = $db->prepare($query);
-    $stmt->bindParam(':token', $token);
-    $stmt->execute();
-    
-    if ($stmt->rowCount() > 0) {
-        $valid_token = true;
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $user_id = $result['user_id'];
+    // Validate token format
+    $token_parts = explode('|', $token);
+    if (count($token_parts) !== 3) {
+        $error = "Invalid reset link. Please request a new password reset.";
     } else {
-        $error = "Invalid or expired reset token.";
-    }
-}
-
-// Handle password reset
-if ($_POST && $valid_token) {
-    $new_password = $_POST['new_password'];
-    $confirm_password = $_POST['confirm_password'];
-    
-    if (strlen($new_password) < 6) {
-        $error = "Password must be at least 6 characters long.";
-    } elseif ($new_password !== $confirm_password) {
-        $error = "Passwords do not match.";
-    } else {
-        $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
+        list($random_string, $timestamp, $email_hash) = $token_parts;
         
-        // Update password
-        $update_query = "UPDATE users SET password = :password WHERE id = :user_id";
-        $update_stmt = $db->prepare($update_query);
-        $update_stmt->bindParam(':password', $hashed_password);
-        $update_stmt->bindParam(':user_id', $user_id);
-        
-        if ($update_stmt->execute()) {
-            // Delete used token
-            $delete_query = "DELETE FROM password_reset_tokens WHERE user_id = :user_id";
-            $delete_stmt = $db->prepare($delete_query);
-            $delete_stmt->bindParam(':user_id', $user_id);
-            $delete_stmt->execute();
-            
-            $message = "Password updated successfully! You can now login with your new password.";
-            $valid_token = false; // Hide form after successful reset
+        // Check if token is expired (1 hour = 3600 seconds)
+        if (time() - $timestamp > 3600) {
+            $error = "This reset link has expired. Please request a new password reset.";
         } else {
-            $error = "Failed to update password. Please try again.";
+            // Verify the email hash
+            $expected_hash = md5($email . $token_salt . $timestamp);
+            if ($email_hash !== $expected_hash) {
+                $error = "Invalid reset link. Please request a new password reset.";
+            } else {
+                // Token is valid, check if email exists in database
+                $database = new Database();
+                $db = $database->getConnection();
+                
+                $query = "SELECT id, full_name FROM users WHERE email = :email AND status = 'approved'";
+                $stmt = $db->prepare($query);
+                $stmt->bindParam(':email', $email);
+                $stmt->execute();
+                
+                if ($stmt->rowCount() > 0) {
+                    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+                    $_SESSION['reset_user_id'] = $user['id'];
+                    $_SESSION['reset_email'] = $email;
+                    header('Location: reset_password_form.php');
+                    exit;
+                } else {
+                    $error = "No account found with this email address or account is not active.";
+                }
+            }
         }
     }
+} else {
+    $error = "Invalid reset link. Please request a new password reset.";
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Confirm Password Reset - Airtel Risk Management</title>
+    <title>Password Reset - Airtel Risk Management</title>
     <style>
         * {
             margin: 0;
@@ -122,50 +115,6 @@ if ($_POST && $valid_token) {
             object-fit: cover;
         }
         
-        .form-group {
-            margin-bottom: 1.5rem;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 0.5rem;
-            color: #333;
-            font-weight: 500;
-        }
-        
-        input[type="password"] {
-            width: 100%;
-            padding: 0.75rem;
-            border: 2px solid #e1e5e9;
-            border-radius: 8px;
-            font-size: 1rem;
-            transition: border-color 0.3s;
-        }
-        
-        input[type="password"]:focus {
-            outline: none;
-            border-color: #E60012;
-            box-shadow: 0 0 0 3px rgba(230, 0, 18, 0.1);
-        }
-        
-        .btn {
-            width: 100%;
-            padding: 0.75rem;
-            background: linear-gradient(135deg, #E60012 0%, #B8000E 100%);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(230, 0, 18, 0.3);
-        }
-        
         .error {
             background: #ffebee;
             color: #c62828;
@@ -193,6 +142,8 @@ if ($_POST && $valid_token) {
             color: #E60012;
             text-decoration: none;
             font-weight: 500;
+            display: block;
+            margin-bottom: 0.5rem;
         }
         
         .back-link a:hover {
@@ -204,8 +155,8 @@ if ($_POST && $valid_token) {
     <div class="reset-container">
         <div class="logo">
             <img src="image.png" alt="Airtel Logo" class="airtel-logo">
-            <h1>Set New Password</h1>
-            <p>Enter your new password below</p>
+            <h1>Password Reset</h1>
+            <p><?php echo EmailConfig::COMPANY_NAME; ?></p>
         </div>
         
         <?php if ($error): ?>
@@ -216,23 +167,8 @@ if ($_POST && $valid_token) {
             <div class="success"><?php echo $message; ?></div>
         <?php endif; ?>
         
-        <?php if ($valid_token): ?>
-            <form method="POST">
-                <div class="form-group">
-                    <label for="new_password">New Password</label>
-                    <input type="password" id="new_password" name="new_password" required minlength="6" placeholder="Minimum 6 characters">
-                </div>
-                
-                <div class="form-group">
-                    <label for="confirm_password">Confirm New Password</label>
-                    <input type="password" id="confirm_password" name="confirm_password" required placeholder="Re-enter your new password">
-                </div>
-                
-                <button type="submit" class="btn">Update Password</button>
-            </form>
-        <?php endif; ?>
-        
         <div class="back-link">
+            <p><a href="forgot_password.php">← Request New Reset Link</a></p>
             <p><a href="login.php">← Back to Login</a></p>
         </div>
     </div>
