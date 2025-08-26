@@ -1,72 +1,350 @@
 <?php
 session_start();
 include_once 'config/database.php';
+// Include PHPMailer
+require 'vendor/autoload.php';
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\SMTP;
+use PHPMailer\PHPMailer\Exception;
 
-// Include compatibility functions if file exists
-if (file_exists('includes/php_compatibility.php')) {
-    include_once 'includes/php_compatibility.php';
-} else {
-    function endsWith($haystack, $needle) {
-        $length = strlen($needle);
-        if ($length == 0) {
-            return true;
-        }
-        return (substr($haystack, -$length) === $needle);
-    }
+// Email Configuration
+class EmailConfig {
+    const FROM_EMAIL = 'mauriceokoth952@gmail.com';
+    const FROM_NAME = 'Airtel Risk Management System';
+    const SUPPORT_EMAIL = 'support@yourcompany.com';
+    const COMPANY_NAME = 'Airtel Risk Management';
+    
+    // SMTP Settings
+    const SMTP_HOST = 'smtp.gmail.com';
+    const SMTP_PORT = 587;
+    const SMTP_USERNAME = 'mauriceokoth952@gmail.com';
+    const SMTP_PASSWORD = 'dein nmuj btpc cxoe'; // Your Gmail App Password
+    const SMTP_ENCRYPTION = 'tls';
 }
 
 $message = '';
 $error = '';
-
 if ($_POST) {
     $email = $_POST['email'];
     
-    // Validate email domain
-    if (!endsWith($email, '@airtel.africa')) {
-        $error = "Please use your Airtel email address ending with @airtel.africa";
+    // Validate email format
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $error = "Please enter a valid email address";
     } else {
-        $database = new Database();
-        $db = $database->getConnection();
+        // Generate a secure token that includes email verification
+        $token_salt = 'your-secret-salt-here'; // Change this to a secure random string
+        $timestamp = time();
+        $random_string = bin2hex(random_bytes(16));
+        $email_hash = md5($email . $token_salt . $timestamp);
+        $token = $random_string . '|' . $timestamp . '|' . $email_hash;
         
-        // Check if email exists
-        $query = "SELECT id, full_name FROM users WHERE email = :email AND status = 'approved'";
-        $stmt = $db->prepare($query);
-        $stmt->bindParam(':email', $email);
-        $stmt->execute();
+        // Create reset link
+        $reset_link = "http://" . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']) . "/reset_password_confirm.php?token=" . urlencode($token) . "&email=" . urlencode($email);
         
-        if ($stmt->rowCount() > 0) {
-            $user = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            // Generate reset token
-            $reset_token = bin2hex(random_bytes(32));
-            $expires_at = date('Y-m-d H:i:s', strtotime('+1 hour'));
-            
-            // Store reset token in database
-            $token_query = "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (:user_id, :token, :expires_at)
-                           ON DUPLICATE KEY UPDATE token = :token, expires_at = :expires_at, created_at = NOW()";
-            $token_stmt = $db->prepare($token_query);
-            $token_stmt->bindParam(':user_id', $user['id']);
-            $token_stmt->bindParam(':token', $reset_token);
-            $token_stmt->bindParam(':expires_at', $expires_at);
-            
-            if ($token_stmt->execute()) {
-                // In a real application, you would send an email here
-                // For now, we'll just show the reset link
-                $reset_link = "http://" . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']) . "/reset_password_confirm.php?token=" . $reset_token;
-                $message = "Password reset link generated! In a production environment, this would be sent to your email.<br><br>
-                           <strong>Reset Link:</strong><br>
-                           <a href='" . $reset_link . "' style='color: #E60012; word-break: break-all;'>" . $reset_link . "</a>";
-            } else {
-                $error = "Failed to generate reset token. Please try again.";
-            }
+        // Send email with reset link
+        $emailSent = sendPasswordResetEmail($email, $reset_link);
+        
+        if ($emailSent) {
+            $message = "Password reset link has been sent to your email address. Please check your inbox and spam folder.";
         } else {
-            // Don't reveal if email exists or not for security
-            $message = "If your email address exists in our system, you will receive a password reset link.";
+            $error = "Failed to send reset email. Please try again later or contact support.";
         }
     }
 }
-?>
 
+function sendPasswordResetEmail($recipientEmail, $resetLink) {
+    try {
+        // Create a new PHPMailer instance
+        $mail = new PHPMailer(true);
+        
+        // Server settings
+        $mail->isSMTP();
+        $mail->Host = EmailConfig::SMTP_HOST;
+        $mail->SMTPAuth = true;
+        $mail->Username = EmailConfig::SMTP_USERNAME;
+        $mail->Password = EmailConfig::SMTP_PASSWORD;
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+        $mail->Port = EmailConfig::SMTP_PORT;
+        
+        // Set sender information
+        $mail->setFrom(EmailConfig::FROM_EMAIL, EmailConfig::FROM_NAME);
+        $mail->addAddress($recipientEmail);
+        $mail->addReplyTo(EmailConfig::SUPPORT_EMAIL, EmailConfig::COMPANY_NAME . ' Support');
+        
+        // Content settings
+        $mail->isHTML(true);
+        $mail->Subject = "Password Reset Request - " . EmailConfig::COMPANY_NAME;
+        $mail->CharSet = 'UTF-8';
+        
+        // Create email body
+        $mail->Body = createPasswordResetEmailTemplate($recipientEmail, $resetLink);
+        
+        // Add custom headers
+        $mail->addCustomHeader('X-Recipient-Email', $recipientEmail);
+        $mail->addCustomHeader('X-Mailer', 'Airtel Risk Management System');
+        
+        // Send the email
+        return $mail->send();
+        
+    } catch (Exception $e) {
+        error_log("PHPMailer Exception: " . $e->getMessage());
+        error_log("PHPMailer ErrorInfo: " . $mail->ErrorInfo);
+        return false;
+    }
+}
+
+function createPasswordResetEmailTemplate($recipientEmail, $resetLink) {
+    return '
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Password Reset - ' . EmailConfig::COMPANY_NAME . '</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+                background-color: #f5f7fa;
+                color: #2c3e50;
+                line-height: 1.6;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }
+            
+            .email-container {
+                max-width: 600px;
+                margin: 20px auto;
+                background-color: #ffffff;
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            }
+            
+            .email-header {
+                background: linear-gradient(135deg, #E60012 0%, #B8000E 100%);
+                color: white;
+                padding: 40px 30px;
+                text-align: center;
+                position: relative;
+            }
+            
+            .email-header h1 {
+                font-size: 28px;
+                font-weight: 700;
+                margin-bottom: 10px;
+                position: relative;
+                z-index: 1;
+            }
+            
+            .email-header p {
+                font-size: 16px;
+                opacity: 0.9;
+                position: relative;
+                z-index: 1;
+            }
+            
+            .email-body {
+                padding: 40px 30px;
+            }
+            
+            .welcome-message {
+                font-size: 24px;
+                font-weight: 600;
+                color: #2c3e50;
+                margin-bottom: 20px;
+            }
+            
+            .intro-text {
+                font-size: 16px;
+                color: #5a6c7d;
+                margin-bottom: 30px;
+            }
+            
+            .reset-button {
+                display: inline-block;
+                background: linear-gradient(135deg, #E60012 0%, #B8000E 100%);
+                color: white;
+                text-decoration: none;
+                padding: 14px 28px;
+                border-radius: 50px;
+                font-weight: 600;
+                font-size: 16px;
+                text-align: center;
+                margin: 20px 0;
+                box-shadow: 0 4px 15px rgba(230, 0, 18, 0.3);
+                transition: all 0.3s ease;
+            }
+            
+            .reset-button:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(230, 0, 18, 0.4);
+            }
+            
+            .security-notice {
+                background-color: #fff8e1;
+                border-left: 4px solid #ffc107;
+                border-radius: 8px;
+                padding: 20px;
+                margin-bottom: 30px;
+            }
+            
+            .security-notice h4 {
+                font-size: 16px;
+                font-weight: 600;
+                color: #856404;
+                margin-bottom: 15px;
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+            }
+            
+            .security-notice ul {
+                padding-left: 20px;
+                margin: 0;
+            }
+            
+            .security-notice li {
+                margin-bottom: 8px;
+                color: #856404;
+            }
+            
+            .contact-info {
+                font-size: 16px;
+                color: #5a6c7d;
+                margin-bottom: 30px;
+            }
+            
+            .contact-info a {
+                color: #E60012;
+                text-decoration: none;
+                font-weight: 500;
+            }
+            
+            .contact-info a:hover {
+                text-decoration: underline;
+            }
+            
+            .email-footer {
+                background-color: #2c3e50;
+                color: rgba(255, 255, 255, 0.7);
+                padding: 30px;
+                text-align: center;
+                font-size: 14px;
+            }
+            
+            .email-footer p {
+                margin-bottom: 10px;
+            }
+            
+            .email-footer a {
+                color: rgba(255, 255, 255, 0.9);
+                text-decoration: none;
+            }
+            
+            .email-footer a:hover {
+                text-decoration: underline;
+            }
+            
+            .email-footer .company-name {
+                font-weight: 600;
+                color: white;
+            }
+            
+            .email-footer .system-url {
+                color: rgba(255, 255, 255, 0.7);
+                font-size: 12px;
+                margin-top: 15px;
+            }
+            
+            .email-footer .recipient-info {
+                color: rgba(255, 255, 255, 0.7);
+                font-size: 12px;
+                margin-top: 10px;
+            }
+            
+            /* Responsive styles */
+            @media only screen and (max-width: 600px) {
+                .email-container {
+                    width: 100%;
+                    border-radius: 0;
+                }
+                
+                .email-header {
+                    padding: 30px 20px;
+                }
+                
+                .email-header h1 {
+                    font-size: 24px;
+                }
+                
+                .email-body {
+                    padding: 30px 20px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="email-container">
+            <div class="email-header">
+                <h1>Password Reset Request</h1>
+                <p>' . EmailConfig::COMPANY_NAME . '</p>
+            </div>
+            
+            <div class="email-body">
+                <h2 class="welcome-message">Hello,</h2>
+                <p class="intro-text">
+                    We received a request to reset the password for your ' . EmailConfig::COMPANY_NAME . ' account. 
+                    If you made this request, please click the button below to set a new password.
+                </p>
+                
+                <div style="text-align: center;">
+                    <a href="' . $resetLink . '" class="reset-button">
+                        Reset Password
+                    </a>
+                </div>
+                
+                <p style="text-align: center; margin: 20px 0; font-size: 14px; color: #666;">
+                    Or copy and paste this link into your browser:<br>
+                    <span style="word-break: break-all;">' . $resetLink . '</span>
+                </p>
+                
+                <div class="security-notice">
+                    <h4><i class="fas fa-shield-alt"></i> Security Information</h4>
+                    <ul>
+                        <li>This password reset link will expire in 1 hour for security reasons</li>
+                        <li>If you did not request a password reset, please ignore this email or contact support</li>
+                        <li>Never share your password with anyone</li>
+                        <li>Always ensure you are on the official ' . EmailConfig::COMPANY_NAME . ' website before entering your credentials</li>
+                    </ul>
+                </div>
+                
+                <div class="contact-info">
+                    If you have any questions or need assistance, please contact us at 
+                    <a href="mailto:' . EmailConfig::SUPPORT_EMAIL . '">' . EmailConfig::SUPPORT_EMAIL . '</a>
+                </div>
+                
+                <p>Best regards,<br>
+                <strong>' . EmailConfig::COMPANY_NAME . ' Team</strong></p>
+            </div>
+            
+            <div class="email-footer">
+                <p>&copy; ' . date('Y') . ' <span class="company-name">' . EmailConfig::COMPANY_NAME . '</span>. All rights reserved.</p>
+                <p>This is an automated message. Please do not reply to this email.</p>
+                <div class="system-url">System URL: http://' . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']) . '</div>
+                <div class="recipient-info">This email was sent to: ' . htmlspecialchars($recipientEmail) . '</div>
+            </div>
+        </div>
+    </body>
+    </html>
+    ';
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -222,8 +500,8 @@ if ($_POST) {
         
         <form method="POST">
             <div class="form-group">
-                <label for="email">Airtel Email Address</label>
-                <input type="email" id="email" name="email" required placeholder="your.name@airtel.africa">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" required placeholder="your.email@example.com">
             </div>
             
             <button type="submit" class="btn">Send Reset Link</button>
