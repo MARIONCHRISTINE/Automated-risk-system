@@ -1,1 +1,2822 @@
 
+<?php
+include_once 'includes/auth.php';
+requireRole('compliance_team'); // Corrected from 'compliance' to 'compliance_team'
+include_once 'config/database.php';
+include_once 'includes/shared_notifications.php';
+
+$database = new Database();
+$db = $database->getConnection();
+
+// Get current user info
+$user = getCurrentUser();
+
+// Get all risks for compliance overview with proper joins based on actual schema
+$query = "SELECT r.*, 
+          u.full_name as reporter_name, 
+          ro.full_name as owner_name
+          FROM risk_incidents r 
+          LEFT JOIN users u ON r.reported_by = u.id 
+          LEFT JOIN users ro ON r.risk_owner_id = ro.id 
+          ORDER BY 
+          CASE r.risk_level
+            WHEN 'Critical' THEN 1
+            WHEN 'High' THEN 2
+            WHEN 'Medium' THEN 3
+            WHEN 'Low' THEN 4
+            ELSE 5
+          END, r.created_at DESC";
+$stmt = $db->prepare($query);
+$stmt->execute();
+$all_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk statistics with corrected field names
+$stats_query = "SELECT 
+    COUNT(*) as total_risks,
+    SUM(CASE WHEN risk_level = 'Critical' THEN 1 ELSE 0 END) as critical_risks,
+    SUM(CASE WHEN risk_level = 'High' THEN 1 ELSE 0 END) as high_risks,
+    SUM(CASE WHEN risk_level = 'Medium' THEN 1 ELSE 0 END) as medium_risks,
+    SUM(CASE WHEN risk_level = 'Low' THEN 1 ELSE 0 END) as low_risks,
+    SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_risks,
+    SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_risks,
+    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_risks,
+    SUM(CASE WHEN status = 'overdue' THEN 1 ELSE 0 END) as overdue_risks,
+    SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed_risks,
+    SUM(CASE WHEN treatment_status = 'Not Started' THEN 1 ELSE 0 END) as not_started_treatments,
+    SUM(CASE WHEN treatment_status = 'In Progress' THEN 1 ELSE 0 END) as in_progress_treatments,
+    SUM(CASE WHEN treatment_status = 'Completed' THEN 1 ELSE 0 END) as completed_treatments,
+    AVG(residual_rating) as avg_residual_rating,
+    AVG(inherent_rating) as avg_inherent_rating,
+    SUM(CASE WHEN to_be_reported_to_board = 'Yes' THEN 1 ELSE 0 END) as board_reportable_risks,
+    SUM(CASE WHEN existing_or_new = 'New' THEN 1 ELSE 0 END) as new_risks,
+    SUM(CASE WHEN existing_or_new = 'Existing' THEN 1 ELSE 0 END) as existing_risks
+    FROM risk_incidents";
+$stats_stmt = $db->prepare($stats_query);
+$stats_stmt->execute();
+$stats = $stats_stmt->fetch(PDO::FETCH_ASSOC);
+
+// Get department distribution - using actual department field from risk_incidents
+$dept_query = "SELECT department, COUNT(*) as count FROM risk_incidents WHERE department IS NOT NULL AND department != '' GROUP BY department";
+$dept_stmt = $db->prepare($dept_query);
+$dept_stmt->execute();
+$dept_data = $dept_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk categories distribution - using the JSON field from your schema
+$categories_query = "SELECT 
+    JSON_UNQUOTE(JSON_EXTRACT(risk_categories, CONCAT('$[', seq.seq, ']'))) as category,
+    COUNT(*) as count
+    FROM risk_incidents 
+    JOIN seq_0_to_20 AS seq
+    WHERE JSON_EXTRACT(risk_categories, CONCAT('$[', seq.seq, ']')) IS NOT NULL
+    GROUP BY category
+    ORDER BY count DESC";
+$categories_stmt = $db->prepare($categories_query);
+$categories_stmt->execute();
+$categories_data = $categories_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk treatment progress
+$treatment_query = "SELECT treatment_status, COUNT(*) as count FROM risk_incidents WHERE treatment_status IS NOT NULL GROUP BY treatment_status";
+$treatment_stmt = $db->prepare($treatment_query);
+$treatment_stmt->execute();
+$treatment_data = $treatment_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risks by owner - using proper user table join
+$owner_query = "SELECT ro.full_name as owner_name, COUNT(r.id) as count 
+                FROM risk_incidents r
+                LEFT JOIN users ro ON r.risk_owner_id = ro.id
+                WHERE ro.id IS NOT NULL
+                GROUP BY r.risk_owner_id
+                ORDER BY count DESC";
+$owner_stmt = $db->prepare($owner_query);
+$owner_stmt->execute();
+$owner_data = $owner_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risks by monitoring frequency
+$monitoring_query = "SELECT monitoring_frequency, COUNT(*) as count FROM risk_incidents WHERE monitoring_frequency IS NOT NULL GROUP BY monitoring_frequency";
+$monitoring_stmt = $db->prepare($monitoring_query);
+$monitoring_stmt->execute();
+$monitoring_data = $monitoring_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get recent activities from the activity_logs table
+$activity_query = "SELECT al.action, al.description, al.created_at, u.full_name 
+                  FROM activity_logs al
+                  LEFT JOIN users u ON al.user_id = u.id
+                  ORDER BY al.created_at DESC
+                  LIMIT 10";
+$activity_stmt = $db->prepare($activity_query);
+$activity_stmt->execute();
+$recent_activities = $activity_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get compliance violations (risks with high residual ratings)
+$violations_query = "SELECT * FROM risk_incidents 
+                      WHERE (residual_rating > 15 OR inherent_rating > 15) 
+                      AND status NOT IN ('completed', 'closed')
+                      ORDER BY residual_rating DESC
+                      LIMIT 10";
+$violations_stmt = $db->prepare($violations_query);
+$violations_stmt->execute();
+$compliance_violations = $violations_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk aging data
+$aging_query = "SELECT 
+                id,
+                risk_name,
+                risk_level,
+                status,
+                created_at,
+                DATEDIFF(NOW(), created_at) as days_open,
+                CASE 
+                    WHEN DATEDIFF(NOW(), created_at) > 90 THEN 'Critical'
+                    WHEN DATEDIFF(NOW(), created_at) > 60 THEN 'High'
+                    WHEN DATEDIFF(NOW(), created_at) > 30 THEN 'Medium'
+                    ELSE 'Low'
+                END as aging_category
+                FROM risk_incidents
+                WHERE status NOT IN ('completed', 'closed')
+                ORDER BY days_open DESC";
+$aging_stmt = $db->prepare($aging_query);
+$aging_stmt->execute();
+$risk_aging = $aging_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get upcoming compliance deadlines using target_completion_date
+$deadlines_query = "SELECT 
+                    id,
+                    risk_name,
+                    target_completion_date,
+                    DATEDIFF(target_completion_date, NOW()) as days_until_deadline,
+                    status,
+                    risk_owner_id
+                    FROM risk_incidents
+                    WHERE target_completion_date IS NOT NULL
+                    AND status NOT IN ('completed', 'closed')
+                    ORDER BY days_until_deadline ASC
+                    LIMIT 10";
+$deadlines_stmt = $db->prepare($deadlines_query);
+$deadlines_stmt->execute();
+$upcoming_deadlines = $deadlines_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get department performance metrics
+$performance_query = "SELECT 
+                      r.department,
+                      COUNT(r.id) as total_risks,
+                      SUM(CASE WHEN r.status = 'completed' THEN 1 ELSE 0 END) as completed_risks,
+                      SUM(CASE WHEN r.status = 'overdue' THEN 1 ELSE 0 END) as overdue_risks,
+                      AVG(r.residual_rating) as avg_residual_rating,
+                      MAX(r.created_at) as last_activity
+                      FROM risk_incidents r
+                      WHERE r.department IS NOT NULL AND r.department != ''
+                      GROUP BY r.department
+                      ORDER BY completed_risks DESC";
+$performance_stmt = $db->prepare($performance_query);
+$performance_stmt->execute();
+$department_performance = $performance_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get monthly risk trends for the past year
+$trends_query = "SELECT 
+                DATE_FORMAT(created_at, '%Y-%m') as month,
+                COUNT(*) as risk_count,
+                SUM(CASE WHEN risk_level = 'Critical' THEN 1 ELSE 0 END) as critical_count,
+                SUM(CASE WHEN risk_level = 'High' THEN 1 ELSE 0 END) as high_count,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count
+                FROM risk_incidents
+                WHERE created_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+                GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+                ORDER BY month ASC";
+$trends_stmt = $db->prepare($trends_query);
+$trends_stmt->execute();
+$risk_trends = $trends_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get notifications using shared component
+$all_notifications = getNotifications($db, $_SESSION['user_id']);
+
+// Create sequence table helper function for JSON extraction
+$db->exec("CREATE TEMPORARY TABLE IF NOT EXISTS seq_0_to_20 (seq INT PRIMARY KEY);
+INSERT IGNORE INTO seq_0_to_20 VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9), (10), (11), (12), (13), (14), (15), (16), (17), (18), (19), (20);");
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compliance Team Dashboard - Airtel Risk Management System</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        /* All your existing CSS styles remain the same */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            line-height: 1.6;
+            color: #333;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #1a237e 0%, #3949ab 100%);
+            color: white;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+        
+        .header h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+        }
+        
+        .user-info span {
+            margin-right: 1rem;
+        }
+        
+        .logout-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            text-decoration: none;
+            transition: background 0.3s;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .nav-tabs {
+            background: white;
+            padding: 0 2rem;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            overflow-x: auto;
+            position: sticky;
+            top: 73px;
+            z-index: 999;
+        }
+        
+        .nav-tabs button {
+            background: none;
+            border: none;
+            padding: 1rem 1.5rem;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            font-size: 1rem;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: all 0.3s;
+        }
+        
+        .nav-tabs button:hover {
+            color: #3949ab;
+        }
+        
+        .nav-tabs button.active {
+            border-bottom-color: #3949ab;
+            color: #3949ab;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+            transition: transform 0.3s, box-shadow 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: #3949ab;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .card {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        
+        .card h2 {
+            margin-bottom: 1.5rem;
+            color: #1a237e;
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .card h2 .card-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .card h2 .card-actions button {
+            background: none;
+            border: none;
+            color: #3949ab;
+            cursor: pointer;
+            font-size: 1rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            transition: background 0.3s;
+        }
+        
+        .card h2 .card-actions button:hover {
+            background: rgba(57, 73, 171, 0.1);
+        }
+        
+        .heat-map {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 2px;
+            margin: 1rem 0;
+        }
+        
+        .heat-cell {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .heat-cell:hover {
+            transform: scale(1.05);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        
+        .heat-header {
+            background: #f8f9fa;
+            color: #333;
+        }
+        
+        .heat-low { background: #d4edda; color: #155724; }
+        .heat-medium { background: #fff3cd; color: #856404; }
+        .heat-high { background: #f8d7da; color: #721c24; }
+        .heat-critical { background: #f5c6cb; color: #721c24; }
+        
+        .btn {
+            background: linear-gradient(135deg, #3949ab 0%, #1a237e 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 0.5rem;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s;
+        }
+        
+        .btn:hover {
+            background: linear-gradient(135deg, #1a237e 0%, #3949ab 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+        }
+        
+        .btn-secondary:hover {
+            background: linear-gradient(135deg, #495057 0%, #6c757d 100%);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
+        }
+        
+        .btn-success:hover {
+            background: linear-gradient(135deg, #1e7e34 0%, #28a745 100%);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+        }
+        
+        .btn-danger:hover {
+            background: linear-gradient(135deg, #c82333 0%, #dc3545 100%);
+        }
+        
+        .btn-sm {
+            padding: 0.25rem 0.75rem;
+            font-size: 0.875rem;
+        }
+        
+        .risk-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        
+        .risk-table th, .risk-table td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .risk-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #1a237e;
+            position: sticky;
+            top: 0;
+        }
+        
+        .risk-table tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .risk-level {
+            padding: 0.25rem 0.75rem;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        
+        .level-low { background: #d4edda; color: #155724; }
+        .level-medium { background: #fff3cd; color: #856404; }
+        .level-high { background: #f8d7da; color: #721c24; }
+        .level-critical { background: #f5c6cb; color: #721c24; }
+        
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 2rem 0;
+        }
+        
+        .filter-container {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            min-width: 200px;
+        }
+        
+        .filter-group label {
+            margin-bottom: 0.25rem;
+            font-weight: 500;
+        }
+        
+        .filter-group select, .filter-group input {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .activity-item {
+            padding: 0.75rem;
+            border-left: 3px solid #3949ab;
+            margin-bottom: 1rem;
+            background: #f8f9fa;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .activity-time {
+            font-size: 0.8rem;
+            color: #666;
+        }
+        
+        .activity-user {
+            font-weight: 600;
+            color: #3949ab;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 2rem;
+            border-radius: 10px;
+            width: 80%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .close:hover {
+            color: #000;
+        }
+        
+        .risk-detail {
+            padding: 1rem;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .risk-detail:last-child {
+            border-bottom: none;
+        }
+        
+        .risk-detail h4 {
+            color: #1a237e;
+            margin-bottom: 0.5rem;
+        }
+        
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin-top: 1rem;
+        }
+        
+        .pagination button {
+            background: white;
+            border: 1px solid #ddd;
+            padding: 0.5rem 1rem;
+            margin: 0 0.25rem;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        
+        .pagination button:hover {
+            background: #f8f9fa;
+        }
+        
+        .pagination button.active {
+            background: #3949ab;
+            color: white;
+            border-color: #3949ab;
+        }
+        
+        .report-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+        
+        .report-card {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 8px;
+            border-left: 4px solid #3949ab;
+            transition: transform 0.3s;
+        }
+        
+        .report-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .report-card h3 {
+            color: #1a237e;
+            margin-bottom: 1rem;
+        }
+        
+        .tabs-container {
+            display: flex;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid #ddd;
+            overflow-x: auto;
+        }
+        
+        .tab-button {
+            background: none;
+            border: none;
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+            white-space: nowrap;
+        }
+        
+        .tab-button.active {
+            border-bottom-color: #3949ab;
+            color: #3949ab;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .info-box {
+            background: #e8eaf6;
+            border-left: 4px solid #3949ab;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .warning-box {
+            background: #fff8e1;
+            border-left: 4px solid #ffc107;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .danger-box {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .success-box {
+            background: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .compliance-violation {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .compliance-violation h4 {
+            color: #d32f2f;
+            margin-bottom: 0.5rem;
+        }
+        
+        .deadline-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .deadline-item:last-child {
+            border-bottom: none;
+        }
+        
+        .deadline-urgent {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+        }
+        
+        .deadline-warning {
+            background: #fff8e1;
+            border-left: 4px solid #ffc107;
+        }
+        
+        .deadline-normal {
+            background: #e8f5e9;
+            border-left: 4px solid #4caf50;
+        }
+        
+        .performance-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .performance-table th, .performance-table td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .performance-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #1a237e;
+        }
+        
+        .performance-bar {
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 0.25rem;
+        }
+        
+        .performance-fill {
+            height: 100%;
+            background: #3949ab;
+        }
+        
+        .simulation-controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .simulation-control {
+            display: flex;
+            flex-direction: column;
+            min-width: 150px;
+        }
+        
+        .simulation-control label {
+            margin-bottom: 0.25rem;
+            font-weight: 500;
+        }
+        
+        .simulation-control input, .simulation-control select {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .simulation-result {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+        
+        .calendar-container {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 1px;
+            background: #ddd;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .calendar-header {
+            background: #3949ab;
+            color: white;
+            padding: 0.5rem;
+            text-align: center;
+            font-weight: 600;
+        }
+        
+        .calendar-day {
+            background: white;
+            min-height: 80px;
+            padding: 0.5rem;
+            position: relative;
+        }
+        
+        .calendar-day.other-month {
+            background: #f8f9fa;
+            color: #aaa;
+        }
+        
+        .calendar-day.today {
+            background: #e8eaf6;
+        }
+        
+        .calendar-day-number {
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+        
+        .calendar-event {
+            font-size: 0.75rem;
+            padding: 0.125rem 0.25rem;
+            border-radius: 2px;
+            margin-bottom: 0.125rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .calendar-event.deadline {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+        
+        .calendar-event.review {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+        
+        .calendar-event.report {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        
+        .notification-nav-item {
+            position: relative;
+        }
+        
+        .nav-notification-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            padding: 1rem 1.5rem;
+            border-radius: 0.25rem;
+            transition: all 0.3s ease;
+            color: #6c757d;
+            text-decoration: none;
+        }
+        
+        .nav-notification-container:hover {
+            background-color: rgba(57, 73, 171, 0.05);
+            color: #3949ab;
+            text-decoration: none;
+        }
+        
+        .nav-notification-container.nav-notification-empty {
+            opacity: 0.6;
+            cursor: default;
+        }
+        
+        .nav-notification-container.nav-notification-empty:hover {
+            background-color: transparent;
+            color: #6c757d;
+        }
+        
+        .nav-notification-bell {
+            font-size: 1.1rem;
+            transition: all 0.3s ease;
+        }
+        
+        .nav-notification-container:hover .nav-notification-bell {
+            transform: scale(1.1);
+        }
+        
+        .nav-notification-bell.has-notifications {
+            color: #ffc107;
+            animation: navBellRing 2s infinite;
+        }
+        
+        @keyframes navBellRing {
+            0%, 50%, 100% { transform: rotate(0deg); }
+            10%, 30% { transform: rotate(-10deg); }
+            20%, 40% { transform: rotate(10deg); }
+        }
+        
+        .nav-notification-text {
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        
+        .nav-notification-badge {
+            background: #dc3545;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 0.7rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            animation: navPulse 2s infinite;
+            margin-left: auto;
+        }
+        
+        @keyframes navPulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+        
+        .nav-notification-dropdown {
+            position: fixed !important;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 0.5rem;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+            width: 400px;
+            max-height: 500px;
+            z-index: 1000;
+            display: none;
+            transition: all 0.3s ease;
+            transform: translateY(-10px);
+        }
+        
+        .nav-notification-dropdown.show {
+            display: block;
+            transform: translateY(0);
+            opacity: 1;
+        }
+        
+        .nav-notification-header {
+            padding: 1rem;
+            border-bottom: 1px solid #dee2e6;
+            font-weight: bold;
+            color: #495057;
+            background: #f8f9fa;
+            border-radius: 0.5rem 0.5rem 0 0;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .nav-notification-content {
+            max-height: 350px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            transition: max-height 0.3s ease;
+            scrollbar-width: thin;
+            scrollbar-color: #cbd5e0 #f7fafc;
+            -webkit-overflow-scrolling: touch;
+            scroll-behavior: smooth;
+        }
+        
+        .nav-notification-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .nav-notification-content::-webkit-scrollbar-track {
+            background: #f7fafc;
+            border-radius: 4px;
+        }
+        
+        .nav-notification-content::-webkit-scrollbar-thumb {
+            background: #cbd5e0;
+            border-radius: 4px;
+            transition: background 0.3s ease;
+        }
+        
+        .nav-notification-content::-webkit-scrollbar-thumb:hover {
+            background: #a0aec0;
+        }
+        
+        .nav-notification-item {
+            padding: 1rem;
+            border-bottom: 1px solid #f8f9fa;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        
+        .nav-notification-item:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .nav-notification-item:last-child {
+            border-bottom: none;
+        }
+        
+        .nav-notification-item.read {
+            display: none !important;
+        }
+        
+        .nav-notification-item.unread {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+        
+        .nav-notification-title {
+            font-weight: bold;
+            color: #495057;
+            margin-bottom: 0.25rem;
+        }
+        
+        .nav-notification-risk {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-bottom: 0.25rem;
+        }
+        
+        .nav-notification-message {
+            color: #495057;
+            font-size: 0.85rem;
+            margin-bottom: 0.25rem;
+            background: #f8f9fa;
+            padding: 0.5rem;
+            border-radius: 0.25rem;
+            border-left: 3px solid #007bff;
+        }
+        
+        .nav-notification-date {
+            color: #6c757d;
+            font-size: 0.8rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .nav-notification-actions {
+            margin-top: 0.5rem;
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .nav-notification-actions .btn {
+            font-size: 0.8rem;
+            padding: 0.25rem 0.5rem;
+        }
+        
+        .export-options {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+        
+        .export-options button {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .user-info {
+                margin-top: 1rem;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .filter-container {
+                flex-direction: column;
+            }
+            
+            .report-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .simulation-controls {
+                flex-direction: column;
+            }
+            
+            .nav-tabs {
+                padding: 0 0.5rem;
+            }
+            
+            .nav-tabs button {
+                padding: 0.75rem 0.5rem;
+                font-size: 0.875rem;
+            }
+            
+            .container {
+                padding: 0 1rem;
+            }
+            
+            .card {
+                padding: 1rem;
+            }
+            
+            .chart-container {
+                height: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><i class="fas fa-shield-alt"></i> Compliance Team Dashboard</h1>
+        <div class="user-info">
+            <span>Welcome, <?php echo $_SESSION['full_name']; ?></span>
+            <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</a>
+        </div>
+    </div>
+    
+    <div class="nav-tabs">
+        <button class="active" onclick="showTab('overview')"><i class="fas fa-tachometer-alt"></i> Overview</button>
+        <button onclick="showTab('violations')"><i class="fas fa-exclamation-triangle"></i> Violations</button>
+        <button onclick="showTab('heatmap')"><i class="fas fa-th"></i> Risk Heat Map</button>
+        <button onclick="showTab('reports')"><i class="fas fa-file-alt"></i> Board Reports</button>
+        <button onclick="showTab('analytics')"><i class="fas fa-chart-pie"></i> Analytics</button>
+        <button onclick="showTab('aging')"><i class="fas fa-hourglass-half"></i> Risk Aging</button>
+        <button onclick="showTab('deadlines')"><i class="fas fa-calendar-alt"></i> Deadlines</button>
+        <button onclick="showTab('performance')"><i class="fas fa-trophy"></i> Performance</button>
+        <button onclick="showTab('activities')"><i class="fas fa-history"></i> Activities</button>
+        <li class="notification-nav-item">
+            <?php
+            // Use shared notifications component
+            if (isset($_SESSION['user_id'])) {
+                renderNotificationBar($all_notifications);
+            }
+            ?>
+        </li>
+    </div>
+    
+    <div class="container">
+        <div id="overview-tab" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #1a237e;"><?php echo $stats['total_risks']; ?></div>
+                    <div class="stat-label">Total Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #d32f2f;"><?php echo $stats['critical_risks']; ?></div>
+                    <div class="stat-label">Critical Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #f57c00;"><?php echo $stats['high_risks']; ?></div>
+                    <div class="stat-label">High Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #fbc02d;"><?php echo $stats['medium_risks']; ?></div>
+                    <div class="stat-label">Medium Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #388e3c;"><?php echo $stats['low_risks']; ?></div>
+                    <div class="stat-label">Low Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #0288d1;"><?php echo $stats['open_risks']; ?></div>
+                    <div class="stat-label">Open Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #7b1fa2;"><?php echo $stats['overdue_risks']; ?></div>
+                    <div class="stat-label">Overdue Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #00796b;"><?php echo $stats['in_progress_risks']; ?></div>
+                    <div class="stat-label">In Progress</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #c62828;"><?php echo $stats['board_reportable_risks']; ?></div>
+                    <div class="stat-label">Board Reportable</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #2e7d32;"><?php echo $stats['new_risks']; ?></div>
+                    <div class="stat-label">New Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #1565c0;"><?php echo $stats['existing_risks']; ?></div>
+                    <div class="stat-label">Existing Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #6a1b9a;"><?php echo count($compliance_violations); ?></div>
+                    <div class="stat-label">Compliance Violations</div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Risk Treatment Progress</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #d32f2f;"><?php echo $stats['not_started_treatments']; ?></div>
+                        <div class="stat-label">Not Started</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #f57c00;"><?php echo $stats['in_progress_treatments']; ?></div>
+                        <div class="stat-label">In Progress</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #388e3c;"><?php echo $stats['completed_treatments']; ?></div>
+                        <div class="stat-label">Completed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #1a237e;"><?php echo round($stats['avg_residual_rating'], 1); ?></div>
+                        <div class="stat-label">Avg. Residual Rating</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>High Priority Risks</h2>
+                <div class="filter-container">
+                    <div class="filter-group">
+                        <label for="department-filter">Department</label>
+                        <select id="department-filter">
+                            <option value="">All Departments</option>
+                            <?php foreach ($dept_data as $dept): ?>
+                                <option value="<?php echo $dept['department']; ?>"><?php echo $dept['department']; ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="risk-level-filter">Risk Level</label>
+                        <select id="risk-level-filter">
+                            <option value="">All Levels</option>
+                            <option value="Critical">Critical</option>
+                            <option value="High">High</option>
+                            <option value="Medium">Medium</option>
+                            <option value="Low">Low</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="status-filter">Status</label>
+                        <select id="status-filter">
+                            <option value="">All Statuses</option>
+                            <option value="open">Open</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="completed">Completed</option>
+                            <option value="overdue">Overdue</option>
+                            <option value="closed">Closed</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="search-filter">Search</label>
+                        <input type="text" id="search-filter" placeholder="Search risks...">
+                    </div>
+                    <div class="filter-group">
+                        <label>&nbsp;</label>
+                        <button class="btn btn-sm" onclick="resetFilters()">Reset Filters</button>
+                    </div>
+                </div>
+                
+                <table class="risk-table" id="risks-table">
+                    <thead>
+                        <tr>
+                            <th>Risk ID</th>
+                            <th>Risk Name</th>
+                            <th>Department</th>
+                            <th>Risk Level</th>
+                            <th>Residual Rating</th>
+                            <th>Status</th>
+                            <th>Risk Owner</th>
+                            <th>Created Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php 
+                        $high_priority_risks = array_filter($all_risks, function($risk) {
+                            return in_array($risk['risk_level'], ['Critical', 'High']);
+                        });
+                        $high_priority_risks = array_slice($high_priority_risks, 0, 10);
+                        ?>
+                        <?php foreach ($high_priority_risks as $risk): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars($risk['risk_id_number']); ?></td>
+                                <td><?php echo htmlspecialchars($risk['risk_name']); ?></td>
+                                <td><?php echo htmlspecialchars($risk['department']); ?></td>
+                                <td>
+                                    <span class="risk-level level-<?php echo strtolower($risk['risk_level']); ?>">
+                                        <?php echo $risk['risk_level']; ?>
+                                    </span>
+                                </td>
+                                <td><?php echo $risk['residual_rating']; ?></td>
+                                <td><?php echo ucfirst(str_replace('_', ' ', $risk['status'])); ?></td>
+                                <td><?php echo htmlspecialchars($risk['owner_name']); ?></td>
+                                <td><?php echo date('M d, Y', strtotime($risk['created_at'])); ?></td>
+                                <td>
+                                    <a href="view_risk.php?id=<?php echo $risk['id']; ?>" class="btn btn-sm">
+                                        <i class="fas fa-eye"></i> View
+                                    </a>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+                
+                <div class="pagination">
+                    <button><i class="fas fa-chevron-left"></i></button>
+                    <button class="active">1</button>
+                    <button>2</button>
+                    <button>3</button>
+                    <button><i class="fas fa-chevron-right"></i></button>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Risk Trends</h2>
+                <div class="chart-container">
+                    <canvas id="riskTrendsChart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <div id="violations-tab" class="tab-content" style="display: none;">
+            <div class="card">
+                <h2>Compliance Violations</h2>
+                <div class="info-box">
+                    <p>Risks with residual ratings above 15 that are not yet completed are considered compliance violations and require immediate attention.</p>
+                </div>
+                
+                <?php if (empty($compliance_violations)): ?>
+                    <div class="success-box">
+                        <h3>No Compliance Violations</h3>
+                        <p>Great job! There are currently no compliance violations in the system.</p>
+                    </div>
+                <?php else: ?>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-number" style="color: #d32f2f;"><?php echo count($compliance_violations); ?></div>
+                            <div class="stat-label">Total Violations</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" style="color: #f57c00;"><?php 
+                                $critical_violations = array_filter($compliance_violations, function($risk) {
+                                    return $risk['risk_level'] == 'Critical';
+                                });
+                                echo count($critical_violations);
+                            ?></div>
+                            <div class="stat-label">Critical Violations</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" style="color: #fbc02d;"><?php 
+                                $high_violations = array_filter($compliance_violations, function($risk) {
+                                    return $risk['risk_level'] == 'High';
+                                });
+                                echo count($high_violations);
+                            ?></div>
+                            <div class="stat-label">High Violations</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" style="color: #1a237e;"><?php 
+                                $avg_violation_rating = array_reduce($compliance_violations, function($carry, $risk) {
+                                    return $carry + $risk['residual_rating'];
+                                }, 0) / count($compliance_violations);
+                                echo round($avg_violation_rating, 1);
+                            ?></div>
+                            <div class="stat-label">Avg. Violation Rating</div>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-container">
+                        <div class="filter-group">
+                            <label for="violation-department-filter">Department</label>
+                            <select id="violation-department-filter">
+                                <option value="">All Departments</option>
+                                <?php foreach ($dept_data as $dept): ?>
+                                    <option value="<?php echo $dept['department']; ?>"><?php echo $dept['department']; ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="violation-level-filter">Risk Level</label>
+                            <select id="violation-level-filter">
+                                <option value="">All Levels</option>
+                                <option value="Critical">Critical</option>
+                                <option value="High">High</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="violation-owner-filter">Risk Owner</label>
+                            <select id="violation-owner-filter">
+                                <option value="">All Owners</option>
+                                <?php foreach ($owner_data as $owner): ?>
+                                    <option value="<?php echo $owner['owner_name']; ?>"><?php echo $owner['owner_name']; ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="violation-search-filter">Search</label>
+                            <input type="text" id="violation-search-filter" placeholder="Search violations...">
+                        </div>
+                    </div>
+                    
+                    <div class="table-responsive">
+                        <table class="risk-table" id="violations-table">
+                            <thead>
+                                <tr>
+                                    <th>Risk ID</th>
+                                    <th>Risk Name</th>
+                                    <th>Department</th>
+                                    <th>Risk Level</th>
+                                    <th>Residual Rating</th>
+                                    <th>Status</th>
+                                    <th>Risk Owner</th>
+                                    <th>Days Open</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($compliance_violations as $violation): ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars($violation['risk_id_number']); ?></td>
+                                        <td><?php echo htmlspecialchars($violation['risk_name']); ?></td>
+                                        <td><?php echo htmlspecialchars($violation['department']); ?></td>
+                                        <td>
+                                            <span class="risk-level level-<?php echo strtolower($violation['risk_level']); ?>">
+                                                <?php echo $violation['risk_level']; ?>
+                                            </span>
+                                        </td>
+                                        <td><?php echo $violation['residual_rating']; ?></td>
+                                        <td><?php echo ucfirst(str_replace('_', ' ', $violation['status'])); ?></td>
+                                        <td><?php echo htmlspecialchars($violation['owner_name']); ?></td>
+                                        <td><?php 
+                                            $days_open = floor((time() - strtotime($violation['created_at'])) / (60 * 60 * 24));
+                                            echo $days_open;
+                                        ?></td>
+                                        <td>
+                                            <a href="view_risk.php?id=<?php echo $violation['id']; ?>" class="btn btn-sm">
+                                                <i class="fas fa-eye"></i> View
+                                            </a>
+                                            <button class="btn btn-sm btn-danger" onclick="escalateViolation(<?php echo $violation['id']; ?>)">
+                                                <i class="fas fa-exclamation-triangle"></i> Escalate
+                                            </button>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+        
+        <div id="heatmap-tab" class="tab-content" style="display: none;">
+            <div class="card">
+                <h2>Risk Heat Map</h2>
+                <div class="info-box">
+                    <p>This matrix shows the relationship between probability and impact for risk assessment. Click on any cell to view detailed risks in that category.</p>
+                </div>
+                
+                <div class="heat-map" id="risk-heatmap">
+                    <div class="heat-cell heat-header"></div>
+                    <div class="heat-cell heat-header">1</div>
+                    <div class="heat-cell heat-header">2</div>
+                    <div class="heat-cell heat-header">3</div>
+                    <div class="heat-cell heat-header">4</div>
+                    <div class="heat-cell heat-header">5</div>
+                    
+                    <?php 
+                    // Initialize heatmap data
+                    $heatmap_data = array_fill(1, 5, array_fill(1, 5, []));
+                    
+                    // Populate heatmap data with actual risks
+                    foreach ($all_risks as $risk) {
+                        $prob = $risk['probability'];
+                        $impact = $risk['impact'];
+                        if ($prob >= 1 && $prob <= 5 && $impact >= 1 && $impact <= 5) {
+                            $heatmap_data[$prob][$impact][] = $risk;
+                        }
+                    }
+                    
+                    // Generate heatmap cells
+                    for ($prob = 5; $prob >= 1; $prob--): ?>
+                        <div class="heat-cell heat-header"><?php echo $prob; ?></div>
+                        <?php for ($impact = 1; $impact <= 5; $impact++): 
+                            $score = $prob * $impact;
+                            $level = 'low';
+                            if ($score > 20) $level = 'critical';
+                            elseif ($score > 12) $level = 'high';
+                            elseif ($score > 6) $level = 'medium';
+                            
+                            $risks_in_cell = $heatmap_data[$prob][$impact];
+                            $count = count($risks_in_cell);
+                        ?>
+                            <div class="heat-cell heat-<?php echo $level; ?>" 
+                                 data-prob="<?php echo $prob; ?>" 
+                                 data-impact="<?php echo $impact; ?>"
+                                 data-count="<?php echo $count; ?>"
+                                 onclick="showHeatmapDetails(<?php echo $prob; ?>, <?php echo $impact; ?>)">
+                                <?php echo $count; ?>
+                            </div>
+                        <?php endfor; ?>
+                    <?php endfor; ?>
+                </div>
+                
+                <div style="margin-top: 2rem;">
+                    <h3>Legend</h3>
+                    <div style="display: flex; gap: 1rem; margin-top: 1rem; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div class="heat-cell heat-low" style="width: 30px; height: 30px;"></div>
+                            <span>Low (1-6)</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div class="heat-cell heat-medium" style="width: 30px; height: 30px;"></div>
+                            <span>Medium (7-12)</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div class="heat-cell heat-high" style="width: 30px; height: 30px;"></div>
+                            <span>High (13-20)</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div class="heat-cell heat-critical" style="width: 30px; height: 30px;"></div>
+                            <span>Critical (21-25)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="reports-tab" class="tab-content" style="display: none;">
+            <div class="card">
+                <h2>Board Reports</h2>
+                <div class="report-grid">
+                    <div class="report-card">
+                        <h3><i class="fas fa-file-contract"></i> Executive Summary</h3>
+                        <p>Generate comprehensive risk reports for board meetings including risk distribution, treatment progress, and key metrics.</p>
+                        <a href="generate_board_report.php" class="btn">Generate Executive Report</a>
+                    </div>
+                    <div class="report-card">
+                        <h3><i class="fas fa-chart-line"></i> Risk Trend Analysis</h3>
+                        <p>Analyze risk trends over time periods to identify patterns and emerging risks.</p>
+                        <a href="trend_analysis.php" class="btn">View Trends</a>
+                    </div>
+                    <div class="report-card">
+                        <h3><i class="fas fa-building"></i> Department Reports</h3>
+                        <p>Department-specific risk analysis with detailed breakdowns and comparisons.</p>
+                        <a href="department_reports.php" class="btn">Department Analysis</a>
+                    </div>
+                    <div class="report-card">
+                        <h3><i class="fas fa-exclamation-triangle"></i> Compliance Report</h3>
+                        <p>Detailed compliance status report with violations and remediation actions.</p>
+                        <a href="compliance_report.php" class="btn">Compliance Analysis</a>
+                    </div>
+                    <div class="report-card">
+                        <h3><i class="fas fa-download"></i> Export Data</h3>
+                        <p>Download risk data in various formats (CSV, Excel, PDF) for further analysis.</p>
+                        <div class="export-options">
+                            <button class="btn btn-sm" onclick="exportData('csv')">
+                                <i class="fas fa-file-csv"></i> CSV
+                            </button>
+                            <button class="btn btn-sm" onclick="exportData('excel')">
+                                <i class="fas fa-file-excel"></i> Excel
+                            </button>
+                            <button class="btn btn-sm" onclick="exportData('pdf')">
+                                <i class="fas fa-file-pdf"></i> PDF
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Compliance Metrics</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #1a237e;"><?php echo round(($stats['completed_treatments'] / $stats['total_risks']) * 100, 1); ?>%</div>
+                        <div class="stat-label">Treatment Completion</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #388e3c;"><?php echo round($stats['avg_inherent_rating'] - $stats['avg_residual_rating'], 1); ?></div>
+                        <div class="stat-label">Avg. Risk Reduction</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #f57c00;"><?php echo round(($stats['overdue_risks'] / $stats['total_risks']) * 100, 1); ?>%</div>
+                        <div class="stat-label">Overdue Risks</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #0288d1;"><?php echo count($dept_data); ?></div>
+                        <div class="stat-label">Departments with Risks</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="analytics-tab" class="tab-content" style="display: none;">
+            <div class="tabs-container">
+                <button class="tab-button active" onclick="showAnalyticsTab('risk-level')">Risk Levels</button>
+                <button class="tab-button" onclick="showAnalyticsTab('departments')">Departments</button>
+                <button class="tab-button" onclick="showAnalyticsTab('categories')">Categories</button>
+                <button class="tab-button" onclick="showAnalyticsTab('treatment')">Treatment Progress</button>
+                <button class="tab-button" onclick="showAnalyticsTab('owners')">Risk Owners</button>
+                <button class="tab-button" onclick="showAnalyticsTab('monitoring')">Monitoring</button>
+                <button class="tab-button" onclick="showAnalyticsTab('trends')">Risk Trends</button>
+                <button class="tab-button" onclick="showAnalyticsTab('aging')">Risk Aging</button>
+            </div>
+            
+            <div id="risk-level-analytics" class="analytics-tab-content active">
+                <div class="card">
+                    <h2>Risk Level Distribution</h2>
+                    <div class="chart-container">
+                        <canvas id="riskLevelChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="departments-analytics" class="analytics-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Risks by Department</h2>
+                    <div class="chart-container">
+                        <canvas id="departmentChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="categories-analytics" class="analytics-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Risk Categories Distribution</h2>
+                    <div class="chart-container">
+                        <canvas id="categoriesChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="treatment-analytics" class="analytics-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Treatment Progress</h2>
+                    <div class="chart-container">
+                        <canvas id="treatmentChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="owners-analytics" class="analytics-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Risks by Owner</h2>
+                    <div class="chart-container">
+                        <canvas id="ownersChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="monitoring-analytics" class="analytics-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Monitoring Frequency</h2>
+                    <div class="chart-container">
+                        <canvas id="monitoringChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="trends-analytics" class="analytics-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Risk Trends Over Time</h2>
+                    <div class="chart-container">
+                        <canvas id="trendsAnalyticsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="aging-analytics" class="analytics-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Risk Aging Analysis</h2>
+                    <div class="chart-container">
+                        <canvas id="agingAnalyticsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="aging-tab" class="tab-content" style="display: none;">
+            <div class="card">
+                <h2>Risk Aging Analysis</h2>
+                <div class="info-box">
+                    <p>This analysis shows how long risks have been open without resolution. Risks open for extended periods may require additional attention or escalation.</p>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #d32f2f;"><?php 
+                            $critical_aging = array_filter($risk_aging, function($risk) {
+                                return $risk['aging_category'] == 'Critical';
+                            });
+                            echo count($critical_aging);
+                        ?></div>
+                        <div class="stat-label">Critical (>90 days)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #f57c00;"><?php 
+                            $high_aging = array_filter($risk_aging, function($risk) {
+                                return $risk['aging_category'] == 'High';
+                            });
+                            echo count($high_aging);
+                        ?></div>
+                        <div class="stat-label">High (61-90 days)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #fbc02d;"><?php 
+                            $medium_aging = array_filter($risk_aging, function($risk) {
+                                return $risk['aging_category'] == 'Medium';
+                            });
+                            echo count($medium_aging);
+                        ?></div>
+                        <div class="stat-label">Medium (31-60 days)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #388e3c;"><?php 
+                            $low_aging = array_filter($risk_aging, function($risk) {
+                                return $risk['aging_category'] == 'Low';
+                            });
+                            echo count($low_aging);
+                        ?></div>
+                        <div class="stat-label">Low (≤30 days)</div>
+                    </div>
+                </div>
+                
+                <div class="filter-container">
+                    <div class="filter-group">
+                        <label for="aging-department-filter">Department</label>
+                        <select id="aging-department-filter">
+                            <option value="">All Departments</option>
+                            <?php foreach ($dept_data as $dept): ?>
+                                <option value="<?php echo $dept['department']; ?>"><?php echo $dept['department']; ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="aging-category-filter">Aging Category</label>
+                        <select id="aging-category-filter">
+                            <option value="">All Categories</option>
+                            <option value="Critical">Critical (>90 days)</option>
+                            <option value="High">High (61-90 days)</option>
+                            <option value="Medium">Medium (31-60 days)</option>
+                            <option value="Low">Low (≤30 days)</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="aging-risk-level-filter">Risk Level</label>
+                        <select id="aging-risk-level-filter">
+                            <option value="">All Levels</option>
+                            <option value="Critical">Critical</option>
+                            <option value="High">High</option>
+                            <option value="Medium">Medium</option>
+                            <option value="Low">Low</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="aging-search-filter">Search</label>
+                        <input type="text" id="aging-search-filter" placeholder="Search risks...">
+                    </div>
+                </div>
+                
+                <div class="table-responsive">
+                    <table class="risk-table" id="aging-table">
+                        <thead>
+                            <tr>
+                                <th>Risk ID</th>
+                                <th>Risk Name</th>
+                                <th>Department</th>
+                                <th>Risk Level</th>
+                                <th>Status</th>
+                                <th>Days Open</th>
+                                <th>Aging Category</th>
+                                <th>Risk Owner</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($risk_aging as $risk): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($risk['risk_id_number']); ?></td>
+                                    <td><?php echo htmlspecialchars($risk['risk_name']); ?></td>
+                                    <td><?php echo htmlspecialchars($risk['department']); ?></td>
+                                    <td>
+                                        <span class="risk-level level-<?php echo strtolower($risk['risk_level']); ?>">
+                                            <?php echo $risk['risk_level']; ?>
+                                        </span>
+                                    </td>
+                                    <td><?php echo ucfirst(str_replace('_', ' ', $risk['status'])); ?></td>
+                                    <td><?php echo $risk['days_open']; ?></td>
+                                    <td>
+                                        <span class="risk-level level-<?php echo strtolower($risk['aging_category']); ?>">
+                                            <?php echo $risk['aging_category']; ?>
+                                        </span>
+                                    </td>
+                                    <td><?php echo htmlspecialchars($risk['owner_name']); ?></td>
+                                    <td>
+                                        <a href="view_risk.php?id=<?php echo $risk['id']; ?>" class="btn btn-sm">
+                                            <i class="fas fa-eye"></i> View
+                                        </a>
+                                        <?php if ($risk['aging_category'] == 'Critical'): ?>
+                                            <button class="btn btn-sm btn-danger" onclick="escalateRisk(<?php echo $risk['id']; ?>)">
+                                                <i class="fas fa-exclamation-triangle"></i> Escalate
+                                            </button>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
+        <div id="deadlines-tab" class="tab-content" style="display: none;">
+            <div class="card">
+                <h2>Upcoming Compliance Deadlines</h2>
+                <div class="info-box">
+                    <p>This view shows all upcoming risk treatment deadlines. Risks with approaching deadlines may require additional attention to ensure timely completion.</p>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #d32f2f;"><?php 
+                            $urgent_deadlines = array_filter($upcoming_deadlines, function($deadline) {
+                                return $deadline['days_until_deadline'] <= 7;
+                            });
+                            echo count($urgent_deadlines);
+                        ?></div>
+                        <div class="stat-label">Urgent (≤7 days)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #f57c00;"><?php 
+                            $warning_deadlines = array_filter($upcoming_deadlines, function($deadline) {
+                                return $deadline['days_until_deadline'] > 7 && $deadline['days_until_deadline'] <= 30;
+                            });
+                            echo count($warning_deadlines);
+                        ?></div>
+                        <div class="stat-label">Warning (8-30 days)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #388e3c;"><?php 
+                            $normal_deadlines = array_filter($upcoming_deadlines, function($deadline) {
+                                return $deadline['days_until_deadline'] > 30;
+                            });
+                            echo count($normal_deadlines);
+                        ?></div>
+                        <div class="stat-label">Normal (>30 days)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #1a237e;"><?php echo count($upcoming_deadlines); ?></div>
+                        <div class="stat-label">Total Deadlines</div>
+                    </div>
+                </div>
+                
+                <div class="filter-container">
+                    <div class="filter-group">
+                        <label for="deadline-department-filter">Department</label>
+                        <select id="deadline-department-filter">
+                            <option value="">All Departments</option>
+                            <?php foreach ($dept_data as $dept): ?>
+                                <option value="<?php echo $dept['department']; ?>"><?php echo $dept['department']; ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="deadline-urgency-filter">Urgency</label>
+                        <select id="deadline-urgency-filter">
+                            <option value="">All Levels</option>
+                            <option value="urgent">Urgent (≤7 days)</option>
+                            <option value="warning">Warning (8-30 days)</option>
+                            <option value="normal">Normal (>30 days)</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="deadline-owner-filter">Risk Owner</label>
+                        <select id="deadline-owner-filter">
+                            <option value="">All Owners</option>
+                            <?php foreach ($owner_data as $owner): ?>
+                                <option value="<?php echo $owner['owner_name']; ?>"><?php echo $owner['owner_name']; ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="deadline-search-filter">Search</label>
+                        <input type="text" id="deadline-search-filter" placeholder="Search risks...">
+                    </div>
+                </div>
+                
+                <div class="deadline-list">
+                    <?php foreach ($upcoming_deadlines as $deadline): 
+                        $deadline_class = 'deadline-normal';
+                        if ($deadline['days_until_deadline'] <= 7) {
+                            $deadline_class = 'deadline-urgent';
+                        } elseif ($deadline['days_until_deadline'] <= 30) {
+                            $deadline_class = 'deadline-warning';
+                        }
+                    ?>
+                        <div class="deadline-item <?php echo $deadline_class; ?>">
+                            <div>
+                                <strong><?php echo htmlspecialchars($deadline['risk_name']); ?></strong>
+                                <div style="font-size: 0.9rem; color: #666;">
+                                    <?php echo htmlspecialchars($deadline['department']); ?> • 
+                                    Status: <?php echo ucfirst(str_replace('_', ' ', $deadline['status'])); ?>
+                                </div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-weight: 600;">
+                                    <?php echo date('M d, Y', strtotime($deadline['target_completion_date'])); ?>
+                                </div>
+                                <div style="font-size: 0.9rem; color: #666;">
+                                    <?php 
+                                        if ($deadline['days_until_deadline'] < 0) {
+                                            echo abs($deadline['days_until_deadline']) . ' days overdue';
+                                        } else {
+                                            echo $deadline['days_until_deadline'] . ' days remaining';
+                                        }
+                                    ?>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </div>
+        
+        <div id="performance-tab" class="tab-content" style="display: none;">
+            <div class="card">
+                <h2>Department Performance Metrics</h2>
+                <div class="info-box">
+                    <p>This view shows how each department is performing in terms of risk management, including completion rates and average risk ratings.</p>
+                </div>
+                
+                <div class="table-responsive">
+                    <table class="performance-table">
+                        <thead>
+                            <tr>
+                                <th>Department</th>
+                                <th>Total Risks</th>
+                                <th>Completion Rate</th>
+                                <th>Overdue Risks</th>
+                                <th>Avg. Residual Rating</th>
+                                <th>Last Activity</th>
+                                <th>Performance</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($department_performance as $dept): 
+                                $completion_rate = round(($dept['completed_risks'] / $dept['total_risks']) * 100, 1);
+                                $overdue_rate = round(($dept['overdue_risks'] / $dept['total_risks']) * 100, 1);
+                                
+                                // Calculate performance score
+                                $performance_score = $completion_rate - ($overdue_rate * 2) - ($dept['avg_residual_rating'] * 5);
+                                $performance_class = 'level-low';
+                                $performance_label = 'Excellent';
+                                
+                                if ($performance_score < 50) {
+                                    $performance_class = 'level-critical';
+                                    $performance_label = 'Poor';
+                                } elseif ($performance_score < 70) {
+                                    $performance_class = 'level-high';
+                                    $performance_label = 'Fair';
+                                } elseif ($performance_score < 85) {
+                                    $performance_class = 'level-medium';
+                                    $performance_label = 'Good';
+                                }
+                            ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($dept['department']); ?></td>
+                                    <td><?php echo $dept['total_risks']; ?></td>
+                                    <td>
+                                        <div><?php echo $completion_rate; ?>%</div>
+                                        <div class="performance-bar">
+                                            <div class="performance-fill" style="width: <?php echo $completion_rate; ?>%;"></div>
+                                        </div>
+                                    </td>
+                                    <td><?php echo $dept['overdue_risks']; ?> (<?php echo $overdue_rate; ?>%)</td>
+                                    <td><?php echo round($dept['avg_residual_rating'], 1); ?></td>
+                                    <td><?php echo date('M d, Y', strtotime($dept['last_activity'])); ?></td>
+                                    <td>
+                                        <span class="risk-level <?php echo $performance_class; ?>">
+                                            <?php echo $performance_label; ?>
+                                        </span>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Performance Comparison</h2>
+                <div class="chart-container">
+                    <canvas id="performanceComparisonChart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <div id="activities-tab" class="tab-content" style="display: none;">
+            <div class="card">
+                <h2>Recent Activities</h2>
+                <div class="filter-container">
+                    <div class="filter-group">
+                        <label for="activity-user-filter">User</label>
+                        <select id="activity-user-filter">
+                            <option value="">All Users</option>
+                            <?php 
+                            $users_query = "SELECT id, full_name FROM users WHERE role IN ('admin', 'compliance_team', 'risk_owner') ORDER BY full_name";
+                            $users_stmt = $db->prepare($users_query);
+                            $users_stmt->execute();
+                            $users = $users_stmt->fetchAll(PDO::FETCH_ASSOC);
+                            foreach ($users as $user): ?>
+                                <option value="<?php echo $user['id']; ?>"><?php echo htmlspecialchars($user['full_name']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="activity-action-filter">Action</label>
+                        <select id="activity-action-filter">
+                            <option value="">All Actions</option>
+                            <option value="CREATE">Create</option>
+                            <option value="UPDATE">Update</option>
+                            <option value="DELETE">Delete</option>
+                            <option value="LOGIN">Login</option>
+                            <option value="LOGOUT">Logout</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="activity-date-filter">Date Range</label>
+                        <select id="activity-date-filter">
+                            <option value="today">Today</option>
+                            <option value="week">This Week</option>
+                            <option value="month" selected>This Month</option>
+                            <option value="quarter">This Quarter</option>
+                            <option value="year">This Year</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="activity-list" id="activity-list">
+                    <?php foreach ($recent_activities as $activity): ?>
+                        <div class="activity-item">
+                            <div class="activity-time"><?php echo date('M d, Y H:i', strtotime($activity['created_at'])); ?></div>
+                            <div class="activity-user"><?php echo htmlspecialchars($activity['full_name']); ?></div>
+                            <div class="activity-action"><?php echo htmlspecialchars($activity['action']); ?></div>
+                            <div class="activity-description"><?php echo htmlspecialchars($activity['description']); ?></div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+                
+                <div style="text-align: center; margin-top: 1rem;">
+                    <button class="btn btn-secondary" onclick="loadMoreActivities()">Load More Activities</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Heatmap Details Modal -->
+    <div id="heatmap-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Risks Details</h2>
+            <div id="heatmap-details">
+                <!-- Details will be populated here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Risk Details Modal -->
+    <div id="risk-details-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Risk Details</h2>
+            <div id="risk-details-content">
+                <!-- Details will be populated here -->
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Tab switching functionality
+        function showTab(tabName) {
+            // Hide all tabs
+            const tabs = document.querySelectorAll('.tab-content');
+            tabs.forEach(tab => tab.style.display = 'none');
+            
+            // Remove active class from all buttons
+            const buttons = document.querySelectorAll('.nav-tabs button');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            
+            // Show selected tab
+            document.getElementById(tabName + '-tab').style.display = 'block';
+            event.target.classList.add('active');
+            
+            // Initialize charts when analytics tab is shown
+            if (tabName === 'analytics') {
+                initializeCharts();
+            }
+        }
+        
+        // Analytics tab switching
+        function showAnalyticsTab(tabName) {
+            // Hide all analytics tabs
+            const tabs = document.querySelectorAll('.analytics-tab-content');
+            tabs.forEach(tab => tab.style.display = 'none');
+            
+            // Remove active class from all buttons
+            const buttons = document.querySelectorAll('.tab-button');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            
+            // Show selected tab
+            document.getElementById(tabName + '-analytics').style.display = 'block';
+            event.target.classList.add('active');
+            
+            // Initialize specific chart
+            switch(tabName) {
+                case 'risk-level':
+                    initRiskLevelChart();
+                    break;
+                case 'departments':
+                    initDepartmentChart();
+                    break;
+                case 'categories':
+                    initCategoriesChart();
+                    break;
+                case 'treatment':
+                    initTreatmentChart();
+                    break;
+                case 'owners':
+                    initOwnersChart();
+                    break;
+                case 'monitoring':
+                    initMonitoringChart();
+                    break;
+                case 'trends':
+                    initTrendsAnalyticsChart();
+                    break;
+                case 'aging':
+                    initAgingAnalyticsChart();
+                    break;
+            }
+        }
+        
+        // Initialize all charts
+        function initializeCharts() {
+            initRiskLevelChart();
+        }
+        
+        // Risk Level Chart
+        function initRiskLevelChart() {
+            const ctx = document.getElementById('riskLevelChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.riskLevelChart) {
+                window.riskLevelChart.destroy();
+            }
+            
+            window.riskLevelChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Critical', 'High', 'Medium', 'Low'],
+                    datasets: [{
+                        data: [
+                            <?php echo $stats['critical_risks']; ?>,
+                            <?php echo $stats['high_risks']; ?>,
+                            <?php echo $stats['medium_risks']; ?>,
+                            <?php echo $stats['low_risks']; ?>
+                        ],
+                        backgroundColor: ['#d32f2f', '#f57c00', '#fbc02d', '#388e3c']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Risk Level Distribution'
+                        },
+                        legend: {
+                            position: 'right'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Risk Trends Chart (for Overview tab)
+        document.addEventListener('DOMContentLoaded', function() {
+            const trendsCtx = document.getElementById('riskTrendsChart');
+            if (trendsCtx) {
+                new Chart(trendsCtx, {
+                    type: 'line',
+                    data: {
+                        labels: <?php echo json_encode(array_column($risk_trends, 'month')); ?>,
+                        datasets: [
+                            {
+                                label: 'Total Risks',
+                                data: <?php echo json_encode(array_column($risk_trends, 'risk_count')); ?>,
+                                borderColor: '#3949ab',
+                                backgroundColor: 'rgba(57, 73, 171, 0.1)',
+                                fill: true
+                            },
+                            {
+                                label: 'Critical Risks',
+                                data: <?php echo json_encode(array_column($risk_trends, 'critical_count')); ?>,
+                                borderColor: '#d32f2f',
+                                backgroundColor: 'rgba(211, 47, 47, 0.1)',
+                                fill: true
+                            },
+                            {
+                                label: 'High Risks',
+                                data: <?php echo json_encode(array_column($risk_trends, 'high_count')); ?>,
+                                borderColor: '#f57c00',
+                                backgroundColor: 'rgba(245, 124, 0, 0.1)',
+                                fill: true
+                            },
+                            {
+                                label: 'Completed Risks',
+                                data: <?php echo json_encode(array_column($risk_trends, 'completed_count')); ?>,
+                                borderColor: '#388e3c',
+                                backgroundColor: 'rgba(56, 142, 60, 0.1)',
+                                fill: true
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Risk Trends Over Time'
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        
+        // Department Chart
+        function initDepartmentChart() {
+            const ctx = document.getElementById('departmentChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.departmentChart) {
+                window.departmentChart.destroy();
+            }
+            
+            window.departmentChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: <?php echo json_encode(array_column($dept_data, 'department')); ?>,
+                    datasets: [{
+                        label: 'Number of Risks',
+                        data: <?php echo json_encode(array_column($dept_data, 'count')); ?>,
+                        backgroundColor: '#3949ab'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Risks by Department'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Categories Chart
+        function initCategoriesChart() {
+            const ctx = document.getElementById('categoriesChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.categoriesChart) {
+                window.categoriesChart.destroy();
+            }
+            
+            window.categoriesChart = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: <?php echo json_encode(array_column($categories_data, 'category')); ?>,
+                    datasets: [{
+                        data: <?php echo json_encode(array_column($categories_data, 'count')); ?>,
+                        backgroundColor: [
+                            '#3949ab', '#1a237e', '#5c6bc0', '#7986cb', '#9fa8da',
+                            '#d32f2f', '#f57c00', '#fbc02d', '#388e3c', '#00796b',
+                            '#0288d1', '#7b1fa2', '#c2185b', '#5d4037', '#616161'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Risk Categories Distribution'
+                        },
+                        legend: {
+                            position: 'right'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Treatment Progress Chart
+        function initTreatmentChart() {
+            const ctx = document.getElementById('treatmentChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.treatmentChart) {
+                window.treatmentChart.destroy();
+            }
+            
+            window.treatmentChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: <?php echo json_encode(array_column($treatment_data, 'treatment_status')); ?>,
+                    datasets: [{
+                        label: 'Number of Risks',
+                        data: <?php echo json_encode(array_column($treatment_data, 'count')); ?>,
+                        backgroundColor: [
+                            '#d32f2f', // Not Started
+                            '#f57c00', // In Progress
+                            '#388e3c'  // Completed
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Treatment Progress'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Risk Owners Chart
+        function initOwnersChart() {
+            const ctx = document.getElementById('ownersChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.ownersChart) {
+                window.ownersChart.destroy();
+            }
+            
+            window.ownersChart = new Chart(ctx, {
+                type: 'horizontalBar',
+                data: {
+                    labels: <?php echo json_encode(array_column($owner_data, 'owner_name')); ?>,
+                    datasets: [{
+                        label: 'Number of Risks',
+                        data: <?php echo json_encode(array_column($owner_data, 'count')); ?>,
+                        backgroundColor: '#3949ab'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Risks by Owner'
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Monitoring Frequency Chart
+        function initMonitoringChart() {
+            const ctx = document.getElementById('monitoringChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.monitoringChart) {
+                window.monitoringChart.destroy();
+            }
+            
+            window.monitoringChart = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: <?php echo json_encode(array_column($monitoring_data, 'monitoring_frequency')); ?>,
+                    datasets: [{
+                        data: <?php echo json_encode(array_column($monitoring_data, 'count')); ?>,
+                        backgroundColor: [
+                            '#3949ab', // Weekly
+                            '#1a237e', // Monthly
+                            '#5c6bc0', // Quarterly
+                            '#7986cb'  // Annually
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Monitoring Frequency'
+                        },
+                        legend: {
+                            position: 'right'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Trends Analytics Chart
+        function initTrendsAnalyticsChart() {
+            const ctx = document.getElementById('trendsAnalyticsChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.trendsAnalyticsChart) {
+                window.trendsAnalyticsChart.destroy();
+            }
+            
+            window.trendsAnalyticsChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: <?php echo json_encode(array_column($risk_trends, 'month')); ?>,
+                    datasets: [
+                        {
+                            label: 'Total Risks',
+                            data: <?php echo json_encode(array_column($risk_trends, 'risk_count')); ?>,
+                            borderColor: '#3949ab',
+                            backgroundColor: 'rgba(57, 73, 171, 0.1)',
+                            fill: true
+                        },
+                        {
+                            label: 'Critical Risks',
+                            data: <?php echo json_encode(array_column($risk_trends, 'critical_count')); ?>,
+                            borderColor: '#d32f2f',
+                            backgroundColor: 'rgba(211, 47, 47, 0.1)',
+                            fill: true
+                        },
+                        {
+                            label: 'High Risks',
+                            data: <?php echo json_encode(array_column($risk_trends, 'high_count')); ?>,
+                            borderColor: '#f57c00',
+                            backgroundColor: 'rgba(245, 124, 0, 0.1)',
+                            fill: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Risk Trends Over Time'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Aging Analytics Chart
+        function initAgingAnalyticsChart() {
+            const ctx = document.getElementById('agingAnalyticsChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.agingAnalyticsChart) {
+                window.agingAnalyticsChart.destroy();
+            }
+            
+            // Prepare aging data
+            const agingData = {
+                'Critical (>90 days)': <?php 
+                    $critical_aging = array_filter($risk_aging, function($risk) {
+                        return $risk['aging_category'] == 'Critical';
+                    });
+                    echo count($critical_aging);
+                ?>,
+                'High (61-90 days)': <?php 
+                    $high_aging = array_filter($risk_aging, function($risk) {
+                        return $risk['aging_category'] == 'High';
+                    });
+                    echo count($high_aging);
+                ?>,
+                'Medium (31-60 days)': <?php 
+                    $medium_aging = array_filter($risk_aging, function($risk) {
+                        return $risk['aging_category'] == 'Medium';
+                    });
+                    echo count($medium_aging);
+                ?>,
+                'Low (≤30 days)': <?php 
+                    $low_aging = array_filter($risk_aging, function($risk) {
+                        return $risk['aging_category'] == 'Low';
+                    });
+                    echo count($low_aging);
+                ?>
+            };
+            
+            window.agingAnalyticsChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(agingData),
+                    datasets: [{
+                        data: Object.values(agingData),
+                        backgroundColor: [
+                            '#d32f2f', // Critical
+                            '#f57c00', // High
+                            '#fbc02d', // Medium
+                            '#388e3c'  // Low
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Risk Aging Distribution'
+                        },
+                        legend: {
+                            position: 'right'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Performance Comparison Chart
+        document.addEventListener('DOMContentLoaded', function() {
+            const performanceCtx = document.getElementById('performanceComparisonChart');
+            if (performanceCtx) {
+                // Prepare performance data
+                const departments = <?php echo json_encode(array_column($department_performance, 'department')); ?>;
+                const completionRates = <?php echo json_encode(array_map(function($dept) {
+                    return round(($dept['completed_risks'] / $dept['total_risks']) * 100, 1);
+                }, $department_performance)); ?>;
+                const overdueRates = <?php echo json_encode(array_map(function($dept) {
+                    return round(($dept['overdue_risks'] / $dept['total_risks']) * 100, 1);
+                }, $department_performance)); ?>;
+                const residualRatings = <?php echo json_encode(array_column($department_performance, 'avg_residual_rating')); ?>;
+                
+                new Chart(performanceCtx, {
+                    type: 'radar',
+                    data: {
+                        labels: departments,
+                        datasets: [
+                            {
+                                label: 'Completion Rate',
+                                data: completionRates,
+                                backgroundColor: 'rgba(56, 142, 60, 0.2)',
+                                borderColor: '#388e3c',
+                                pointBackgroundColor: '#388e3c'
+                            },
+                            {
+                                label: 'Overdue Rate (Inverted)',
+                                data: overdueRates.map(rate => 100 - rate),
+                                backgroundColor: 'rgba(211, 47, 47, 0.2)',
+                                borderColor: '#d32f2f',
+                                pointBackgroundColor: '#d32f2f'
+                            },
+                            {
+                                label: 'Risk Rating (Inverted)',
+                                data: residualRatings.map(rating => 25 - rating),
+                                backgroundColor: 'rgba(57, 73, 171, 0.2)',
+                                borderColor: '#3949ab',
+                                pointBackgroundColor: '#3949ab'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Department Performance Comparison'
+                            }
+                        },
+                        scales: {
+                            r: {
+                                beginAtZero: true,
+                                max: 100
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        
+        // Heatmap Details Modal
+        const heatmapModal = document.getElementById('heatmap-modal');
+        const riskDetailsModal = document.getElementById('risk-details-modal');
+        
+        const closeButtons = document.getElementsByClassName("close");
+        for (let i = 0; i < closeButtons.length; i++) {
+            closeButtons[i].onclick = function() {
+                heatmapModal.style.display = "none";
+                riskDetailsModal.style.display = "none";
+            }
+        }
+        
+        window.onclick = function(event) {
+            if (event.target == heatmapModal) {
+                heatmapModal.style.display = "none";
+            }
+            if (event.target == riskDetailsModal) {
+                riskDetailsModal.style.display = "none";
+            }
+        }
+        
+        // Show heatmap details
+        function showHeatmapDetails(probability, impact) {
+            // Get risks for this cell
+            const risksInCell = <?php echo json_encode($heatmap_data); ?>[probability][impact];
+            
+            let detailsHTML = `<h3>Risks with Probability: ${probability} and Impact: ${impact}</h3>`;
+            
+            if (risksInCell.length === 0) {
+                detailsHTML += '<p>No risks found in this category.</p>';
+            } else {
+                detailsHTML += '<div class="risk-details-list">';
+                risksInCell.forEach(risk => {
+                    detailsHTML += `
+                        <div class="risk-detail">
+                            <h4>${risk.risk_name} (${risk.risk_id_number})</h4>
+                            <p><strong>Department:</strong> ${risk.department}</p>
+                            <p><strong>Risk Level:</strong> ${risk.risk_level}</p>
+                            <p><strong>Status:</strong> ${risk.status}</p>
+                            <p><strong>Risk Owner:</strong> ${risk.owner_name}</p>
+                            <a href="view_risk.php?id=${risk.id}" class="btn">View Details</a>
+                        </div>
+                    `;
+                });
+                detailsHTML += '</div>';
+            }
+            
+            document.getElementById('heatmap-details').innerHTML = detailsHTML;
+            heatmapModal.style.display = "block";
+        }
+        
+        // Filter functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            // Overview tab filters
+            const departmentFilter = document.getElementById('department-filter');
+            const riskLevelFilter = document.getElementById('risk-level-filter');
+            const statusFilter = document.getElementById('status-filter');
+            const searchFilter = document.getElementById('search-filter');
+            const risksTable = document.getElementById('risks-table');
+            
+            function filterTable() {
+                const departmentValue = departmentFilter ? departmentFilter.value.toLowerCase() : '';
+                const riskLevelValue = riskLevelFilter ? riskLevelFilter.value.toLowerCase() : '';
+                const statusValue = statusFilter ? statusFilter.value.toLowerCase() : '';
+                const searchValue = searchFilter ? searchFilter.value.toLowerCase() : '';
+                
+                const rows = risksTable.getElementsByTagName('tr');
+                
+                for (let i = 1; i < rows.length; i++) {
+                    const departmentCell = rows[i].getElementsByTagName('td')[2];
+                    const riskLevelCell = rows[i].getElementsByTagName('td')[3];
+                    const statusCell = rows[i].getElementsByTagName('td')[5];
+                    const nameCell = rows[i].getElementsByTagName('td')[1];
+                    
+                    const departmentText = departmentCell.textContent || departmentCell.innerText;
+                    const riskLevelText = riskLevelCell.textContent || riskLevelCell.innerText;
+                    const statusText = statusCell.textContent || statusCell.innerText;
+                    const nameText = nameCell.textContent || nameCell.innerText;
+                    
+                    if (
+                        (departmentValue === '' || departmentText.toLowerCase().includes(departmentValue)) &&
+                        (riskLevelValue === '' || riskLevelText.toLowerCase().includes(riskLevelValue)) &&
+                        (statusValue === '' || statusText.toLowerCase().includes(statusValue)) &&
+                        (searchValue === '' || nameText.toLowerCase().includes(searchValue))
+                    ) {
+                        rows[i].style.display = '';
+                    } else {
+                        rows[i].style.display = 'none';
+                    }
+                }
+            }
+            
+            if (departmentFilter) departmentFilter.addEventListener('change', filterTable);
+            if (riskLevelFilter) riskLevelFilter.addEventListener('change', filterTable);
+            if (statusFilter) statusFilter.addEventListener('change', filterTable);
+            if (searchFilter) searchFilter.addEventListener('input', filterTable);
+            
+            // Violations tab filters
+            const violationDepartmentFilter = document.getElementById('violation-department-filter');
+            const violationLevelFilter = document.getElementById('violation-level-filter');
+            const violationOwnerFilter = document.getElementById('violation-owner-filter');
+            const violationSearchFilter = document.getElementById('violation-search-filter');
+            const violationsTable = document.getElementById('violations-table');
+            
+            function filterViolationsTable() {
+                const departmentValue = violationDepartmentFilter ? violationDepartmentFilter.value.toLowerCase() : '';
+                const levelValue = violationLevelFilter ? violationLevelFilter.value.toLowerCase() : '';
+                const ownerValue = violationOwnerFilter ? violationOwnerFilter.value.toLowerCase() : '';
+                const searchValue = violationSearchFilter ? violationSearchFilter.value.toLowerCase() : '';
+                
+                const rows = violationsTable.getElementsByTagName('tr');
+                
+                for (let i = 1; i < rows.length; i++) {
+                    const departmentCell = rows[i].getElementsByTagName('td')[2];
+                    const levelCell = rows[i].getElementsByTagName('td')[3];
+                    const ownerCell = rows[i].getElementsByTagName('td')[6];
+                    const nameCell = rows[i].getElementsByTagName('td')[1];
+                    
+                    const departmentText = departmentCell.textContent || departmentCell.innerText;
+                    const levelText = levelCell.textContent || levelCell.innerText;
+                    const ownerText = ownerCell.textContent || ownerCell.innerText;
+                    const nameText = nameCell.textContent || nameCell.innerText;
+                    
+                    if (
+                        (departmentValue === '' || departmentText.toLowerCase().includes(departmentValue)) &&
+                        (levelValue === '' || levelText.toLowerCase().includes(levelValue)) &&
+                        (ownerValue === '' || ownerText.toLowerCase().includes(ownerValue)) &&
+                        (searchValue === '' || nameText.toLowerCase().includes(searchValue))
+                    ) {
+                        rows[i].style.display = '';
+                    } else {
+                        rows[i].style.display = 'none';
+                    }
+                }
+            }
+            
+            if (violationDepartmentFilter) violationDepartmentFilter.addEventListener('change', filterViolationsTable);
+            if (violationLevelFilter) violationLevelFilter.addEventListener('change', filterViolationsTable);
+            if (violationOwnerFilter) violationOwnerFilter.addEventListener('change', filterViolationsTable);
+            if (violationSearchFilter) violationSearchFilter.addEventListener('input', filterViolationsTable);
+        });
+        
+        // Reset filters function
+        function resetFilters() {
+            const filters = ['department-filter', 'risk-level-filter', 'status-filter', 'search-filter'];
+            filters.forEach(filterId => {
+                const filter = document.getElementById(filterId);
+                if (filter) {
+                    filter.value = '';
+                    filter.dispatchEvent(new Event('change'));
+                }
+            });
+        }
+        
+        // Export data function
+        function exportData(format) {
+            // In a real implementation, this would trigger a download
+            alert(`Exporting data in ${format.toUpperCase()} format. This would download a file in a real implementation.`);
+        }
+        
+        // Escalate violation function
+        function escalateViolation(riskId) {
+            if (confirm('Are you sure you want to escalate this violation to senior management?')) {
+                // In a real implementation, this would send a notification
+                alert(`Violation ${riskId} has been escalated to senior management.`);
+            }
+        }
+        
+        // Escalate risk function
+        function escalateRisk(riskId) {
+            if (confirm('Are you sure you want to escalate this risk to senior management?')) {
+                // In a real implementation, this would send a notification
+                alert(`Risk ${riskId} has been escalated to senior management.`);
+            }
+        }
+        
+        // Load more activities function
+        function loadMoreActivities() {
+            // In a real implementation, this would load more activities from the server
+            alert('Loading more activities. This would fetch additional activities from the server in a real implementation.');
+        }
+    </script>
+</body>
+</html>
