@@ -1,0 +1,2363 @@
+<?php
+include_once 'includes/auth.php';
+requireRole('compliance');
+include_once 'config/database.php';
+$database = new Database();
+$db = $database->getConnection();
+
+// Create sequence table helper function for JSON extraction
+$db->exec("CREATE TEMPORARY TABLE IF NOT EXISTS seq_0_to_20 (seq INT PRIMARY KEY);
+INSERT IGNORE INTO seq_0_to_20 VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9), (10), (11), (12), (13), (14), (15), (16), (17), (18), (19), (20);");
+
+// Get all risks for compliance overview with proper joins
+$query = "SELECT r.*, 
+          u.full_name as reporter_name, 
+          ro.full_name as owner_name,
+          d.department_name as department_name
+          FROM risk_incidents r 
+          LEFT JOIN users u ON r.reported_by = u.id 
+          LEFT JOIN users ro ON r.risk_owner_id = ro.id 
+          LEFT JOIN department_assignment_tracker d ON r.department = d.department
+          ORDER BY 
+          CASE r.risk_level
+            WHEN 'Critical' THEN 1
+            WHEN 'High' THEN 2
+            WHEN 'Medium' THEN 3
+            WHEN 'Low' THEN 4
+            ELSE 5
+          END, r.created_at DESC";
+$stmt = $db->prepare($query);
+$stmt->execute();
+$all_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk statistics with additional metrics
+$stats_query = "SELECT 
+    COUNT(*) as total_risks,
+    SUM(CASE WHEN risk_level = 'Critical' THEN 1 ELSE 0 END) as critical_risks,
+    SUM(CASE WHEN risk_level = 'High' THEN 1 ELSE 0 END) as high_risks,
+    SUM(CASE WHEN risk_level = 'Medium' THEN 1 ELSE 0 END) as medium_risks,
+    SUM(CASE WHEN risk_level = 'Low' THEN 1 ELSE 0 END) as low_risks,
+    SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_risks,
+    SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_risks,
+    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_risks,
+    SUM(CASE WHEN status = 'overdue' THEN 1 ELSE 0 END) as overdue_risks,
+    SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed_risks,
+    SUM(CASE WHEN treatment_status = 'Not Started' THEN 1 ELSE 0 END) as not_started_treatments,
+    SUM(CASE WHEN treatment_status = 'In Progress' THEN 1 ELSE 0 END) as in_progress_treatments,
+    SUM(CASE WHEN treatment_status = 'Completed' THEN 1 ELSE 0 END) as completed_treatments,
+    AVG(residual_rating) as avg_residual_rating,
+    AVG(inherent_rating) as avg_inherent_rating
+    FROM risk_incidents";
+$stats_stmt = $db->prepare($stats_query);
+$stats_stmt->execute();
+$stats = $stats_stmt->fetch(PDO::FETCH_ASSOC);
+
+// Get department distribution
+$dept_query = "SELECT department, COUNT(*) as count FROM risk_incidents GROUP BY department";
+$dept_stmt = $db->prepare($dept_query);
+$dept_stmt->execute();
+$dept_data = $dept_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk categories distribution
+$categories_query = "SELECT 
+    JSON_UNQUOTE(JSON_EXTRACT(risk_categories, CONCAT('$[', seq.seq, ']'))) as category,
+    COUNT(*) as count
+    FROM risk_incidents 
+    JOIN seq_0_to_20 AS seq
+    WHERE JSON_EXTRACT(risk_categories, CONCAT('$[', seq.seq, ']')) IS NOT NULL
+    GROUP BY category
+    ORDER BY count DESC";
+$categories_stmt = $db->prepare($categories_query);
+$categories_stmt->execute();
+$categories_data = $categories_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk treatment progress
+$treatment_query = "SELECT treatment_status, COUNT(*) as count FROM risk_incidents GROUP BY treatment_status";
+$treatment_stmt = $db->prepare($treatment_query);
+$treatment_stmt->execute();
+$treatment_data = $treatment_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risks by owner
+$owner_query = "SELECT ro.full_name as owner_name, COUNT(r.id) as count 
+                FROM risk_incidents r
+                LEFT JOIN users ro ON r.risk_owner_id = ro.id
+                GROUP BY r.risk_owner_id
+                ORDER BY count DESC";
+$owner_stmt = $db->prepare($owner_query);
+$owner_stmt->execute();
+$owner_data = $owner_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risks by monitoring frequency
+$monitoring_query = "SELECT monitoring_frequency, COUNT(*) as count FROM risk_incidents GROUP BY monitoring_frequency";
+$monitoring_stmt = $db->prepare($monitoring_query);
+$monitoring_stmt->execute();
+$monitoring_data = $monitoring_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get recent activities
+$activity_query = "SELECT al.action, al.description, al.created_at, u.full_name 
+                  FROM activity_logs al
+                  LEFT JOIN users u ON al.user_id = u.id
+                  ORDER BY al.created_at DESC
+                  LIMIT 10";
+$activity_stmt = $db->prepare($activity_query);
+$activity_stmt->execute();
+$recent_activities = $activity_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk assignments
+$assignment_query = "SELECT ra.*, r.risk_name, u.full_name as assigned_to_name, 
+                   u2.full_name as assigned_by_name
+                   FROM risk_assignments ra
+                   JOIN risk_incidents r ON ra.risk_id = r.id
+                   JOIN users u ON ra.assigned_to = u.id
+                   JOIN users u2 ON ra.assigned_by = u2.id
+                   ORDER BY ra.assignment_date DESC
+                   LIMIT 10";
+$assignment_stmt = $db->prepare($assignment_query);
+$assignment_stmt->execute();
+$recent_assignments = $assignment_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk monitoring data
+$monitoring_review_query = "SELECT rm.*, r.risk_name, u.full_name as reviewer_name
+                           FROM risk_monitoring rm
+                           JOIN risk_incidents r ON rm.risk_id = r.id
+                           LEFT JOIN users u ON rm.reviewed_by = u.id
+                           ORDER BY rm.review_date DESC
+                           LIMIT 10";
+$monitoring_review_stmt = $db->prepare($monitoring_review_query);
+$monitoring_review_stmt->execute();
+$recent_reviews = $monitoring_review_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk treatments
+$treatments_query = "SELECT rt.*, r.risk_name, u.full_name as assigned_to_name, 
+                    u2.full_name as created_by_name
+                    FROM risk_treatments rt
+                    JOIN risk_incidents r ON rt.risk_id = r.id
+                    JOIN users u ON rt.assigned_to = u.id
+                    JOIN users u2 ON rt.created_by = u2.id
+                    ORDER BY rt.created_at DESC
+                    LIMIT 10";
+$treatments_stmt = $db->prepare($treatments_query);
+$treatments_stmt->execute();
+$recent_treatments = $treatments_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk comments
+$comments_query = "SELECT rc.*, r.risk_name, u.full_name as commenter_name
+                 FROM risk_comments rc
+                 JOIN risk_incidents r ON rc.risk_id = r.id
+                 JOIN users u ON rc.user_id = u.id
+                 ORDER BY rc.created_at DESC
+                 LIMIT 10";
+$comments_stmt = $db->prepare($comments_query);
+$comments_stmt->execute();
+$recent_comments = $comments_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk history
+$history_query = "SELECT rh.*, r.risk_name, u.full_name as updated_by_name
+                 FROM risk_history rh
+                 JOIN risk_incidents r ON rh.risk_id = r.id
+                 JOIN users u ON rh.updated_by = u.id
+                 ORDER BY rh.created_at DESC
+                 LIMIT 10";
+$history_stmt = $db->prepare($history_query);
+$history_stmt->execute();
+$recent_history = $history_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get notifications
+$notifications_query = "SELECT n.*, r.risk_name, ro.name as owner_name
+                      FROM notifications n
+                      JOIN risk_incidents r ON n.risk_id = r.id
+                      JOIN risk_owners ro ON n.owner_id = ro.id
+                      ORDER BY n.created_at DESC
+                      LIMIT 10";
+$notifications_stmt = $db->prepare($notifications_query);
+$notifications_stmt->execute();
+$recent_notifications = $notifications_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk documents
+$documents_query = "SELECT rd.*, r.risk_name, u.full_name as uploader_name
+                  FROM risk_documents rd
+                  JOIN risk_incidents r ON rd.risk_id = r.id
+                  JOIN users u ON rd.uploaded_by = u.id
+                  ORDER BY rd.uploaded_at DESC
+                  LIMIT 10";
+$documents_stmt = $db->prepare($documents_query);
+$documents_stmt->execute();
+$recent_documents = $documents_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk attachments
+$attachments_query = "SELECT ra.*, r.risk_name, u.full_name as uploader_name
+                    FROM risk_attachments ra
+                    JOIN risk_incidents r ON ra.risk_id = r.id
+                    JOIN users u ON ra.uploaded_by = u.id
+                    ORDER BY ra.created_at DESC
+                    LIMIT 10";
+$attachments_stmt = $db->prepare($attachments_query);
+$attachments_stmt->execute();
+$recent_attachments = $attachments_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get treatment documents
+$treatment_documents_query = "SELECT td.*, rt.treatment_title, r.risk_name
+                             FROM treatment_documents td
+                             JOIN risk_treatments rt ON td.treatment_id = rt.id
+                             JOIN risk_incidents r ON rt.risk_id = r.id
+                             ORDER BY td.uploaded_at DESC
+                             LIMIT 10";
+$treatment_documents_stmt = $db->prepare($treatment_documents_query);
+$treatment_documents_stmt->execute();
+$recent_treatment_documents = $treatment_documents_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk categories options
+$category_options_query = "SELECT * FROM risk_category_options ORDER BY category_name, sort_order";
+$category_options_stmt = $db->prepare($category_options_query);
+$category_options_stmt->execute();
+$category_options = $category_options_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk categories reference
+$categories_reference_query = "SELECT * FROM risk_categories_reference";
+$categories_reference_stmt = $db->prepare($categories_reference_query);
+$categories_reference_stmt->execute();
+$categories_reference = $categories_reference_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk category details
+$category_details_query = "SELECT rcd.*, r.risk_name, rcr.category_name, rcr.input_type
+                         FROM risk_category_details rcd
+                         JOIN risk_incidents r ON rcd.risk_id = r.id
+                         JOIN risk_categories_reference rcr ON rcd.risk_category = rcr.category_name
+                         ORDER BY rcd.created_at DESC
+                         LIMIT 20";
+$category_details_stmt = $db->prepare($category_details_query);
+$category_details_stmt->execute();
+$category_details = $category_details_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk owner assignments
+$risk_owner_assignments_query = "SELECT roa.*, u.full_name as owner_name, d.department_name
+                               FROM risk_owner_assignments roa
+                               JOIN users u ON roa.risk_owner_id = u.id
+                               LEFT JOIN department_assignment_tracker d ON roa.department = d.department
+                               ORDER BY roa.last_assigned DESC";
+$risk_owner_assignments_stmt = $db->prepare($risk_owner_assignments_query);
+$risk_owner_assignments_stmt->execute();
+$risk_owner_assignments = $risk_owner_assignments_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get department assignment queue
+$department_assignment_queue_query = "SELECT * FROM department_assignment_queue ORDER BY last_updated DESC";
+$department_assignment_queue_stmt = $db->prepare($department_assignment_queue_query);
+$department_assignment_queue_stmt->execute();
+$department_assignment_queue = $department_assignment_queue_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get department assignment tracker
+$department_assignment_tracker_query = "SELECT dat.*, u.full_name as last_assigned_owner_name
+                                       FROM department_assignment_tracker dat
+                                       LEFT JOIN users u ON dat.last_assigned_owner_id = u.id
+                                       ORDER BY dat.last_assignment_date DESC";
+$department_assignment_tracker_stmt = $db->prepare($department_assignment_tracker_query);
+$department_assignment_tracker_stmt->execute();
+$department_assignment_tracker = $department_assignment_tracker_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get risk owners
+$risk_owners_query = "SELECT * FROM risk_owners";
+$risk_owners_stmt = $db->prepare($risk_owners_query);
+$risk_owners_stmt->execute();
+$risk_owners = $risk_owners_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get security settings
+$security_settings_query = "SELECT * FROM security_settings";
+$security_settings_stmt = $db->prepare($security_settings_query);
+$security_settings_stmt->execute();
+$security_settings = $security_settings_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get suspicious activities
+$suspicious_activities_query = "SELECT sa.*, u.full_name as user_name
+                               FROM suspicious_activities sa
+                               LEFT JOIN users u ON sa.user_id = u.id
+                               ORDER BY sa.created_at DESC
+                               LIMIT 10";
+$suspicious_activities_stmt = $db->prepare($suspicious_activities_query);
+$suspicious_activities_stmt->execute();
+$suspicious_activities = $suspicious_activities_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get system audit logs
+$system_audit_logs_query = "SELECT sal.*, u.full_name as user_name
+                           FROM system_audit_logs sal
+                           LEFT JOIN users u ON sal.user_id = u.id
+                           ORDER BY sal.timestamp DESC
+                           LIMIT 10";
+$system_audit_logs_stmt = $db->prepare($system_audit_logs_query);
+$system_audit_logs_stmt->execute();
+$system_audit_logs = $system_audit_logs_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get account lockouts
+$account_lockouts_query = "SELECT al.*, u.full_name as user_name
+                          FROM account_lockouts al
+                          LEFT JOIN users u ON al.user_id = u.id
+                          ORDER BY al.locked_at DESC
+                          LIMIT 10";
+$account_lockouts_stmt = $db->prepare($account_lockouts_query);
+$account_lockouts_stmt->execute();
+$account_lockouts = $account_lockouts_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get active sessions
+$active_sessions_query = "SELECT * FROM active_sessions WHERE is_active = 1 ORDER BY last_activity DESC";
+$active_sessions_stmt = $db->prepare($active_sessions_query);
+$active_sessions_stmt->execute();
+$active_sessions = $active_sessions_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get login history
+$login_history_query = "SELECT lh.*, u.full_name as user_name
+                       FROM login_history lh
+                       LEFT JOIN users u ON lh.user_id = u.id
+                       ORDER BY lh.created_at DESC
+                       LIMIT 20";
+$login_history_stmt = $db->prepare($login_history_query);
+$login_history_stmt->execute();
+$login_history = $login_history_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get user sessions
+$user_sessions_query = "SELECT us.*, u.full_name as user_name
+                       FROM user_sessions us
+                       JOIN users u ON us.user_id = u.id
+                       ORDER BY us.last_activity DESC
+                       LIMIT 20";
+$user_sessions_stmt = $db->prepare($user_sessions_query);
+$user_sessions_stmt->execute();
+$user_sessions = $user_sessions_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get password resets
+$password_resets_query = "SELECT pr.*, u.full_name as user_name
+                         FROM password_resets pr
+                         JOIN users u ON pr.user_id = u.id
+                         ORDER BY pr.created_at DESC
+                         LIMIT 10";
+$password_resets_stmt = $db->prepare($password_resets_query);
+$password_resets_stmt->execute();
+$password_resets = $password_resets_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get password reset tokens
+$password_reset_tokens_query = "SELECT prt.*, u.full_name as user_name
+                               FROM password_reset_tokens prt
+                               JOIN users u ON prt.user_id = u.id
+                               ORDER BY prt.created_at DESC
+                               LIMIT 10";
+$password_reset_tokens_stmt = $db->prepare($password_reset_tokens_query);
+$password_reset_tokens_stmt->execute();
+$password_reset_tokens = $password_reset_tokens_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get invite tokens
+$invite_tokens_query = "SELECT * FROM invite_tokens ORDER BY created_at DESC LIMIT 10";
+$invite_tokens_stmt = $db->prepare($invite_tokens_query);
+$invite_tokens_stmt->execute();
+$invite_tokens = $invite_tokens_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get deleted users
+$deleted_users_query = "SELECT * FROM deleted_users ORDER BY deleted_at DESC LIMIT 10";
+$deleted_users_stmt = $db->prepare($deleted_users_query);
+$deleted_users_stmt->execute();
+$deleted_users = $deleted_users_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get chat rooms
+$chat_rooms_query = "SELECT cr.*, u.full_name as created_by_name
+                    FROM chat_rooms cr
+                    LEFT JOIN users u ON cr.created_by = u.id
+                    ORDER BY cr.created_at DESC";
+$chat_rooms_stmt = $db->prepare($chat_rooms_query);
+$chat_rooms_stmt->execute();
+$chat_rooms = $chat_rooms_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get chat messages
+$chat_messages_query = "SELECT cm.*, cr.name as room_name, u.full_name as sender_name
+                       FROM chat_messages cm
+                       JOIN chat_rooms cr ON cm.room_id = cr.id
+                       JOIN users u ON cm.sender_id = u.id
+                       ORDER BY cm.created_at DESC
+                       LIMIT 20";
+$chat_messages_stmt = $db->prepare($chat_messages_query);
+$chat_messages_stmt->execute();
+$chat_messages = $chat_messages_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get chat files
+$chat_files_query = "SELECT cf.*, cm.message, u.full_name as uploaded_by_name
+                    FROM chat_files cf
+                    JOIN chat_messages cm ON cf.message_id = cm.id
+                    JOIN users u ON cf.uploaded_by = u.id
+                    ORDER BY cf.uploaded_at DESC
+                    LIMIT 10";
+$chat_files_stmt = $db->prepare($chat_files_query);
+$chat_files_stmt->execute();
+$chat_files = $chat_files_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get chat participants
+$chat_participants_query = "SELECT cp.*, cr.name as room_name, u.full_name as user_name
+                           FROM chat_participants cp
+                           JOIN chat_rooms cr ON cp.room_id = cr.id
+                           JOIN users u ON cp.user_id = u.id
+                           ORDER BY cp.joined_at DESC";
+$chat_participants_stmt = $db->prepare($chat_participants_query);
+$chat_participants_stmt->execute();
+$chat_participants = $chat_participants_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Initialize heatmap data
+$heatmap_data = array_fill(1, 5, array_fill(1, 5, []));
+
+// Populate heatmap data with actual risks
+foreach ($all_risks as $risk) {
+    $prob = $risk['probability'];
+    $impact = $risk['impact'];
+    if ($prob >= 1 && $prob <= 5 && $impact >= 1 && $impact <= 5) {
+        $heatmap_data[$prob][$impact][] = $risk;
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compliance Dashboard - Airtel Risk Management System</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            line-height: 1.6;
+            color: #333;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #1a237e 0%, #3949ab 100%);
+            color: white;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+        }
+        
+        .user-info span {
+            margin-right: 1rem;
+        }
+        
+        .logout-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            text-decoration: none;
+            transition: background 0.3s;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .nav-tabs {
+            background: white;
+            padding: 0 2rem;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            overflow-x: auto;
+        }
+        
+        .nav-tabs button {
+            background: none;
+            border: none;
+            padding: 1rem 1.5rem;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            font-size: 1rem;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: all 0.3s;
+        }
+        
+        .nav-tabs button:hover {
+            color: #3949ab;
+        }
+        
+        .nav-tabs button.active {
+            border-bottom-color: #3949ab;
+            color: #3949ab;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .card {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        
+        .card h2 {
+            margin-bottom: 1.5rem;
+            color: #1a237e;
+            font-size: 1.5rem;
+        }
+        
+        .heat-map {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 2px;
+            margin: 1rem 0;
+        }
+        
+        .heat-cell {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .heat-cell:hover {
+            transform: scale(1.05);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        
+        .heat-header {
+            background: #f8f9fa;
+            color: #333;
+        }
+        
+        .heat-low { background: #d4edda; color: #155724; }
+        .heat-medium { background: #fff3cd; color: #856404; }
+        .heat-high { background: #f8d7da; color: #721c24; }
+        .heat-critical { background: #f5c6cb; color: #721c24; }
+        
+        .btn {
+            background: linear-gradient(135deg, #3949ab 0%, #1a237e 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 0.5rem;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s;
+        }
+        
+        .btn:hover {
+            background: linear-gradient(135deg, #1a237e 0%, #3949ab 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .risk-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        
+        .risk-table th, .risk-table td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .risk-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #1a237e;
+        }
+        
+        .risk-table tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .risk-level {
+            padding: 0.25rem 0.75rem;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        
+        .level-low { background: #d4edda; color: #155724; }
+        .level-medium { background: #fff3cd; color: #856404; }
+        .level-high { background: #f8d7da; color: #721c24; }
+        .level-critical { background: #f5c6cb; color: #721c24; }
+        
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 2rem 0;
+        }
+        
+        .filter-container {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            min-width: 200px;
+        }
+        
+        .filter-group label {
+            margin-bottom: 0.25rem;
+            font-weight: 500;
+        }
+        
+        .filter-group select, .filter-group input {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .activity-item {
+            padding: 0.75rem;
+            border-left: 3px solid #3949ab;
+            margin-bottom: 1rem;
+            background: #f8f9fa;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .activity-time {
+            font-size: 0.8rem;
+            color: #666;
+        }
+        
+        .activity-user {
+            font-weight: 600;
+            color: #3949ab;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 2rem;
+            border-radius: 10px;
+            width: 80%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .close:hover {
+            color: #000;
+        }
+        
+        .risk-detail {
+            padding: 1rem;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .risk-detail:last-child {
+            border-bottom: none;
+        }
+        
+        .risk-detail h4 {
+            color: #1a237e;
+            margin-bottom: 0.5rem;
+        }
+        
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin-top: 1rem;
+        }
+        
+        .pagination button {
+            background: white;
+            border: 1px solid #ddd;
+            padding: 0.5rem 1rem;
+            margin: 0 0.25rem;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        
+        .pagination button:hover {
+            background: #f8f9fa;
+        }
+        
+        .pagination button.active {
+            background: #3949ab;
+            color: white;
+            border-color: #3949ab;
+        }
+        
+        .report-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+        
+        .report-card {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 8px;
+            border-left: 4px solid #3949ab;
+        }
+        
+        .report-card h3 {
+            color: #1a237e;
+            margin-bottom: 1rem;
+        }
+        
+        .tabs-container {
+            display: flex;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .tab-button {
+            background: none;
+            border: none;
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+        }
+        
+        .tab-button.active {
+            border-bottom-color: #3949ab;
+            color: #3949ab;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .info-box {
+            background: #e8eaf6;
+            border-left: 4px solid #3949ab;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .data-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+        
+        .data-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .data-card-header {
+            background: #3949ab;
+            color: white;
+            padding: 1rem;
+            font-weight: 600;
+        }
+        
+        .data-card-body {
+            padding: 1rem;
+        }
+        
+        .data-item {
+            padding: 0.75rem;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .data-item:last-child {
+            border-bottom: none;
+        }
+        
+        .data-item-title {
+            font-weight: 600;
+            color: #1a237e;
+            margin-bottom: 0.25rem;
+        }
+        
+        .data-item-meta {
+            font-size: 0.8rem;
+            color: #666;
+        }
+        
+        .sub-tabs {
+            display: flex;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .sub-tab-button {
+            background: none;
+            border: none;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+        }
+        
+        .sub-tab-button.active {
+            border-bottom-color: #3949ab;
+            color: #3949ab;
+        }
+        
+        .sub-tab-content {
+            display: none;
+        }
+        
+        .sub-tab-content.active {
+            display: block;
+        }
+        
+        .system-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+        
+        .system-stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .system-stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #3949ab;
+            margin-bottom: 0.5rem;
+        }
+        
+        .system-stat-label {
+            color: #666;
+        }
+        
+        .log-entry {
+            padding: 0.75rem;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        
+        .log-entry-time {
+            font-size: 0.8rem;
+            color: #666;
+        }
+        
+        .log-entry-user {
+            font-weight: 600;
+            color: #3949ab;
+        }
+        
+        .log-entry-action {
+            font-weight: 500;
+        }
+        
+        .log-entry-details {
+            font-size: 0.9rem;
+            color: #555;
+        }
+        
+        .severity-low { color: #388e3c; }
+        .severity-medium { color: #fbc02d; }
+        .severity-high { color: #f57c00; }
+        .severity-critical { color: #d32f2f; }
+        
+        .chat-message {
+            padding: 0.75rem;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .chat-message:last-child {
+            border-bottom: none;
+        }
+        
+        .chat-message-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+        
+        .chat-message-sender {
+            font-weight: 600;
+            color: #3949ab;
+        }
+        
+        .chat-message-time {
+            font-size: 0.8rem;
+            color: #666;
+        }
+        
+        .chat-message-content {
+            margin-bottom: 0.5rem;
+        }
+        
+        .chat-message-room {
+            font-size: 0.8rem;
+            color: #666;
+        }
+        
+        .file-attachment {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+            padding: 0.5rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        .file-icon {
+            color: #3949ab;
+        }
+        
+        .file-name {
+            font-weight: 500;
+        }
+        
+        .file-size {
+            font-size: 0.8rem;
+            color: #666;
+        }
+        
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .user-info {
+                margin-top: 1rem;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .filter-container {
+                flex-direction: column;
+            }
+            
+            .report-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .data-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><i class="fas fa-shield-alt"></i> Compliance Dashboard</h1>
+        <div class="user-info">
+            <span>Welcome, <?php echo $_SESSION['full_name']; ?></span>
+            <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</a>
+        </div>
+    </div>
+    
+    <div class="nav-tabs">
+        <button class="active" onclick="showTab('overview')"><i class="fas fa-tachometer-alt"></i> Overview</button>
+        <button onclick="showTab('heatmap')"><i class="fas fa-th"></i> Risk Heat Map</button>
+        <button onclick="showTab('reports')"><i class="fas fa-file-alt"></i> Board Reports</button>
+        <button onclick="showTab('analytics')"><i class="fas fa-chart-pie"></i> Analytics</button>
+        <button onclick="showTab('activities')"><i class="fas fa-history"></i> Recent Activities</button>
+        <button onclick="showTab('system')"><i class="fas fa-cog"></i> System</button>
+        <button onclick="showTab('communication')"><i class="fas fa-comments"></i> Communication</button>
+    </div>
+    
+    <div class="container">
+        <div id="overview-tab" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #1a237e;"><?php echo $stats['total_risks']; ?></div>
+                    <div class="stat-label">Total Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #d32f2f;"><?php echo $stats['critical_risks']; ?></div>
+                    <div class="stat-label">Critical Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #f57c00;"><?php echo $stats['high_risks']; ?></div>
+                    <div class="stat-label">High Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #fbc02d;"><?php echo $stats['medium_risks']; ?></div>
+                    <div class="stat-label">Medium Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #388e3c;"><?php echo $stats['low_risks']; ?></div>
+                    <div class="stat-label">Low Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #0288d1;"><?php echo $stats['open_risks']; ?></div>
+                    <div class="stat-label">Open Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #7b1fa2;"><?php echo $stats['overdue_risks']; ?></div>
+                    <div class="stat-label">Overdue Risks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="color: #00796b;"><?php echo $stats['in_progress_risks']; ?></div>
+                    <div class="stat-label">In Progress</div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Risk Treatment Progress</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #d32f2f;"><?php echo $stats['not_started_treatments']; ?></div>
+                        <div class="stat-label">Not Started</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #f57c00;"><?php echo $stats['in_progress_treatments']; ?></div>
+                        <div class="stat-label">In Progress</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #388e3c;"><?php echo $stats['completed_treatments']; ?></div>
+                        <div class="stat-label">Completed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #1a237e;"><?php echo round($stats['avg_residual_rating'], 1); ?></div>
+                        <div class="stat-label">Avg. Residual Rating</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>High Priority Risks</h2>
+                <div class="filter-container">
+                    <div class="filter-group">
+                        <label for="department-filter">Department</label>
+                        <select id="department-filter">
+                            <option value="">All Departments</option>
+                            <?php foreach ($dept_data as $dept): ?>
+                                <option value="<?php echo $dept['department']; ?>"><?php echo $dept['department']; ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="risk-level-filter">Risk Level</label>
+                        <select id="risk-level-filter">
+                            <option value="">All Levels</option>
+                            <option value="Critical">Critical</option>
+                            <option value="High">High</option>
+                            <option value="Medium">Medium</option>
+                            <option value="Low">Low</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="status-filter">Status</label>
+                        <select id="status-filter">
+                            <option value="">All Statuses</option>
+                            <option value="open">Open</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="completed">Completed</option>
+                            <option value="overdue">Overdue</option>
+                            <option value="closed">Closed</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="search-filter">Search</label>
+                        <input type="text" id="search-filter" placeholder="Search risks...">
+                    </div>
+                </div>
+                
+                <table class="risk-table" id="risks-table">
+                    <thead>
+                        <tr>
+                            <th>Risk ID</th>
+                            <th>Risk Name</th>
+                            <th>Department</th>
+                            <th>Risk Level</th>
+                            <th>Residual Rating</th>
+                            <th>Status</th>
+                            <th>Risk Owner</th>
+                            <th>Created Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php 
+                        $high_priority_risks = array_filter($all_risks, function($risk) {
+                            return in_array($risk['risk_level'], ['Critical', 'High']);
+                        });
+                        $high_priority_risks = array_slice($high_priority_risks, 0, 10);
+                        ?>
+                        <?php foreach ($high_priority_risks as $risk): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars($risk['risk_id_number']); ?></td>
+                                <td><?php echo htmlspecialchars($risk['risk_name']); ?></td>
+                                <td><?php echo htmlspecialchars($risk['department']); ?></td>
+                                <td>
+                                    <span class="risk-level level-<?php echo strtolower($risk['risk_level']); ?>">
+                                        <?php echo $risk['risk_level']; ?>
+                                    </span>
+                                </td>
+                                <td><?php echo $risk['residual_rating']; ?></td>
+                                <td><?php echo ucfirst(str_replace('_', ' ', $risk['status'])); ?></td>
+                                <td><?php echo htmlspecialchars($risk['owner_name']); ?></td>
+                                <td><?php echo date('M d, Y', strtotime($risk['created_at'])); ?></td>
+                                <td>
+                                    <a href="view_risk.php?id=<?php echo $risk['id']; ?>" class="btn" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">
+                                        <i class="fas fa-eye"></i> View
+                                    </a>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+                
+                <div class="pagination">
+                    <button><i class="fas fa-chevron-left"></i></button>
+                    <button class="active">1</button>
+                    <button>2</button>
+                    <button>3</button>
+                    <button><i class="fas fa-chevron-right"></i></button>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Recent Risk Assignments</h2>
+                <div class="data-grid">
+                    <?php foreach ($recent_assignments as $assignment): ?>
+                        <div class="data-card">
+                            <div class="data-card-header">
+                                <?php echo htmlspecialchars($assignment['risk_name']); ?>
+                            </div>
+                            <div class="data-card-body">
+                                <div class="data-item">
+                                    <div class="data-item-title">Assigned To</div>
+                                    <div class="data-item-meta"><?php echo htmlspecialchars($assignment['assigned_to_name']); ?></div>
+                                </div>
+                                <div class="data-item">
+                                    <div class="data-item-title">Assigned By</div>
+                                    <div class="data-item-meta"><?php echo htmlspecialchars($assignment['assigned_by_name']); ?></div>
+                                </div>
+                                <div class="data-item">
+                                    <div class="data-item-title">Status</div>
+                                    <div class="data-item-meta"><?php echo htmlspecialchars($assignment['status']); ?></div>
+                                </div>
+                                <div class="data-item">
+                                    <div class="data-item-title">Assignment Date</div>
+                                    <div class="data-item-meta"><?php echo date('M d, Y', strtotime($assignment['assignment_date'])); ?></div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </div>
+        
+        <div id="heatmap-tab" class="tab-content" style="display: none;">
+            <div class="card">
+                <h2>Risk Heat Map</h2>
+                <div class="info-box">
+                    <p>This matrix shows the relationship between probability and impact for risk assessment. Click on any cell to view detailed risks in that category.</p>
+                </div>
+                
+                <div class="heat-map" id="risk-heatmap">
+                    <div class="heat-cell heat-header"></div>
+                    <div class="heat-cell heat-header">1</div>
+                    <div class="heat-cell heat-header">2</div>
+                    <div class="heat-cell heat-header">3</div>
+                    <div class="heat-cell heat-header">4</div>
+                    <div class="heat-cell heat-header">5</div>
+                    
+                    <?php for ($prob = 5; $prob >= 1; $prob--): ?>
+                        <div class="heat-cell heat-header"><?php echo $prob; ?></div>
+                        <?php for ($impact = 1; $impact <= 5; $impact++): 
+                            $score = $prob * $impact;
+                            $level = 'low';
+                            if ($score > 20) $level = 'critical';
+                            elseif ($score > 12) $level = 'high';
+                            elseif ($score > 6) $level = 'medium';
+                            
+                            $risks_in_cell = $heatmap_data[$prob][$impact];
+                            $count = count($risks_in_cell);
+                        ?>
+                            <div class="heat-cell heat-<?php echo $level; ?>" 
+                                 data-prob="<?php echo $prob; ?>" 
+                                 data-impact="<?php echo $impact; ?>"
+                                 data-count="<?php echo $count; ?>"
+                                 onclick="showHeatmapDetails(<?php echo $prob; ?>, <?php echo $impact; ?>)">
+                                <?php echo $count; ?>
+                            </div>
+                        <?php endfor; ?>
+                    <?php endfor; ?>
+                </div>
+                
+                <div style="margin-top: 2rem;">
+                    <h3>Legend</h3>
+                    <div style="display: flex; gap: 1rem; margin-top: 1rem; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div class="heat-cell heat-low" style="width: 30px; height: 30px;"></div>
+                            <span>Low (1-6)</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div class="heat-cell heat-medium" style="width: 30px; height: 30px;"></div>
+                            <span>Medium (7-12)</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div class="heat-cell heat-high" style="width: 30px; height: 30px;"></div>
+                            <span>High (13-20)</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div class="heat-cell heat-critical" style="width: 30px; height: 30px;"></div>
+                            <span>Critical (21-25)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Risk Distribution by Probability and Impact</h2>
+                <div class="chart-container">
+                    <canvas id="heatmapChart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <div id="reports-tab" class="tab-content" style="display: none;">
+            <div class="card">
+                <h2>Board Reports</h2>
+                <div class="report-grid">
+                    <div class="report-card">
+                        <h3><i class="fas fa-file-contract"></i> Executive Summary</h3>
+                        <p>Generate comprehensive risk reports for board meetings including risk distribution, treatment progress, and key metrics.</p>
+                        <a href="generate_board_report.php" class="btn">Generate Executive Report</a>
+                    </div>
+                    <div class="report-card">
+                        <h3><i class="fas fa-chart-line"></i> Risk Trend Analysis</h3>
+                        <p>Analyze risk trends over time periods to identify patterns and emerging risks.</p>
+                        <a href="trend_analysis.php" class="btn">View Trends</a>
+                    </div>
+                    <div class="report-card">
+                        <h3><i class="fas fa-building"></i> Department Reports</h3>
+                        <p>Department-specific risk analysis with detailed breakdowns and comparisons.</p>
+                        <a href="department_reports.php" class="btn">Department Analysis</a>
+                    </div>
+                    <div class="report-card">
+                        <h3><i class="fas fa-download"></i> Export Data</h3>
+                        <p>Download risk data in various formats (CSV, Excel, PDF) for further analysis.</p>
+                        <a href="export_all_data.php" class="btn">Export All Data</a>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Compliance Metrics</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #1a237e;"><?php echo round(($stats['completed_treatments'] / $stats['total_risks']) * 100, 1); ?>%</div>
+                        <div class="stat-label">Treatment Completion</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #388e3c;"><?php echo round($stats['avg_inherent_rating'] - $stats['avg_residual_rating'], 1); ?></div>
+                        <div class="stat-label">Avg. Risk Reduction</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #f57c00;"><?php echo round(($stats['overdue_risks'] / $stats['total_risks']) * 100, 1); ?>%</div>
+                        <div class="stat-label">Overdue Risks</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="color: #0288d1;"><?php echo count($dept_data); ?></div>
+                        <div class="stat-label">Departments with Risks</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Risk Monitoring</h2>
+                <div class="data-grid">
+                    <?php foreach ($recent_reviews as $review): ?>
+                        <div class="data-card">
+                            <div class="data-card-header">
+                                <?php echo htmlspecialchars($review['risk_name']); ?>
+                            </div>
+                            <div class="data-card-body">
+                                <div class="data-item">
+                                    <div class="data-item-title">Review Date</div>
+                                    <div class="data-item-meta"><?php echo date('M d, Y', strtotime($review['review_date'])); ?></div>
+                                </div>
+                                <div class="data-item">
+                                    <div class="data-item-title">Current Risk Level</div>
+                                    <div class="data-item-meta"><?php echo htmlspecialchars($review['current_risk_level']); ?></div>
+                                </div>
+                                <div class="data-item">
+                                    <div class="data-item-title">Effectiveness Rating</div>
+                                    <div class="data-item-meta"><?php echo htmlspecialchars($review['effectiveness_rating']); ?>/5</div>
+                                </div>
+                                <div class="data-item">
+                                    <div class="data-item-title">Reviewer</div>
+                                    <div class="data-item-meta"><?php echo htmlspecialchars($review['reviewer_name']); ?></div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </div>
+        
+        <div id="analytics-tab" class="tab-content" style="display: none;">
+            <div class="tabs-container">
+                <button class="tab-button active" onclick="showAnalyticsTab('risk-level')">Risk Levels</button>
+                <button class="tab-button" onclick="showAnalyticsTab('departments')">Departments</button>
+                <button class="tab-button" onclick="showAnalyticsTab('categories')">Categories</button>
+                <button class="tab-button" onclick="showAnalyticsTab('treatment')">Treatment Progress</button>
+                <button class="tab-button" onclick="showAnalyticsTab('owners')">Risk Owners</button>
+                <button class="tab-button" onclick="showAnalyticsTab('monitoring')">Monitoring</button>
+            </div>
+            
+            <div id="risk-level-analytics" class="analytics-tab-content active">
+                <div class="card">
+                    <h2>Risk Level Distribution</h2>
+                    <div class="chart-container">
+                        <canvas id="riskLevelChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="departments-analytics" class="analytics-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Risks by Department</h2>
+                    <div class="chart-container">
+                        <canvas id="departmentChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="categories-analytics" class="analytics-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Risk Categories Distribution</h2>
+                    <div class="chart-container">
+                        <canvas id="categoriesChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="treatment-analytics" class="analytics-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Treatment Progress</h2>
+                    <div class="chart-container">
+                        <canvas id="treatmentChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="owners-analytics" class="analytics-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Risks by Owner</h2>
+                    <div class="chart-container">
+                        <canvas id="ownersChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="monitoring-analytics" class="analytics-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Monitoring Frequency</h2>
+                    <div class="chart-container">
+                        <canvas id="monitoringChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="activities-tab" class="tab-content" style="display: none;">
+            <div class="sub-tabs">
+                <button class="sub-tab-button active" onclick="showActivityTab('recent-activities')">Recent Activities</button>
+                <button class="sub-tab-button" onclick="showActivityTab('risk-comments')">Risk Comments</button>
+                <button class="sub-tab-button" onclick="showActivityTab('risk-history')">Risk History</button>
+                <button class="sub-tab-button" onclick="showActivityTab('notifications')">Notifications</button>
+            </div>
+            
+            <div id="recent-activities" class="sub-tab-content active">
+                <div class="card">
+                    <h2>Recent Activities</h2>
+                    <div class="activity-list">
+                        <?php foreach ($recent_activities as $activity): ?>
+                            <div class="activity-item">
+                                <div class="activity-time"><?php echo date('M d, Y H:i', strtotime($activity['created_at'])); ?></div>
+                                <div class="activity-user"><?php echo htmlspecialchars($activity['full_name']); ?></div>
+                                <div class="activity-action"><?php echo htmlspecialchars($activity['action']); ?></div>
+                                <div class="activity-description"><?php echo htmlspecialchars($activity['description']); ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="risk-comments" class="sub-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Risk Comments</h2>
+                    <div class="activity-list">
+                        <?php foreach ($recent_comments as $comment): ?>
+                            <div class="activity-item">
+                                <div class="activity-time"><?php echo date('M d, Y H:i', strtotime($comment['created_at'])); ?></div>
+                                <div class="activity-user"><?php echo htmlspecialchars($comment['commenter_name']); ?></div>
+                                <div class="activity-action">Commented on risk: <?php echo htmlspecialchars($comment['risk_name']); ?></div>
+                                <div class="activity-description"><?php echo htmlspecialchars($comment['comment']); ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="risk-history" class="sub-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Risk History</h2>
+                    <div class="activity-list">
+                        <?php foreach ($recent_history as $history): ?>
+                            <div class="activity-item">
+                                <div class="activity-time"><?php echo date('M d, Y H:i', strtotime($history['created_at'])); ?></div>
+                                <div class="activity-user"><?php echo htmlspecialchars($history['updated_by_name']); ?></div>
+                                <div class="activity-action"><?php echo htmlspecialchars($history['change_type']); ?></div>
+                                <div class="activity-description"><?php echo htmlspecialchars($history['change_description']); ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="notifications" class="sub-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Notifications</h2>
+                    <div class="activity-list">
+                        <?php foreach ($recent_notifications as $notification): ?>
+                            <div class="activity-item">
+                                <div class="activity-time"><?php echo date('M d, Y H:i', strtotime($notification['created_at'])); ?></div>
+                                <div class="activity-user"><?php echo htmlspecialchars($notification['owner_name']); ?></div>
+                                <div class="activity-action">Notification for risk: <?php echo htmlspecialchars($notification['risk_name']); ?></div>
+                                <div class="activity-description"><?php echo htmlspecialchars($notification['message']); ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="system-tab" class="tab-content" style="display: none;">
+            <div class="sub-tabs">
+                <button class="sub-tab-button active" onclick="showSystemTab('overview')">System Overview</button>
+                <button class="sub-tab-button" onclick="showSystemTab('security')">Security</button>
+                <button class="sub-tab-button" onclick="showSystemTab('users')">Users</button>
+                <button class="sub-tab-button" onclick="showSystemTab('audit')">Audit Logs</button>
+            </div>
+            
+            <div id="system-overview" class="sub-tab-content active">
+                <div class="card">
+                    <h2>System Overview</h2>
+                    <div class="system-stats">
+                        <div class="system-stat-card">
+                            <div class="system-stat-number"><?php echo count($active_sessions); ?></div>
+                            <div class="system-stat-label">Active Sessions</div>
+                        </div>
+                        <div class="system-stat-card">
+                            <div class="system-stat-number"><?php echo count($risk_owners); ?></div>
+                            <div class="system-stat-label">Risk Owners</div>
+                        </div>
+                        <div class="system-stat-card">
+                            <div class="system-stat-number"><?php echo count($chat_rooms); ?></div>
+                            <div class="system-stat-label">Chat Rooms</div>
+                        </div>
+                        <div class="system-stat-card">
+                            <div class="system-stat-number"><?php echo count($security_settings); ?></div>
+                            <div class="system-stat-label">Security Settings</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>Department Assignment Tracker</h2>
+                    <div class="data-grid">
+                        <?php foreach ($department_assignment_tracker as $tracker): ?>
+                            <div class="data-card">
+                                <div class="data-card-header">
+                                    <?php echo htmlspecialchars($tracker['department']); ?>
+                                </div>
+                                <div class="data-card-body">
+                                    <div class="data-item">
+                                        <div class="data-item-title">Last Assigned Owner</div>
+                                        <div class="data-item-meta"><?php echo htmlspecialchars($tracker['last_assigned_owner_name']); ?></div>
+                                    </div>
+                                    <div class="data-item">
+                                        <div class="data-item-title">Total Assignments</div>
+                                        <div class="data-item-meta"><?php echo htmlspecialchars($tracker['total_assignments']); ?></div>
+                                    </div>
+                                    <div class="data-item">
+                                        <div class="data-item-title">Last Assignment Date</div>
+                                        <div class="data-item-meta"><?php echo date('M d, Y', strtotime($tracker['last_assignment_date'])); ?></div>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>Risk Categories Reference</h2>
+                    <div class="data-grid">
+                        <?php foreach ($categories_reference as $category): ?>
+                            <div class="data-card">
+                                <div class="data-card-header">
+                                    <?php echo htmlspecialchars($category['category_name']); ?>
+                                </div>
+                                <div class="data-card-body">
+                                    <div class="data-item">
+                                        <div class="data-item-title">Input Type</div>
+                                        <div class="data-item-meta"><?php echo htmlspecialchars($category['input_type']); ?></div>
+                                    </div>
+                                    <div class="data-item">
+                                        <div class="data-item-title">Description</div>
+                                        <div class="data-item-meta"><?php echo htmlspecialchars($category['description']); ?></div>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="security" class="sub-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Security Settings</h2>
+                    <div class="data-grid">
+                        <?php foreach ($security_settings as $setting): ?>
+                            <div class="data-card">
+                                <div class="data-card-header">
+                                    <?php echo htmlspecialchars($setting['setting_name']); ?>
+                                </div>
+                                <div class="data-card-body">
+                                    <div class="data-item">
+                                        <div class="data-item-title">Setting Value</div>
+                                        <div class="data-item-meta"><?php echo htmlspecialchars($setting['setting_value']); ?></div>
+                                    </div>
+                                    <div class="data-item">
+                                        <div class="data-item-title">Description</div>
+                                        <div class="data-item-meta"><?php echo htmlspecialchars($setting['description']); ?></div>
+                                    </div>
+                                    <div class="data-item">
+                                        <div class="data-item-title">Last Updated</div>
+                                        <div class="data-item-meta"><?php echo date('M d, Y H:i', strtotime($setting['updated_at'])); ?></div>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>Suspicious Activities</h2>
+                    <div class="activity-list">
+                        <?php foreach ($suspicious_activities as $activity): ?>
+                            <div class="activity-item">
+                                <div class="activity-time"><?php echo date('M d, Y H:i', strtotime($activity['created_at'])); ?></div>
+                                <div class="activity-user"><?php echo htmlspecialchars($activity['user_name']); ?></div>
+                                <div class="activity-action severity-<?php echo strtolower($activity['severity']); ?>">
+                                    <?php echo htmlspecialchars($activity['activity_type']); ?> (<?php echo htmlspecialchars($activity['severity']); ?>)
+                                </div>
+                                <div class="activity-description"><?php echo htmlspecialchars($activity['description']); ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>Account Lockouts</h2>
+                    <div class="activity-list">
+                        <?php foreach ($account_lockouts as $lockout): ?>
+                            <div class="activity-item">
+                                <div class="activity-time"><?php echo date('M d, Y H:i', strtotime($lockout['locked_at'])); ?></div>
+                                <div class="activity-user"><?php echo htmlspecialchars($lockout['user_name']); ?></div>
+                                <div class="activity-action">Account Locked</div>
+                                <div class="activity-description">
+                                    Failed attempts: <?php echo htmlspecialchars($lockout['failed_attempts']); ?>,
+                                    Reason: <?php echo htmlspecialchars($lockout['lock_reason']); ?>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="users" class="sub-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Active Sessions</h2>
+                    <div class="activity-list">
+                        <?php foreach ($active_sessions as $session): ?>
+                            <div class="activity-item">
+                                <div class="activity-time">Login: <?php echo date('M d, Y H:i', strtotime($session['login_time'])); ?></div>
+                                <div class="activity-user"><?php echo htmlspecialchars($session['user_name']); ?></div>
+                                <div class="activity-action">Active Session</div>
+                                <div class="activity-description">
+                                    Last activity: <?php echo date('M d, Y H:i', strtotime($session['last_activity'])); ?>,
+                                    IP: <?php echo htmlspecialchars($session['ip_address']); ?>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>Login History</h2>
+                    <div class="activity-list">
+                        <?php foreach ($login_history as $login): ?>
+                            <div class="activity-item">
+                                <div class="activity-time"><?php echo date('M d, Y H:i', strtotime($login['created_at'])); ?></div>
+                                <div class="activity-user"><?php echo htmlspecialchars($login['user_name']); ?></div>
+                                <div class="activity-action <?php echo $login['login_status'] === 'success' ? 'severity-low' : 'severity-high'; ?>">
+                                    Login <?php echo htmlspecialchars($login['login_status']); ?>
+                                </div>
+                                <div class="activity-description">
+                                    IP: <?php echo htmlspecialchars($login['ip_address']); ?>
+                                    <?php if ($login['failure_reason']): ?>
+                                        , Reason: <?php echo htmlspecialchars($login['failure_reason']); ?>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>Deleted Users</h2>
+                    <div class="activity-list">
+                        <?php foreach ($deleted_users as $user): ?>
+                            <div class="activity-item">
+                                <div class="activity-time"><?php echo date('M d, Y H:i', strtotime($user['deleted_at'])); ?></div>
+                                <div class="activity-user"><?php echo htmlspecialchars($user['full_name']); ?></div>
+                                <div class="activity-action">User Deleted</div>
+                                <div class="activity-description">
+                                    Role: <?php echo htmlspecialchars($user['role']); ?>,
+                                    Department: <?php echo htmlspecialchars($user['department']); ?>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="audit" class="sub-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>System Audit Logs</h2>
+                    <div class="activity-list">
+                        <?php foreach ($system_audit_logs as $log): ?>
+                            <div class="activity-item">
+                                <div class="activity-time"><?php echo date('M d, Y H:i', strtotime($log['timestamp'])); ?></div>
+                                <div class="activity-user"><?php echo htmlspecialchars($log['user_name']); ?></div>
+                                <div class="activity-action"><?php echo htmlspecialchars($log['action']); ?></div>
+                                <div class="activity-description"><?php echo htmlspecialchars($log['details']); ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>Password Reset Requests</h2>
+                    <div class="activity-list">
+                        <?php foreach ($password_resets as $reset): ?>
+                            <div class="activity-item">
+                                <div class="activity-time"><?php echo date('M d, Y H:i', strtotime($reset['created_at'])); ?></div>
+                                <div class="activity-user"><?php echo htmlspecialchars($reset['user_name']); ?></div>
+                                <div class="activity-action">Password Reset Request</div>
+                                <div class="activity-description">
+                                    Status: <?php echo $reset['used'] ? 'Used' : 'Not Used'; ?>,
+                                    Expires: <?php echo date('M d, Y H:i', strtotime($reset['expires_at'])); ?>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="communication-tab" class="tab-content" style="display: none;">
+            <div class="sub-tabs">
+                <button class="sub-tab-button active" onclick="showCommunicationTab('chat-rooms')">Chat Rooms</button>
+                <button class="sub-tab-button" onclick="showCommunicationTab('chat-messages')">Recent Messages</button>
+                <button class="sub-tab-button" onclick="showCommunicationTab('chat-files')">Shared Files</button>
+            </div>
+            
+            <div id="chat-rooms" class="sub-tab-content active">
+                <div class="card">
+                    <h2>Chat Rooms</h2>
+                    <div class="data-grid">
+                        <?php foreach ($chat_rooms as $room): ?>
+                            <div class="data-card">
+                                <div class="data-card-header">
+                                    <?php echo htmlspecialchars($room['name']); ?>
+                                </div>
+                                <div class="data-card-body">
+                                    <div class="data-item">
+                                        <div class="data-item-title">Type</div>
+                                        <div class="data-item-meta"><?php echo htmlspecialchars($room['type']); ?></div>
+                                    </div>
+                                    <div class="data-item">
+                                        <div class="data-item-title">Created By</div>
+                                        <div class="data-item-meta"><?php echo htmlspecialchars($room['created_by_name']); ?></div>
+                                    </div>
+                                    <div class="data-item">
+                                        <div class="data-item-title">Created At</div>
+                                        <div class="data-item-meta"><?php echo date('M d, Y', strtotime($room['created_at'])); ?></div>
+                                    </div>
+                                    <div class="data-item">
+                                        <div class="data-item-title">Status</div>
+                                        <div class="data-item-meta"><?php echo $room['is_archived'] ? 'Archived' : 'Active'; ?></div>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="chat-messages" class="sub-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Recent Messages</h2>
+                    <div class="activity-list">
+                        <?php foreach ($chat_messages as $message): ?>
+                            <div class="chat-message">
+                                <div class="chat-message-header">
+                                    <div class="chat-message-sender"><?php echo htmlspecialchars($message['sender_name']); ?></div>
+                                    <div class="chat-message-time"><?php echo date('M d, Y H:i', strtotime($message['created_at'])); ?></div>
+                                </div>
+                                <div class="chat-message-content"><?php echo htmlspecialchars($message['message']); ?></div>
+                                <div class="chat-message-room">Room: <?php echo htmlspecialchars($message['room_name']); ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="chat-files" class="sub-tab-content" style="display: none;">
+                <div class="card">
+                    <h2>Shared Files</h2>
+                    <div class="activity-list">
+                        <?php foreach ($chat_files as $file): ?>
+                            <div class="chat-message">
+                                <div class="chat-message-header">
+                                    <div class="chat-message-sender"><?php echo htmlspecialchars($file['uploaded_by_name']); ?></div>
+                                    <div class="chat-message-time"><?php echo date('M d, Y H:i', strtotime($file['uploaded_at'])); ?></div>
+                                </div>
+                                <div class="chat-message-content"><?php echo htmlspecialchars($file['message']); ?></div>
+                                <div class="file-attachment">
+                                    <i class="fas fa-file file-icon"></i>
+                                    <div class="file-name"><?php echo htmlspecialchars($file['original_name']); ?></div>
+                                    <div class="file-size"><?php echo round($file['file_size'] / 1024, 2); ?> KB</div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Heatmap Details Modal -->
+    <div id="heatmap-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Risks Details</h2>
+            <div id="heatmap-details">
+                <!-- Details will be populated here -->
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Tab switching functionality
+        function showTab(tabName) {
+            // Hide all tabs
+            const tabs = document.querySelectorAll('.tab-content');
+            tabs.forEach(tab => tab.style.display = 'none');
+            
+            // Remove active class from all buttons
+            const buttons = document.querySelectorAll('.nav-tabs button');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            
+            // Show selected tab
+            document.getElementById(tabName + '-tab').style.display = 'block';
+            event.target.classList.add('active');
+            
+            // Initialize charts when analytics tab is shown
+            if (tabName === 'analytics') {
+                initializeCharts();
+            }
+        }
+        
+        // Analytics tab switching
+        function showAnalyticsTab(tabName) {
+            // Hide all analytics tabs
+            const tabs = document.querySelectorAll('.analytics-tab-content');
+            tabs.forEach(tab => tab.style.display = 'none');
+            
+            // Remove active class from all buttons
+            const buttons = document.querySelectorAll('.tab-button');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            
+            // Show selected tab
+            document.getElementById(tabName + '-analytics').style.display = 'block';
+            event.target.classList.add('active');
+            
+            // Initialize specific chart
+            switch(tabName) {
+                case 'risk-level':
+                    initRiskLevelChart();
+                    break;
+                case 'departments':
+                    initDepartmentChart();
+                    break;
+                case 'categories':
+                    initCategoriesChart();
+                    break;
+                case 'treatment':
+                    initTreatmentChart();
+                    break;
+                case 'owners':
+                    initOwnersChart();
+                    break;
+                case 'monitoring':
+                    initMonitoringChart();
+                    break;
+            }
+        }
+        
+        // Activity tab switching
+        function showActivityTab(tabName) {
+            // Hide all activity tabs
+            const tabs = document.querySelectorAll('.sub-tab-content');
+            tabs.forEach(tab => tab.style.display = 'none');
+            
+            // Remove active class from all buttons
+            const buttons = document.querySelectorAll('.sub-tab-button');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            
+            // Show selected tab
+            document.getElementById(tabName).style.display = 'block';
+            event.target.classList.add('active');
+        }
+        
+        // System tab switching
+        function showSystemTab(tabName) {
+            // Hide all system tabs
+            const tabs = document.querySelectorAll('.sub-tab-content');
+            tabs.forEach(tab => tab.style.display = 'none');
+            
+            // Remove active class from all buttons
+            const buttons = document.querySelectorAll('.sub-tab-button');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            
+            // Show selected tab
+            document.getElementById(tabName).style.display = 'block';
+            event.target.classList.add('active');
+        }
+        
+        // Communication tab switching
+        function showCommunicationTab(tabName) {
+            // Hide all communication tabs
+            const tabs = document.querySelectorAll('.sub-tab-content');
+            tabs.forEach(tab => tab.style.display = 'none');
+            
+            // Remove active class from all buttons
+            const buttons = document.querySelectorAll('.sub-tab-button');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            
+            // Show selected tab
+            document.getElementById(tabName).style.display = 'block';
+            event.target.classList.add('active');
+        }
+        
+        // Initialize all charts
+        function initializeCharts() {
+            initRiskLevelChart();
+        }
+        
+        // Risk Level Chart
+        function initRiskLevelChart() {
+            const ctx = document.getElementById('riskLevelChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.riskLevelChart) {
+                window.riskLevelChart.destroy();
+            }
+            
+            window.riskLevelChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Critical', 'High', 'Medium', 'Low'],
+                    datasets: [{
+                        data: [
+                            <?php echo $stats['critical_risks']; ?>,
+                            <?php echo $stats['high_risks']; ?>,
+                            <?php echo $stats['medium_risks']; ?>,
+                            <?php echo $stats['low_risks']; ?>
+                        ],
+                        backgroundColor: ['#d32f2f', '#f57c00', '#fbc02d', '#388e3c']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Risk Level Distribution'
+                        },
+                        legend: {
+                            position: 'right'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Department Chart
+        function initDepartmentChart() {
+            const ctx = document.getElementById('departmentChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.departmentChart) {
+                window.departmentChart.destroy();
+            }
+            
+            window.departmentChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: <?php echo json_encode(array_column($dept_data, 'department')); ?>,
+                    datasets: [{
+                        label: 'Number of Risks',
+                        data: <?php echo json_encode(array_column($dept_data, 'count')); ?>,
+                        backgroundColor: '#3949ab'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Risks by Department'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Categories Chart
+        function initCategoriesChart() {
+            const ctx = document.getElementById('categoriesChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.categoriesChart) {
+                window.categoriesChart.destroy();
+            }
+            
+            window.categoriesChart = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: <?php echo json_encode(array_column($categories_data, 'category')); ?>,
+                    datasets: [{
+                        data: <?php echo json_encode(array_column($categories_data, 'count')); ?>,
+                        backgroundColor: [
+                            '#3949ab', '#1a237e', '#5c6bc0', '#7986cb', '#9fa8da',
+                            '#d32f2f', '#f57c00', '#fbc02d', '#388e3c', '#00796b',
+                            '#0288d1', '#7b1fa2', '#c2185b', '#5d4037', '#616161'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Risk Categories Distribution'
+                        },
+                        legend: {
+                            position: 'right'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Treatment Progress Chart
+        function initTreatmentChart() {
+            const ctx = document.getElementById('treatmentChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.treatmentChart) {
+                window.treatmentChart.destroy();
+            }
+            
+            window.treatmentChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: <?php echo json_encode(array_column($treatment_data, 'treatment_status')); ?>,
+                    datasets: [{
+                        label: 'Number of Risks',
+                        data: <?php echo json_encode(array_column($treatment_data, 'count')); ?>,
+                        backgroundColor: [
+                            '#d32f2f', // Not Started
+                            '#f57c00', // In Progress
+                            '#388e3c'  // Completed
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Treatment Progress'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Risk Owners Chart
+        function initOwnersChart() {
+            const ctx = document.getElementById('ownersChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.ownersChart) {
+                window.ownersChart.destroy();
+            }
+            
+            window.ownersChart = new Chart(ctx, {
+                type: 'horizontalBar',
+                data: {
+                    labels: <?php echo json_encode(array_column($owner_data, 'owner_name')); ?>,
+                    datasets: [{
+                        label: 'Number of Risks',
+                        data: <?php echo json_encode(array_column($owner_data, 'count')); ?>,
+                        backgroundColor: '#3949ab'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Risks by Owner'
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Monitoring Frequency Chart
+        function initMonitoringChart() {
+            const ctx = document.getElementById('monitoringChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.monitoringChart) {
+                window.monitoringChart.destroy();
+            }
+            
+            window.monitoringChart = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: <?php echo json_encode(array_column($monitoring_data, 'monitoring_frequency')); ?>,
+                    datasets: [{
+                        data: <?php echo json_encode(array_column($monitoring_data, 'count')); ?>,
+                        backgroundColor: [
+                            '#3949ab', // Weekly
+                            '#1a237e', // Monthly
+                            '#5c6bc0', // Quarterly
+                            '#7986cb'  // Annually
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Monitoring Frequency'
+                        },
+                        legend: {
+                            position: 'right'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Heatmap Chart
+        function initHeatmapChart() {
+            const ctx = document.getElementById('heatmapChart').getContext('2d');
+            
+            // Check if chart already exists and destroy it
+            if (window.heatmapChart) {
+                window.heatmapChart.destroy();
+            }
+            
+            // Prepare data for heatmap
+            const heatmapData = [];
+            for (let prob = 1; prob <= 5; prob++) {
+                for (let impact = 1; impact <= 5; impact++) {
+                    const count = <?php echo json_encode($heatmap_data); ?>[prob][impact].length;
+                    heatmapData.push({
+                        x: impact,
+                        y: prob,
+                        v: count
+                    });
+                }
+            }
+            
+            window.heatmapChart = new Chart(ctx, {
+                type: 'bubble',
+                data: {
+                    datasets: [{
+                        label: 'Risk Count',
+                        data: heatmapData,
+                        backgroundColor: function(context) {
+                            const value = context.dataset.data[context.dataIndex];
+                            const score = value.x * value.y;
+                            if (score > 20) return 'rgba(245, 198, 203, 0.7)';
+                            if (score > 12) return 'rgba(248, 215, 218, 0.7)';
+                            if (score > 6) return 'rgba(255, 243, 205, 0.7)';
+                            return 'rgba(212, 237, 218, 0.7)';
+                        }
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Risk Distribution by Probability and Impact'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `Count: ${context.raw.v}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Impact'
+                            },
+                            min: 0.5,
+                            max: 5.5,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Probability'
+                            },
+                            min: 0.5,
+                            max: 5.5,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Heatmap Details Modal
+        const modal = document.getElementById('heatmap-modal');
+        const span = document.getElementsByClassName("close")[0];
+        
+        // Show heatmap details
+        function showHeatmapDetails(probability, impact) {
+            // Get risks for this cell
+            const risksInCell = <?php echo json_encode($heatmap_data); ?>[probability][impact];
+            
+            let detailsHTML = `<h3>Risks with Probability: ${probability} and Impact: ${impact}</h3>`;
+            
+            if (risksInCell.length === 0) {
+                detailsHTML += '<p>No risks found in this category.</p>';
+            } else {
+                detailsHTML += '<div class="risk-details-list">';
+                risksInCell.forEach(risk => {
+                    detailsHTML += `
+                        <div class="risk-detail">
+                            <h4>${risk.risk_name} (${risk.risk_id_number})</h4>
+                            <p><strong>Department:</strong> ${risk.department}</p>
+                            <p><strong>Risk Level:</strong> ${risk.risk_level}</p>
+                            <p><strong>Status:</strong> ${risk.status}</p>
+                            <p><strong>Risk Owner:</strong> ${risk.owner_name}</p>
+                            <a href="view_risk.php?id=${risk.id}" class="btn">View Details</a>
+                        </div>
+                    `;
+                });
+                detailsHTML += '</div>';
+            }
+            
+            document.getElementById('heatmap-details').innerHTML = detailsHTML;
+            modal.style.display = "block";
+        }
+        
+        // Close modal
+        span.onclick = function() {
+            modal.style.display = "none";
+        }
+        
+        window.onclick = function(event) {
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
+        }
+        
+        // Filter functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const departmentFilter = document.getElementById('department-filter');
+            const riskLevelFilter = document.getElementById('risk-level-filter');
+            const statusFilter = document.getElementById('status-filter');
+            const searchFilter = document.getElementById('search-filter');
+            const risksTable = document.getElementById('risks-table');
+            
+            function filterTable() {
+                const departmentValue = departmentFilter.value.toLowerCase();
+                const riskLevelValue = riskLevelFilter.value.toLowerCase();
+                const statusValue = statusFilter.value.toLowerCase();
+                const searchValue = searchFilter.value.toLowerCase();
+                
+                const rows = risksTable.getElementsByTagName('tr');
+                
+                for (let i = 1; i < rows.length; i++) {
+                    const departmentCell = rows[i].getElementsByTagName('td')[2];
+                    const riskLevelCell = rows[i].getElementsByTagName('td')[3];
+                    const statusCell = rows[i].getElementsByTagName('td')[5];
+                    const nameCell = rows[i].getElementsByTagName('td')[1];
+                    
+                    const departmentText = departmentCell.textContent || departmentCell.innerText;
+                    const riskLevelText = riskLevelCell.textContent || riskLevelCell.innerText;
+                    const statusText = statusCell.textContent || statusCell.innerText;
+                    const nameText = nameCell.textContent || nameCell.innerText;
+                    
+                    if (
+                        (departmentValue === '' || departmentText.toLowerCase().includes(departmentValue)) &&
+                        (riskLevelValue === '' || riskLevelText.toLowerCase().includes(riskLevelValue)) &&
+                        (statusValue === '' || statusText.toLowerCase().includes(statusValue)) &&
+                        (searchValue === '' || nameText.toLowerCase().includes(searchValue))
+                    ) {
+                        rows[i].style.display = '';
+                    } else {
+                        rows[i].style.display = 'none';
+                    }
+                }
+            }
+            
+            departmentFilter.addEventListener('change', filterTable);
+            riskLevelFilter.addEventListener('change', filterTable);
+            statusFilter.addEventListener('change', filterTable);
+            searchFilter.addEventListener('input', filterTable);
+            
+            // Initialize heatmap chart when heatmap tab is shown
+            document.querySelector('button[onclick="showTab(\'heatmap\')"]').addEventListener('click', function() {
+                setTimeout(initHeatmapChart, 100);
+            });
+        });
+    </script>
+</body>
+</html>
