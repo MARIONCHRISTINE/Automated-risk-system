@@ -3,3 +3,6 @@ ADD COLUMN `risk_rating` DECIMAL(10,2) DEFAULT NULL COMMENT 'Calculated risk rat
 ALTER TABLE `risk_incidents` 
 ADD COLUMN `involves_money_loss` VARCHAR(10) NULL DEFAULT NULL COMMENT 'Whether the risk involves money loss' AFTER `treatment_documents`,
 ADD COLUMN `money_amount` DECIMAL(15,2) NULL DEFAULT NULL COMMENT 'Estimated amount of money loss' AFTER `involves_money_loss`;
+ALTER TABLE `risk_documents`
+ADD COLUMN `document_content` LONGBLOB NULL AFTER `file_size`,
+ADD COLUMN `mime_type` VARCHAR(100) NULL AFTER `document_content`;
