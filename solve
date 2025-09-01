@@ -6,3 +6,6 @@ ADD COLUMN `money_amount` DECIMAL(15,2) NULL DEFAULT NULL COMMENT 'Estimated amo
 ALTER TABLE `risk_documents`
 ADD COLUMN `document_content` LONGBLOB NULL AFTER `file_size`,
 ADD COLUMN `mime_type` VARCHAR(100) NULL AFTER `document_content`;
+ALTER TABLE `risk_incidents` 
+ADD COLUMN `cause_of_risk_description` TEXT DEFAULT NULL 
+AFTER `cause_of_risk`;
