@@ -80,31 +80,22 @@ CREATE TABLE `risk_incidents` (
   KEY `idx_department_id` (`department_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Add foreign key constraints only if the referenced tables exist
-SET @exists_departments = 0;
-SELECT 1 INTO @exists_departments FROM information_schema.tables 
-WHERE table_schema = DATABASE() AND table_name = 'departments' LIMIT 1;
+-- Try to add foreign keys (will be ignored if tables don't exist)
+-- Note: If these fail, the transaction will continue without them
+ALTER TABLE `risk_incidents` 
+ADD CONSTRAINT `fk_risk_incidents_department` 
+FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`);
 
-SET @exists_users = 0;
-SELECT 1 INTO @exists_users FROM information_schema.tables 
-WHERE table_schema = DATABASE() AND table_name = 'users' LIMIT 1;
+ALTER TABLE `risk_incidents` 
+ADD CONSTRAINT `risk_incidents_ibfk_1` 
+FOREIGN KEY (`reported_by`) REFERENCES `users` (`id`);
 
-SET @sql = '';
-IF @exists_departments > 0 THEN
-    SET @sql = CONCAT(@sql, 'ALTER TABLE `risk_incidents` ADD CONSTRAINT `fk_risk_incidents_department` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`); ');
-END IF;
+ALTER TABLE `risk_incidents` 
+ADD CONSTRAINT `risk_incidents_ibfk_3` 
+FOREIGN KEY (`risk_owner_id`) REFERENCES `users` (`id`);
 
-IF @exists_users > 0 THEN
-    SET @sql = CONCAT(@sql, 'ALTER TABLE `risk_incidents` ADD CONSTRAINT `risk_incidents_ibfk_1` FOREIGN KEY (`reported_by`) REFERENCES `users` (`id`); ');
-    SET @sql = CONCAT(@sql, 'ALTER TABLE `risk_incidents` ADD CONSTRAINT `risk_incidents_ibfk_3` FOREIGN KEY (`risk_owner_id`) REFERENCES `users` (`id`); ');
-    SET @sql = CONCAT(@sql, 'ALTER TABLE `risk_incidents` ADD CONSTRAINT `risk_incidents_ibfk_4` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL; ');
-END IF;
-
--- Execute the dynamic SQL if there are any foreign keys to add
-IF LENGTH(@sql) > 0 THEN
-    PREPARE stmt FROM @sql;
-    EXECUTE stmt;
-    DEALLOCATE PREPARE stmt;
-END IF;
+ALTER TABLE `risk_incidents` 
+ADD CONSTRAINT `risk_incidents_ibfk_4` 
+FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL;
 
 COMMIT;
