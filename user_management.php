@@ -955,18 +955,28 @@ try {
 }
 
 // --- Data Fetching for User Management (Define queries first) ---
-// Get all users (excluding current admin)
-$users_query = "SELECT id, username, email, full_name, role, department, phone, is_active, created_at, updated_at, status, area_of_responsibility, assigned_risk_owner_id FROM users WHERE id != :current_user_id ORDER BY created_at DESC";
+// Get all users (excluding current admin) - MODIFIED TO JOIN WITH DEPARTMENTS TABLE
+$users_query = "SELECT u.id, u.username, u.email, u.full_name, u.role, u.department_id, d.name as department_name, u.phone, u.is_active, u.created_at, u.updated_at, u.status, u.area_of_responsibility, u.assigned_risk_owner_id 
+                FROM users u 
+                LEFT JOIN departments d ON u.department_id = d.id 
+                WHERE u.id != :current_user_id 
+                ORDER BY u.created_at DESC";
 $users_stmt = $db->prepare($users_query);
 $users_stmt->bindParam(':current_user_id', $_SESSION['user_id']);
-// Get Deleted Users from the deleted_users table
-$deleted_users_query = "SELECT * FROM deleted_users ORDER BY deleted_at DESC";
+
+// Get Deleted Users from the deleted_users table - MODIFIED TO JOIN WITH DEPARTMENTS TABLE
+$deleted_users_query = "SELECT du.*, d.name as department_name 
+                        FROM deleted_users du 
+                        LEFT JOIN departments d ON du.department = d.id 
+                        ORDER BY du.deleted_at DESC";
 $deleted_users_stmt = $db->prepare($deleted_users_query);
+
 // Execute initial queries
 $users_stmt->execute();
 $all_users = $users_stmt->fetchAll(PDO::FETCH_ASSOC);
 $deleted_users_stmt->execute();
 $deleted_users = $deleted_users_stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Get current user info for header
 $user_info = getCurrentUser();
 
@@ -979,8 +989,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_invitation'])) {
     error_log("=== INDIVIDUAL SEND INVITATION REQUEST START ===");
     error_log("Requested User ID: " . $userId);
    
-    // Fetch the user from the database using the ID
-    $query = "SELECT id, full_name, email, role, department FROM users WHERE id = :id LIMIT 1";
+    // Fetch the user from the database using the ID - FIXED TO JOIN WITH DEPARTMENTS
+    $query = "SELECT u.id, u.full_name, u.email, u.role, d.name as department_name 
+              FROM users u 
+              LEFT JOIN departments d ON u.department_id = d.id 
+              WHERE u.id = :id LIMIT 1";
     $stmt = $db->prepare($query);
     $stmt->bindParam(':id', $userId, PDO::PARAM_INT);
     $stmt->execute();
@@ -1003,8 +1016,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_invitation'])) {
         if ($updateStmt->execute()) {
             error_log("Password updated successfully for User ID: " . $userId);
            
-            // Refetch the user to get the latest data
-            $refetch_query = "SELECT id, full_name, email, role, department FROM users WHERE id = :id LIMIT 1";
+            // Refetch the user to get the latest data - FIXED TO JOIN WITH DEPARTMENTS
+            $refetch_query = "SELECT u.id, u.full_name, u.email, u.role, d.name as department_name 
+                              FROM users u 
+                              LEFT JOIN departments d ON u.department_id = d.id 
+                              WHERE u.id = :id LIMIT 1";
             $refetch_stmt = $db->prepare($refetch_query);
             $refetch_stmt->bindParam(':id', $userId, PDO::PARAM_INT);
             $refetch_stmt->execute();
@@ -1014,7 +1030,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_invitation'])) {
             $recipientEmail = trim($user['email']);
             $recipientName = trim($user['full_name']);
             $role = trim($user['role']);
-            $department = trim($user['department'] ?? 'General');
+            $department = trim($user['department_name'] ?? 'General');
            
             error_log("INDIVIDUAL INVITATION - CLEANED EMAIL DATA:");
             error_log("- Email: '" . $recipientEmail . "'");
@@ -1027,7 +1043,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_invitation'])) {
             $emailSent = sendInvitationEmail($recipientEmail, $recipientName, $role, $department, $defaultPassword);
            
             if ($emailSent === true) {
-                $success_message = "✅ Invitation sent to {$recipientEmail} successfully! Password: {$defaultPassword}";
+                // CHANGED: Shorter success message with toast notification style
+                $success_message = "Invitation sent successfully!";
                 error_log("SUCCESS: Individual invitation sent to " . $recipientEmail);
                
                 // Log successful invitation
@@ -1041,17 +1058,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_invitation'])) {
                     $_SESSION['user_id']
                 ]);
             } elseif ($emailSent === 'manual_required') {
-                $success_message = "⚠️ Email server unavailable. Invitation saved to 'emails' folder for manual sending to {$recipientEmail}. Password: {$defaultPassword}";
+                $success_message = "Email saved for manual sending";
             } else {
-                $error_message = "❌ Failed to send invitation to {$recipientEmail}. Please check your email configuration and server logs.";
+                $error_message = "Failed to send invitation";
                 error_log("ERROR: Failed to send individual invitation to " . $recipientEmail);
             }
         } else {
-            $error_message = "❌ Failed to update password for user. Please try again.";
+            $error_message = "Failed to update password";
             error_log("ERROR: Failed to update password for User ID: " . $userId);
         }
     } else {
-        $error_message = "❌ User not found with ID: {$userId}";
+        $error_message = "User not found";
         error_log("ERROR: User not found for ID: " . $userId);
     }
    
@@ -1076,8 +1093,11 @@ if ($_POST && isset($_POST['bulk_action']) && !empty($_POST['bulk_action']) && i
             $log_action_type = 'Bulk User Action';
             $log_details = "";
            
-            // CORRECTED: Fetch user's data from database using proper SELECT query
-            $user_email_query = "SELECT id, email, full_name, role, department FROM users WHERE id = :user_id LIMIT 1";
+            // CORRECTED: Fetch user's data from database using proper SELECT query - FIXED TO JOIN WITH DEPARTMENTS
+            $user_email_query = "SELECT u.id, u.email, u.full_name, u.role, d.name as department_name 
+                                 FROM users u 
+                                 LEFT JOIN departments d ON u.department_id = d.id 
+                                 WHERE u.id = :user_id LIMIT 1";
             $user_email_stmt = $db->prepare($user_email_query);
             $user_email_stmt->bindParam(':user_id', $user_id, PDO::PARAM_INT);
             $user_email_stmt->execute();
@@ -1088,7 +1108,7 @@ if ($_POST && isset($_POST['bulk_action']) && !empty($_POST['bulk_action']) && i
             $user_email = $user_data['email'] ?? 'Unknown';
             $user_name = $user_data['full_name'] ?? 'Unknown';
             $user_role = $user_data['role'] ?? 'staff';
-            $user_department = $user_data['department'] ?? 'General';
+            $user_department = $user_data['department_name'] ?? 'General';
             $user_email_detail = " (Email: " . $user_email . ", Name: " . $user_name . ")";
            
             switch ($action) {
@@ -1105,7 +1125,7 @@ if ($_POST && isset($_POST['bulk_action']) && !empty($_POST['bulk_action']) && i
                 case 'delete_soft':
                     // Move user to deleted_users table and delete from users table
                     $move_query = "INSERT INTO deleted_users (original_user_id, full_name, email, username, password, role, department, status, is_active, original_created_at, original_updated_at, deleted_by)
-                                    SELECT id, full_name, email, username, password, role, department, status, is_active, created_at, updated_at, ?
+                                    SELECT id, full_name, email, username, password, role, department_id, status, is_active, created_at, updated_at, ?
                                     FROM users WHERE id = ?";
                     $move_stmt = $db->prepare($move_query);
                     $move_stmt->bindParam(1, $_SESSION['user_id']);
@@ -1221,8 +1241,11 @@ if ($_POST && isset($_POST['bulk_action']) && !empty($_POST['bulk_action']) && i
                         if ($update_stmt->execute()) {
                             error_log("Password updated successfully for User ID: " . $user_id);
                            
-                            // CORRECTED: Get fresh user data from database for email using proper SELECT
-                            $fresh_user_query = "SELECT id, email, full_name, role, department FROM users WHERE id = ? LIMIT 1";
+                            // CORRECTED: Get fresh user data from database for email using proper SELECT - FIXED TO JOIN WITH DEPARTMENTS
+                            $fresh_user_query = "SELECT u.id, u.email, u.full_name, u.role, d.name as department_name 
+                                                FROM users u 
+                                                LEFT JOIN departments d ON u.department_id = d.id 
+                                                WHERE u.id = ? LIMIT 1";
                             $fresh_user_stmt = $db->prepare($fresh_user_query);
                             $fresh_user_stmt->bindParam(1, $user_id, PDO::PARAM_INT);
                             $fresh_user_stmt->execute();
@@ -1235,7 +1258,7 @@ if ($_POST && isset($_POST['bulk_action']) && !empty($_POST['bulk_action']) && i
                                 $clean_recipient_email = trim($fresh_user_data['email']);
                                 $clean_recipient_name = trim($fresh_user_data['full_name']);
                                 $clean_role = trim($fresh_user_data['role']);
-                                $clean_department = trim($fresh_user_data['department'] ?? 'General');
+                                $clean_department = trim($fresh_user_data['department_name'] ?? 'General');
                                
                                 error_log("BULK INVITE - CLEANED EMAIL DATA for User ID $user_id:");
                                 error_log("- Email: '" . $clean_recipient_email . "'");
@@ -1335,7 +1358,7 @@ if ($_POST && isset($_POST['bulk_action']) && !empty($_POST['bulk_action']) && i
         $deleted_users = $deleted_users_stmt->fetchAll(PDO::FETCH_ASSOC);
         
         error_log("After bulk action - Active users: " . count($all_users) . ", Deleted users: " . count($deleted_users));
-       
+        
     } catch (PDOException $e) {
         $db->rollBack();
         $error_message = "Database error during bulk action: " . $e->getMessage();
@@ -1366,7 +1389,7 @@ if ($_POST && isset($_POST['single_action_user_id'])) {
                 $stmt->bindParam(':password', $new_password);
                 $stmt->bindParam(':user_id', $user_id);
                 if ($stmt->execute()) {
-                    $success_message = "Password reset for user ID: {$user_id}. New password: 'newdefaultpassword'.";
+                    $success_message = "Password reset successfully";
                     // Log to system_audit_logs
                     $log_query = "INSERT INTO system_audit_logs (user, action, details, ip_address, user_id) VALUES (?, ?, ?, ?, ?)";
                     $log_stmt = $db->prepare($log_query);
@@ -1378,7 +1401,7 @@ if ($_POST && isset($_POST['single_action_user_id'])) {
                         $_SESSION['user_id']
                     ]);
                 } else {
-                    $error_message = "Failed to reset password for user ID: {$user_id}.";
+                    $error_message = "Failed to reset password";
                 }
                 break;
             case 'change_role':
@@ -1388,7 +1411,7 @@ if ($_POST && isset($_POST['single_action_user_id'])) {
                 $stmt->bindParam(':role', $new_role);
                 $stmt->bindParam(':user_id', $user_id);
                 if ($stmt->execute()) {
-                    $success_message = "Role changed to '{$new_role}' for user ID: {$user_id}.";
+                    $success_message = "Role changed successfully";
                     // Log to system_audit_logs
                     $log_query = "INSERT INTO system_audit_logs (user, action, details, ip_address, user_id) VALUES (?, ?, ?, ?, ?)";
                     $log_stmt = $db->prepare($log_query);
@@ -1400,7 +1423,7 @@ if ($_POST && isset($_POST['single_action_user_id'])) {
                         $_SESSION['user_id']
                     ]);
                 } else {
-                    $error_message = "Failed to change role for user ID: {$user_id}.";
+                    $error_message = "Failed to change role";
                 }
                 break;
             case 'toggle_status':
@@ -1419,7 +1442,7 @@ if ($_POST && isset($_POST['single_action_user_id'])) {
                 $stmt->bindParam(':is_active', $new_is_active);
                 $stmt->bindParam(':user_id', $user_id);
                 if ($stmt->execute()) {
-                    $success_message = "Account status changed to '{$new_status}' for user ID: {$user_id}.";
+                    $success_message = "Account status changed successfully";
                     // Log to system_audit_logs
                     $log_query = "INSERT INTO system_audit_logs (user, action, details, ip_address, user_id) VALUES (?, ?, ?, ?, ?)";
                     $log_stmt = $db->prepare($log_query);
@@ -1431,7 +1454,7 @@ if ($_POST && isset($_POST['single_action_user_id'])) {
                         $_SESSION['user_id']
                     ]);
                 } else {
-                    $error_message = "Failed to change account status for user ID: {$user_id}.";
+                    $error_message = "Failed to change account status";
                 }
                 break;
         }
@@ -1468,7 +1491,7 @@ if ($_POST && isset($_POST['delete_permanent_user'])) {
        
         if ($delete_recycle_stmt->execute()) {
             $db->commit();
-            $success_message = "User permanently deleted from the system! The email address can now be re-registered.";
+            $success_message = "User permanently deleted";
            
             // Log the permanent deletion
             $log_query = "INSERT INTO system_audit_logs (user, action, details, ip_address, user_id) VALUES (?, ?, ?, ?, ?)";
@@ -1487,7 +1510,7 @@ if ($_POST && isset($_POST['delete_permanent_user'])) {
            
         } else {
             $db->rollBack();
-            $error_message = "Failed to permanently delete user from recycle bin.";
+            $error_message = "Failed to permanently delete user";
         }
        
     } catch (PDOException $e) {
@@ -1518,10 +1541,10 @@ if ($_POST && isset($_POST['restore_user'])) {
         $email_exists = $check_email_stmt->fetchColumn();
        
         if ($email_exists > 0) {
-            $error_message = "Cannot restore user: Email address already exists in the system.";
+            $error_message = "Cannot restore user: Email already exists";
         } else {
             // Insert back into users table
-            $restore_query = "INSERT INTO users (full_name, email, username, password, role, department, status, is_active, created_at, updated_at)
+            $restore_query = "INSERT INTO users (full_name, email, username, password, role, department_id, status, is_active, created_at, updated_at)
                               VALUES (?, ?, ?, ?, ?, ?, 'pending', 1, ?, NOW())";
             $restore_stmt = $db->prepare($restore_query);
            
@@ -1540,7 +1563,7 @@ if ($_POST && isset($_POST['restore_user'])) {
                 $remove_stmt->bindParam(':deleted_user_id', $deleted_user_id);
                 $remove_stmt->execute();
                
-                $success_message = "User restored successfully (status set to pending)!";
+                $success_message = "User restored successfully";
                 // Log to system_audit_logs
                 $log_query = "INSERT INTO system_audit_logs (user, action, details, ip_address, user_id) VALUES (?, ?, ?, ?, ?)";
                 $log_stmt = $db->prepare($log_query);
@@ -1559,11 +1582,11 @@ if ($_POST && isset($_POST['restore_user'])) {
                 $deleted_users_stmt->execute();
                 $deleted_users = $deleted_users_stmt->fetchAll(PDO::FETCH_ASSOC);
             } else {
-                $error_message = "Failed to restore user to users table.";
+                $error_message = "Failed to restore user";
             }
         }
     } else {
-        $error_message = "Failed to restore user - user not found in recycle bin.";
+        $error_message = "Failed to restore user - not found in recycle bin";
     }
 }
 
@@ -1936,14 +1959,33 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             font-size: 0.8rem;
         }
        
+        /* CHANGED: Red toast notification style instead of green success */
         .success {
-            background: #d4edda;
-            color: #155724;
+            background: #dc3545;
+            color: white;
             padding: 1rem;
             border-radius: 5px;
             margin-bottom: 1rem;
-            border-left: 4px solid #28a745;
+            border-left: 4px solid #a71e2a;
             font-weight: 500;
+            position: fixed;
+            top: 120px;
+            right: 20px;
+            z-index: 1001;
+            max-width: 300px;
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+            animation: slideIn 0.3s ease-out;
+        }
+       
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
         }
        
         .error {
@@ -2531,7 +2573,15 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
 </nav>
 <div class="main-content">
     <?php if (isset($success_message)): ?>
-        <div class="success">✅ <?php echo $success_message; ?></div>
+        <div class="success" id="success-message"><?php echo $success_message; ?></div>
+        <script>
+            setTimeout(function() {
+                const successMessage = document.getElementById('success-message');
+                if (successMessage) {
+                    successMessage.style.display = 'none';
+                }
+            }, 1000);
+        </script>
     <?php endif; ?>
     <?php if (isset($error_message)): ?>
         <div class="error">❌ <?php echo $error_message; ?></div>
@@ -2540,19 +2590,19 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
     <div class="card">
         
         <div class="section-nav">
-            <button class="section-nav-btn active" onclick="showSection('all-users')">
+            <button class="section-nav-btn active" onclick="showSection(event, 'all-users')">
                 <i class="fas fa-users"></i>
                 All Users (<?php echo count($all_users); ?>)
             </button>
-            <button class="section-nav-btn" onclick="showSection('register-invite')">
+            <button class="section-nav-btn" onclick="showSection(event, 'register-invite')">
                 <i class="fas fa-user-plus"></i>
                 Register & Invite User
             </button>
-            <button class="section-nav-btn" onclick="showSection('session-management')">
+            <button class="section-nav-btn" onclick="showSection(event, 'session-management')">
                 <i class="fas fa-clock"></i>
                 Session Management (<?php echo $active_sessions_count; ?>)
             </button>
-            <button class="section-nav-btn" onclick="showSection('account-locking')">
+            <button class="section-nav-btn" onclick="showSection(event, 'account-locking')">
                 <i class="fas fa-lock"></i>
                 Account Locking (<?php echo $locked_accounts_count; ?>)
             </button>
@@ -2606,6 +2656,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                                 <th>Name</th>
                                 <th>Email</th>
                                 <th>Role</th>
+                                <th>Department</th>
                                 <th>Status</th>
                                 <th>Account Status</th>
                             </tr>
@@ -2626,6 +2677,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                                         <td><?php echo htmlspecialchars($user['full_name']); ?></td>
                                         <td><?php echo htmlspecialchars($user['email']); ?></td>
                                         <td><?php echo ucfirst(str_replace('_', ' ', $user['role'])); ?></td>
+                                        <td><?php echo htmlspecialchars($user['department_name'] ?? 'N/A'); ?></td>
                                         <td>
                                             <span class="status-badge status-<?php echo $user['status']; ?>">
                                                 <?php echo ucfirst($user['status']); ?>
@@ -2639,7 +2691,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                                     </tr>
                                 <?php endforeach;
                             else: ?>
-                                <tr><td colspan="6" style="text-align: center;">No active users found.</td></tr>
+                                <tr><td colspan="7" style="text-align: center;">No active users found.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
@@ -2685,7 +2737,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                                         <td><?php echo htmlspecialchars($user['full_name']); ?></td>
                                         <td><?php echo htmlspecialchars($user['email']); ?></td>
                                         <td><?php echo ucfirst(str_replace('_', ' ', $user['role'])); ?></td>
-                                        <td><?php echo htmlspecialchars($user['department'] ?? 'N/A'); ?></td>
+                                        <td><?php echo htmlspecialchars($user['department_name'] ?? 'N/A'); ?></td>
                                         <td><?php echo date('M d, Y H:i', strtotime($user['deleted_at'])); ?></td>
                                         <td>
                                             <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to restore <?php echo htmlspecialchars($user['full_name']); ?>?');">
@@ -2705,7 +2757,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                         </tbody>
                     </table>
                 </div>
-               
                 
                 <script>
                 const allDeletedUsersData = <?php echo json_encode($deleted_users); ?>;
@@ -2713,7 +2764,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                 </script>
             </div>
         </div>
-       
         
         <div id="register-invite" class="section-content">
             <div class="section-header" style="background: linear-gradient(135deg, #E60012 0%, #B8000E 100%); color: white; padding: 1.5rem 2rem; border-radius: 8px; margin-bottom: 2rem;">
@@ -2725,14 +2775,12 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                 </div>
             </div>
             
-            
             <div class="register-link-container">
                 <h3><i class="fas fa-user-plus"></i> Step 1: Register New User</h3>
                 <a href="register.php?return_to=user_management" class="btn-register">
                     <i class="fas fa-plus-circle"></i> Register New User
                 </a>
             </div>
-           
             
             <div class="invitation-section" style="background: #fff9e6; border-color: #ffd700;">
                 <h4><i class="fas fa-user-check"></i> Step 1.5: Approve Pending Registrations</h4>
@@ -2745,36 +2793,48 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                 ?>
                
                 <?php if (count($pending_users) > 0): ?>
-                    <div class="pending-users-list">
-                        <?php foreach ($pending_users as $user): ?>
-                            <div class="pending-user-item">
-                                <div class="pending-user-info">
-                                    <div class="pending-user-name"><?php echo htmlspecialchars($user['full_name']); ?></div>
-                                    <div class="pending-user-details">
-                                        <?php echo htmlspecialchars($user['email']); ?> •
-                                        <?php echo ucfirst(str_replace('_', ' ', $user['role'])); ?> •
-                                        <?php echo htmlspecialchars($user['department']); ?> •
-                                        <span class="status-badge status-pending">Pending Approval</span>
-                                    </div>
-                                </div>
-                                <div class="pending-user-actions">
-                                    <form method="POST" style="display: inline;" onsubmit="return confirm('Approve registration for <?php echo htmlspecialchars($user['full_name']); ?>?');">
-                                        <input type="hidden" name="selected_users[]" value="<?php echo $user['id']; ?>">
-                                        <input type="hidden" name="bulk_action" value="approve">
-                                        <button type="submit" class="btn btn-warning btn-sm">
-                                            <i class="fas fa-check"></i> Approve
-                                        </button>
-                                    </form>
-                                    <form method="POST" style="display: inline;" onsubmit="return confirm('Approve and send invitation to <?php echo htmlspecialchars($user['full_name']); ?>?');">
-                                        <input type="hidden" name="selected_users[]" value="<?php echo $user['id']; ?>">
-                                        <input type="hidden" name="bulk_action" value="approve_and_invite">
-                                        <button type="submit" class="btn btn-success btn-sm">
-                                            <i class="fas fa-user-check"></i> Approve & Invite
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
+                    <div class="table-container">
+                        <table class="user-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Department</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($pending_users as $user): ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars($user['full_name']); ?></td>
+                                        <td><?php echo htmlspecialchars($user['email']); ?></td>
+                                        <td><?php echo ucfirst(str_replace('_', ' ', $user['role'])); ?></td>
+                                        <td><?php echo htmlspecialchars($user['department_name'] ?? 'N/A'); ?></td>
+                                        <td>
+                                            <span class="status-badge status-pending">Pending Approval</span>
+                                        </td>
+                                        <td>
+                                            <form method="POST" style="display: inline;" onsubmit="return confirm('Approve registration for <?php echo htmlspecialchars($user['full_name']); ?>?');">
+                                                <input type="hidden" name="selected_users[]" value="<?php echo $user['id']; ?>">
+                                                <input type="hidden" name="bulk_action" value="approve">
+                                                <button type="submit" class="btn btn-warning btn-sm">
+                                                    <i class="fas fa-check"></i> Approve
+                                                </button>
+                                            </form>
+                                            <form method="POST" style="display: inline;" onsubmit="return confirm('Approve and send invitation to <?php echo htmlspecialchars($user['full_name']); ?>?');">
+                                                <input type="hidden" name="selected_users[]" value="<?php echo $user['id']; ?>">
+                                                <input type="hidden" name="bulk_action" value="approve_and_invite">
+                                                <button type="submit" class="btn btn-success btn-sm">
+                                                    <i class="fas fa-user-check"></i> Approve & Invite
+                                                </button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
                     </div>
                 <?php else: ?>
                     <div class="info-box">
@@ -2783,7 +2843,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                     </div>
                 <?php endif; ?>
             </div>
-           
             
             <div class="invitation-section">
                 <h4><i class="fas fa-paper-plane"></i> Step 2: Send Invitations to Registered Users</h4>
@@ -2796,28 +2855,40 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                 });
                 ?>
                 <?php if (count($approved_users) > 0): ?>
-                    <div class="pending-users-list">
-                        <?php foreach ($approved_users as $user): ?>
-                            <div class="pending-user-item">
-                                <div class="pending-user-info">
-                                    <div class="pending-user-name"><?php echo htmlspecialchars($user['full_name']); ?></div>
-                                    <div class="pending-user-details">
-                                        <?php echo htmlspecialchars($user['email']); ?> •
-                                        <?php echo ucfirst(str_replace('_', ' ', $user['role'])); ?> •
-                                        <?php echo htmlspecialchars($user['department']); ?> •
-                                        <span class="status-badge status-approved">Approved</span>
-                                    </div>
-                                </div>
-                                <div class="pending-user-actions">
-                                    <form method="POST" style="display: inline;" onsubmit="return confirm('Send invitation email to <?php echo htmlspecialchars($user['full_name']); ?> at <?php echo htmlspecialchars($user['email']); ?>?');">
-                                        <input type="hidden" name="user_id" value="<?php echo $user['id']; ?>">
-                                        <button type="submit" name="send_invitation" class="btn btn-success btn-sm">
-                                            <i class="fas fa-paper-plane"></i> Send Invitation
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
+                    <div class="table-container">
+                        <table class="user-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Department</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($approved_users as $user): ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars($user['full_name']); ?></td>
+                                        <td><?php echo htmlspecialchars($user['email']); ?></td>
+                                        <td><?php echo ucfirst(str_replace('_', ' ', $user['role'])); ?></td>
+                                        <td><?php echo htmlspecialchars($user['department_name'] ?? 'N/A'); ?></td>
+                                        <td>
+                                            <span class="status-badge status-approved">Approved</span>
+                                        </td>
+                                        <td>
+                                            <form method="POST" style="display: inline;" onsubmit="return confirm('Send invitation email to <?php echo htmlspecialchars($user['full_name']); ?> at <?php echo htmlspecialchars($user['email']); ?>?');">
+                                                <input type="hidden" name="user_id" value="<?php echo $user['id']; ?>">
+                                                <button type="submit" name="send_invitation" class="btn btn-success btn-sm">
+                                                    <i class="fas fa-paper-plane"></i> Send Invitation
+                                                </button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
                     </div>
                 <?php else: ?>
                     <div class="info-box">
@@ -2830,7 +2901,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             <div class="info-box">
             </div>
         </div>
-       
         
         <div id="session-management" class="section-content">
             <div class="section-header" style="background: linear-gradient(135deg, #E60012 0%, #B8000E 100%); color: white; padding: 1.5rem 2rem; border-radius: 8px; margin-bottom: 2rem;">
@@ -2875,7 +2945,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                 <p>Session timeout is currently set to <?php echo getSecuritySetting($db, 'session_timeout', 30); ?> minutes of inactivity.</p>
             </div>
         </div>
-       
         
         <div id="account-locking" class="section-content">
             <div class="section-header" style="background: linear-gradient(135deg, #E60012 0%, #B8000E 100%); color: white; padding: 1.5rem 2rem; border-radius: 8px; margin-bottom: 2rem;">
@@ -2934,25 +3003,50 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
     </div>
 </div>
 <script>
-    
-    function showSection(sectionId) {
+    // CORRECTED: Improved showSection function to properly handle tab switching
+    function showSection(event, sectionId) {
+        // Prevent default action if event exists
+        if (event && typeof event.preventDefault === 'function') {
+            event.preventDefault();
+        }
         
+        // Hide all sections
         const sections = document.querySelectorAll('.section-content');
         sections.forEach(section => {
             section.classList.remove('active');
         });
         
-        
+        // Remove active class from all buttons
         const buttons = document.querySelectorAll('.section-nav-btn');
         buttons.forEach(button => {
             button.classList.remove('active');
         });
         
+        // Show selected section
+        const selectedSection = document.getElementById(sectionId);
+        if (selectedSection) {
+            selectedSection.classList.add('active');
+        }
         
-        document.getElementById(sectionId).classList.add('active');
+        // Find and activate the button that corresponds to this section
+        let targetButton = null;
+        if (event && event.currentTarget) {
+            // If called from a button click event, use the currentTarget
+            targetButton = event.currentTarget;
+        } else {
+            // Otherwise find the button by its onclick attribute
+            buttons.forEach(button => {
+                const onclickAttr = button.getAttribute('onclick');
+                if (onclickAttr && onclickAttr.includes(sectionId)) {
+                    targetButton = button;
+                }
+            });
+        }
         
-        
-        event.target.classList.add('active');
+        // Add active class to the target button
+        if (targetButton) {
+            targetButton.classList.add('active');
+        }
     }
     
     function validateBulkAction() {
@@ -2968,7 +3062,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             alert('Please select at least one user.');
             return false;
         }
-       
         
         let confirmMessage = '';
         switch(selectedAction) {
@@ -2989,7 +3082,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
         }
        
         if (confirm(confirmMessage)) {
-            
             const submitBtn = document.querySelector('button[type="submit"]');
             submitBtn.textContent = 'Processing...';
             submitBtn.disabled = true;
@@ -3009,6 +3101,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             });
         }
     });
+    
     function filterUserTable() {
         const input = document.getElementById('userSearchInput');
         const filter = input.value.toLowerCase();
@@ -3028,12 +3121,12 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             tr[i].style.display = found ? "" : "none";
         }
     }
+    
     function toggleAllUsers() {
         const tbody = document.getElementById('userTableBody');
         const btn = document.getElementById('viewAllBtn');
        
         if (!showingAll) {
-            
             tbody.innerHTML = '';
             allUsersData.forEach(user => {
                 const row = createUserRow(user);
@@ -3042,7 +3135,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             btn.textContent = 'Show Less';
             showingAll = true;
         } else {
-            
             tbody.innerHTML = '';
             allUsersData.slice(0, 5).forEach(user => {
                 const row = createUserRow(user);
@@ -3052,6 +3144,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             showingAll = false;
         }
     }
+    
     function createUserRow(user) {
         const row = document.createElement('tr');
         const accountStatus = (user.status === 'suspended' || (user.is_active !== undefined && !user.is_active)) ? 'Locked' : 'Active';
@@ -3062,17 +3155,18 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             <td>${user.full_name}</td>
             <td>${user.email}</td>
             <td>${user.role.charAt(0).toUpperCase() + user.role.slice(1).replace('_', ' ')}</td>
+            <td>${user.department_name || 'N/A'}</td>
             <td><span class="status-badge status-${user.status}">${user.status.charAt(0).toUpperCase() + user.status.slice(1)}</span></td>
             <td><span class="status-badge ${accountStatusClass}">${accountStatus}</span></td>
         `;
         return row;
     }
+    
     function toggleDeletedUsers() {
         const tbody = document.getElementById('deletedUserTableBody');
         const btn = document.getElementById('viewAllDeletedBtn');
        
         if (!showingAllDeleted) {
-            
             tbody.innerHTML = '';
             if (allDeletedUsersData.length > 0) {
                 allDeletedUsersData.forEach(user => {
@@ -3085,7 +3179,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             btn.textContent = 'Show Less';
             showingAllDeleted = true;
         } else {
-            
             tbody.innerHTML = '';
             const displayUsers = allDeletedUsersData.slice(0, 5);
             if (displayUsers.length > 0) {
@@ -3100,6 +3193,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             showingAllDeleted = false;
         }
     }
+    
     function createDeletedUserRow(user) {
         const row = document.createElement('tr');
         const deletedDate = new Date(user.deleted_at);
@@ -3115,7 +3209,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             <td>${user.full_name}</td>
             <td>${user.email}</td>
             <td>${user.role.charAt(0).toUpperCase() + user.role.slice(1).replace('_', ' ')}</td>
-            <td>${user.department || 'N/A'}</td>
+            <td>${user.department_name || 'N/A'}</td>
             <td>${formattedDate}</td>
             <td>
                 <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to restore ${user.full_name}?');">
@@ -3152,6 +3246,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             alert('Error loading active sessions');
         });
     }
+    
     function displayActiveSessionsModal(sessions) {
         // Count sessions by role
         let adminCount = 0;
@@ -3163,7 +3258,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                 otherCount++;
             }
         });
-
         let modalHtml = `
             <div id="sessionsModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;">
                 <div style="background: white; padding: 2rem; border-radius: 10px; max-width: 90%; max-height: 90%; overflow-y: auto; width: 800px;">
@@ -3192,7 +3286,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                                 </tr>
                             </thead>
                             <tbody>`;
-
         sessions.forEach(session => {
             const loginTime = new Date(session.login_time).toLocaleString();
             const statusColor = session.status === 'Active' ? '#28a745' :
@@ -3225,7 +3318,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                     </td>
                 </tr>`;
         });
-
         modalHtml += `
                             </tbody>
                         </table>
@@ -3236,9 +3328,9 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
                     </div>
                 </div>
             </div>`;
-
         document.body.insertAdjacentHTML('beforeend', modalHtml);
     }
+    
     function forceLogoutSession(sessionId) {
         if (confirm('Are you sure you want to force logout this session?')) {
             fetch('user_management.php', {
@@ -3264,6 +3356,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             });
         }
     }
+    
     function forceLogoutAll() {
         if (confirm('Are you sure you want to force logout ALL users? This will end all active sessions immediately.')) {
             fetch('user_management.php', {
@@ -3288,9 +3381,11 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             });
         }
     }
+    
     function sessionSettings() {
         displaySessionSettingsModal();
     }
+    
     function displaySessionSettingsModal() {
         let modalHtml = `
             <div id="sessionSettingsModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;">
@@ -3340,6 +3435,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             alert('Error loading locked accounts');
         });
     }
+    
     function displayLockedAccountsModal(accounts) {
         let modalHtml = `
             <div id="lockedAccountsModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;">
@@ -3412,6 +3508,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
        
         document.body.insertAdjacentHTML('beforeend', modalHtml);
     }
+    
     function unlockAccount(userEmail) {
         if (confirm(`Are you sure you want to unlock the account for ${userEmail}?`)) {
             fetch('user_management.php', {
@@ -3437,6 +3534,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             });
         }
     }
+    
     function unlockAllAccounts() {
         if (confirm('Are you sure you want to unlock ALL currently locked accounts?')) {
             fetch('user_management.php', {
@@ -3461,9 +3559,11 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             });
         }
     }
+    
     function configureLocking() {
         displayLockingConfigModal();
     }
+    
     function displayLockingConfigModal() {
         let modalHtml = `
             <div id="lockingConfigModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;">
@@ -3504,6 +3604,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             modal.remove();
         }
     }
+    
     function saveSessionSettings() {
         const form = document.getElementById('sessionSettingsForm');
         const formData = new FormData(form);
@@ -3535,6 +3636,7 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
             alert('Error updating session settings');
         });
     }
+    
     function saveLockingConfig() {
         const form = document.getElementById('lockingConfigForm');
         const formData = new FormData(form);
@@ -3543,7 +3645,6 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
         for (let [key, value] of formData.entries()) {
             settings[key] = value;
         }
-       
         
         if (!settings.auto_unlock) {
             settings.auto_unlock = '0';
@@ -3572,27 +3673,36 @@ error_log("DEBUG - Total deleted users: " . count($deleted_users));
         });
     }
     
+    // CORRECTED: Cross-page navigation functions
     function showDatabaseTab() {
         window.location.href = 'admin_dashboard.php';
         setTimeout(function() {
-            if (window.showTab) {
-                showTab({preventDefault: function(){}}, 'database');
+            // Activate the database tab after page loads
+            const databaseTab = document.querySelector('.nav-item a[onclick*="database"]');
+            if (databaseTab) {
+                databaseTab.click();
             }
         }, 100);
     }
+    
     function showNotificationsTab() {
         window.location.href = 'admin_dashboard.php';
         setTimeout(function() {
-            if (window.showTab) {
-                showTab({preventDefault: function(){}}, 'notifications');
+            // Activate the notifications tab after page loads
+            const notificationsTab = document.querySelector('.nav-item a[onclick*="notifications"]');
+            if (notificationsTab) {
+                notificationsTab.click();
             }
         }, 100);
     }
+    
     function showSettingsTab() {
         window.location.href = 'admin_dashboard.php';
         setTimeout(function() {
-            if (window.showTab) {
-                showTab({preventDefault: function(){}}, 'settings');
+            // Activate the settings tab after page loads
+            const settingsTab = document.querySelector('.nav-item a[onclick*="settings"]');
+            if (settingsTab) {
+                settingsTab.click();
             }
         }, 100);
     }
