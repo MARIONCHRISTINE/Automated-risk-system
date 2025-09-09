@@ -1,7 +1,6 @@
 <?php
 session_start();
 include_once 'config/database.php';
-
 // Include compatibility functions if file exists
 if (file_exists('includes/php_compatibility.php')) {
     include_once 'includes/php_compatibility.php';
@@ -15,11 +14,22 @@ if (file_exists('includes/php_compatibility.php')) {
         return (substr($haystack, -$length) === $needle);
     }
 }
-
 $message = '';
 $error = '';
 $database = new Database();
 $db = $database->getConnection();
+
+// Fetch departments from the database
+$departments = [];
+try {
+    $dept_query = "SELECT id, name FROM departments ORDER BY name";
+    $dept_stmt = $db->prepare($dept_query);
+    $dept_stmt->execute();
+    $departments = $dept_stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    $error = "Error loading departments. Please try again later.";
+    error_log("Department fetch error: " . $e->getMessage());
+}
 
 if ($_POST) {
     $email = $_POST['email'];
@@ -27,13 +37,22 @@ if ($_POST) {
     $confirm_password = $_POST['confirm_password'];
     $full_name = $_POST['full_name'];
     $role = $_POST['role'];
-    $department = $_POST['department'];
+    $department_id = $_POST['department']; // This now contains the department ID
     $area_of_responsibility = null; // Default to null
     $assigned_risk_owner_id = null; // Default to null
-
+    
+    // Get department name for logging
+    $department_name = '';
+    foreach ($departments as $dept) {
+        if ($dept['id'] == $department_id) {
+            $department_name = $dept['name'];
+            break;
+        }
+    }
+    
     // Generate username from email (part before @)
     $username = explode('@', $email)[0];
-
+    
     // Validate email domain - using compatible function
     if (!endsWith($email, '@ke.airtel.com')) {
         $error = "Please use your Airtel email address ending with @ke.airtel.com";
@@ -47,7 +66,7 @@ if ($_POST) {
     } elseif (empty($role)) {
         $error = "Please select your role.";
         $database->logActivity(null, 'Registration Failed - Missing Role', 'Attempt to register for ' . $email . ' with no role selected.', $_SERVER['REMOTE_ADDR']);
-    } elseif (empty($department)) {
+    } elseif (empty($department_id)) {
         $error = "Please select your department.";
         $database->logActivity(null, 'Registration Failed - Missing Department', 'Attempt to register for ' . $email . ' with no department selected.', $_SERVER['REMOTE_ADDR']);
     } else {
@@ -65,7 +84,7 @@ if ($_POST) {
                 $database->logActivity(null, 'Registration Failed - Missing Assigned RO', 'Attempt to register Staff ' . $email . ' with no assigned Risk Owner.', $_SERVER['REMOTE_ADDR']);
             }
         }
-
+        
         if (empty($error)) { // Proceed only if no validation errors so far
             // Check if email or username already exists (regardless of status)
             $check_query = "SELECT id, status FROM users WHERE email = :email OR username = :username";
@@ -73,7 +92,7 @@ if ($_POST) {
             $check_stmt->bindParam(':email', $email);
             $check_stmt->bindParam(':username', $username);
             $check_stmt->execute();
-
+            
             if ($check_stmt->rowCount() > 0) {
                 $existing_user = $check_stmt->fetch(PDO::FETCH_ASSOC);
                 if ($existing_user['status'] === 'approved') {
@@ -88,7 +107,7 @@ if ($_POST) {
                                         password = :password,
                                         full_name = :full_name,
                                         role = :role,
-                                        department = :department,
+                                        department_id = :department_id,
                                         area_of_responsibility = :area_of_responsibility,
                                         assigned_risk_owner_id = :assigned_risk_owner_id,
                                         status = :status,
@@ -98,12 +117,12 @@ if ($_POST) {
                     $update_stmt->bindParam(':password', $hashed_password);
                     $update_stmt->bindParam(':full_name', $full_name);
                     $update_stmt->bindParam(':role', $role);
-                    $update_stmt->bindParam(':department', $department);
+                    $update_stmt->bindParam(':department_id', $department_id);
                     $update_stmt->bindParam(':area_of_responsibility', $area_of_responsibility);
                     $update_stmt->bindParam(':assigned_risk_owner_id', $assigned_risk_owner_id);
                     $update_stmt->bindParam(':status', $status);
                     $update_stmt->bindParam(':id', $existing_user['id']);
-
+                    
                     if ($update_stmt->execute()) {
                         if ($role === 'admin') {
                             $message = "Admin account reactivated and updated successfully! You can now login.";
@@ -123,19 +142,19 @@ if ($_POST) {
                 $hashed_password = password_hash($password, PASSWORD_DEFAULT);
                 // Admin accounts are auto-approved, others need approval
                 $status = ($role === 'admin') ? 'approved' : 'pending';
-                $query = "INSERT INTO users (username, email, password, full_name, role, department, area_of_responsibility, assigned_risk_owner_id, status, created_at, updated_at)
-                            VALUES (:username, :email, :password, :full_name, :role, :department, :area_of_responsibility, :assigned_risk_owner_id, :status, NOW(), NOW())";
+                $query = "INSERT INTO users (username, email, password, full_name, role, department_id, area_of_responsibility, assigned_risk_owner_id, status, created_at, updated_at)
+                            VALUES (:username, :email, :password, :full_name, :role, :department_id, :area_of_responsibility, :assigned_risk_owner_id, :status, NOW(), NOW())";
                 $stmt = $db->prepare($query);
                 $stmt->bindParam(':username', $username);
                 $stmt->bindParam(':email', $email);
                 $stmt->bindParam(':password', $hashed_password);
                 $stmt->bindParam(':full_name', $full_name);
                 $stmt->bindParam(':role', $role);
-                $stmt->bindParam(':department', $department);
+                $stmt->bindParam(':department_id', $department_id);
                 $stmt->bindParam(':area_of_responsibility', $area_of_responsibility);
                 $stmt->bindParam(':assigned_risk_owner_id', $assigned_risk_owner_id);
                 $stmt->bindParam(':status', $status);
-
+                
                 if ($stmt->execute()) {
                     if ($role === 'admin') {
                         $message = "Admin account created successfully! You can now login.";
@@ -330,17 +349,11 @@ if ($_POST) {
                 <label for="department">Department</label>
                 <select id="department" name="department" required>
                     <option value="">Select Department</option>
-                    <option value="Airtel Money" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Airtel Money') ? 'selected' : ''; ?>>Airtel Money</option>
-                    <option value="IT & Technology" <?php echo (isset($_POST['department']) && $_POST['department'] === 'IT & Technology') ? 'selected' : ''; ?>>IT & Technology</option>
-                    <option value="Finance" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Finance') ? 'selected' : ''; ?>>Finance</option>
-                    <option value="Operations" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Operations') ? 'selected' : ''; ?>>Operations</option>
-                    <option value="Risk & Compliance" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Risk & Compliance') ? 'selected' : ''; ?>>Risk & Compliance</option>
-                    <option value="Human Resources" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Human Resources') ? 'selected' : ''; ?>>Human Resources</option>
-                    <option value="Marketing" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Marketing') ? 'selected' : ''; ?>>Marketing</option>
-                    <option value="Customer Service" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Customer Service') ? 'selected' : ''; ?>>Customer Service</option>
-                    <option value="Network" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Network') ? 'selected' : ''; ?>>Network</option>
-                    <option value="Legal" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Legal') ? 'selected' : ''; ?>>Legal</option>
-                    <option value="Other" <?php echo (isset($_POST['department']) && $_POST['department'] === 'Other') ? 'selected' : ''; ?>>Other</option>
+                    <?php foreach ($departments as $dept): ?>
+                        <option value="<?php echo $dept['id']; ?>" <?php echo (isset($_POST['department']) && $_POST['department'] == $dept['id']) ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($dept['name']); ?>
+                        </option>
+                    <?php endforeach; ?>
                 </select>
             </div>
             <div class="form-group">
@@ -355,7 +368,7 @@ if ($_POST) {
                         <div class="role-title">Risk Owner</div>
                     </label>
                     <label class="role-card" for="role_compliance">
-                        <input type="radio" id="role_compliance" name="role" value="compliance" <?php echo (isset($_POST['role']) && $_POST['role'] === 'compliance') ? 'checked' : ''; ?> onchange="toggleRoleFields()">
+                        <input type="radio" id="role_compliance" name="role" value="compliance_team" <?php echo (isset($_POST['role']) && $_POST['role'] === 'compliance') ? 'checked' : ''; ?> onchange="toggleRoleFields()">
                         <div class="role-title">Compliance</div>
                     </label>
                     <label class="role-card" for="role_admin">
@@ -410,16 +423,19 @@ if ($_POST) {
     </div>
     <script>
         // Function to fetch risk owners based on department
-        function fetchRiskOwnersByDepartment(department) {
+        function fetchRiskOwnersByDepartment(departmentId) {
             const assignedRiskOwnerSelect = document.getElementById('assigned_risk_owner_id');
             const prevSelectedOwnerId = assignedRiskOwnerSelect.dataset.prevSelected; // Get previously selected value
             assignedRiskOwnerSelect.innerHTML = '<option value="">Loading Risk Owners...</option>'; // Clear and show loading state
-            if (!department) {
+            
+            if (!departmentId) {
                 assignedRiskOwnerSelect.innerHTML = '<option value="">Select a Department first</option>';
                 return;
             }
+            
             // Construct the URL for the API call
-            const apiUrl = `api/get_risk_owners_by_department.php?department=${encodeURIComponent(department)}`;
+            const apiUrl = `api/get_risk_owners_by_department.php?department_id=${encodeURIComponent(departmentId)}`;
+            
             fetch(apiUrl)
                 .then(response => {
                     if (!response.ok) {
@@ -430,21 +446,24 @@ if ($_POST) {
                 })
                 .then(data => {
                     assignedRiskOwnerSelect.innerHTML = '<option value="">Select your Risk Owner</option>'; // Default option
+                    
                     if (data.error) {
                         assignedRiskOwnerSelect.innerHTML = '<option value="">Error loading owners</option>';
                         console.error('API Error:', data.error);
                         return;
                     }
+                    
                     if (data.length === 0) {
                         assignedRiskOwnerSelect.innerHTML = '<option value="">No Risk Owners in this Department</option>';
                     } else {
                         data.forEach(owner => {
                             const option = document.createElement('option');
                             option.value = owner.id;
-                            option.textContent = `${owner.full_name} (${owner.department})`;
+                            option.textContent = `${owner.full_name} (${owner.department_name})`;
                             assignedRiskOwnerSelect.appendChild(option);
                         });
                     }
+                    
                     // Attempt to re-select the previously chosen value if it's still valid
                     if (prevSelectedOwnerId) {
                         const optionExists = Array.from(assignedRiskOwnerSelect.options).some(option => option.value === prevSelectedOwnerId);
@@ -460,6 +479,7 @@ if ($_POST) {
                     assignedRiskOwnerSelect.innerHTML = '<option value="">Error loading Risk Owners</option>';
                 });
         }
+        
         // Function to toggle visibility of role-specific fields
         function toggleRoleFields() {
             const selectedRole = document.querySelector('input[name="role"]:checked')?.value;
@@ -467,18 +487,22 @@ if ($_POST) {
             const staffFields = document.getElementById('staffFields');
             const departmentSelect = document.getElementById('department');
             const assignedRiskOwnerSelect = document.getElementById('assigned_risk_owner_id');
+            
             if (riskOwnerFields && staffFields) {
                 riskOwnerFields.style.display = 'none';
                 staffFields.style.display = 'none';
+                
                 // Reset required attributes
                 riskOwnerFields.querySelector('select').removeAttribute('required');
                 staffFields.querySelector('select').removeAttribute('required');
+                
                 if (selectedRole === 'risk_owner') {
                     riskOwnerFields.style.display = 'block';
                     riskOwnerFields.querySelector('select').setAttribute('required', 'required');
                 } else if (selectedRole === 'staff') {
                     staffFields.style.display = 'block';
                     staffFields.querySelector('select').setAttribute('required', 'required');
+                    
                     // Store current selection before fetching new list (if form was submitted with errors)
                     if (assignedRiskOwnerSelect.value) {
                         assignedRiskOwnerSelect.dataset.prevSelected = assignedRiskOwnerSelect.value;
@@ -486,11 +510,13 @@ if ($_POST) {
                         // If there was a POST value but no current selection, use the POST value
                         assignedRiskOwnerSelect.dataset.prevSelected = '<?php echo isset($_POST["assigned_risk_owner_id"]) ? htmlspecialchars($_POST["assigned_risk_owner_id"]) : ""; ?>';
                     }
+                    
                     // Fetch risk owners for the currently selected department
                     fetchRiskOwnersByDepartment(departmentSelect.value);
                 }
             }
         }
+        
         // Event listener for role card selection
         document.querySelectorAll('.role-card').forEach(card => {
             card.addEventListener('click', function() {
@@ -500,6 +526,7 @@ if ($_POST) {
                 toggleRoleFields(); // Call toggle function on click
             });
         });
+        
         // Event listener for department change (only if staff role is selected)
         document.getElementById('department').addEventListener('change', function() {
             const selectedRole = document.querySelector('input[name="role"]:checked')?.value;
@@ -507,6 +534,7 @@ if ($_POST) {
                 fetchRiskOwnersByDepartment(this.value);
             }
         });
+        
         // Initial call on page load to set up fields correctly
         document.addEventListener('DOMContentLoaded', function() {
             const initialCheckedRadio = document.querySelector('input[type="radio"]:checked');
