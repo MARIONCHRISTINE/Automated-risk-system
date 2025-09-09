@@ -320,11 +320,19 @@ $category_colors = [
 function cleanCategoryName($name) {
     return str_replace(['"', "'", '[', ']'], '', $name);
 }
-// Risk level calculation function that uses risk_level field first
+// CORRECTED Risk level calculation function that properly handles unassessed risks
 function getRiskLevel($risk) {
-    // First check if risk_level is set in the database
+    // First check if risk_level is set in the database and is not "Not Assessed"
     if (!empty($risk['risk_level']) && $risk['risk_level'] !== 'Not Assessed') {
         return strtolower($risk['risk_level']);
+    }
+    
+    // Check if the risk has been assessed by the risk owner
+    // If none of the assessment fields are filled, it's not assessed
+    if (empty($risk['probability']) && empty($risk['impact']) &&
+        empty($risk['inherent_likelihood']) && empty($risk['inherent_consequence']) &&
+        empty($risk['residual_likelihood']) && empty($risk['residual_consequence'])) {
+        return 'not-assessed';
     }
     
     // If risk_level is not set or is 'Not Assessed', calculate from available fields
@@ -349,10 +357,19 @@ function getRiskLevel($risk) {
     if ($rating >= 4) return 'medium';
     return 'low';
 }
+// CORRECTED Risk level text function that properly handles unassessed risks
 function getRiskLevelText($risk) {
-    // First check if risk_level is set in the database
+    // First check if risk_level is set in the database and is not "Not Assessed"
     if (!empty($risk['risk_level']) && $risk['risk_level'] !== 'Not Assessed') {
         return $risk['risk_level'];
+    }
+    
+    // Check if the risk has been assessed by the risk owner
+    // If none of the assessment fields are filled, it's not assessed
+    if (empty($risk['probability']) && empty($risk['impact']) &&
+        empty($risk['inherent_likelihood']) && empty($risk['inherent_consequence']) &&
+        empty($risk['residual_likelihood']) && empty($risk['residual_consequence'])) {
+        return 'Not Assessed';
     }
     
     // If risk_level is not set or is 'Not Assessed', calculate from available fields
