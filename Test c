@@ -1,1 +1,41 @@
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+START TRANSACTION;
+SET time_zone = "+00:00";
 
+-- Drop table if it exists to avoid errors
+DROP TABLE IF EXISTS `users`;
+
+CREATE TABLE `users` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `username` varchar(50) NOT NULL,
+  `email` varchar(100) NOT NULL,
+  `password` varchar(255) NOT NULL,
+  `full_name` varchar(100) NOT NULL,
+  `role` enum('staff','risk_owner','compliance_team','admin') NOT NULL,
+  `department_id` int(11) DEFAULT NULL,
+  `phone` varchar(20) DEFAULT NULL,
+  `is_active` tinyint(1) DEFAULT 1,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `status` enum('pending','approved','rejected') DEFAULT 'approved',
+  `area_of_responsibility` varchar(255) DEFAULT NULL,
+  `assigned_risk_owner_id` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `username` (`username`),
+  UNIQUE KEY `email` (`email`),
+  KEY `idx_users_role` (`role`),
+  KEY `idx_assigned_risk_owner_id` (`assigned_risk_owner_id`),
+  KEY `idx_department_id` (`department_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Try to add foreign keys (will be ignored if tables don't exist)
+-- Note: If these fail, the transaction will continue without them
+ALTER TABLE `users` 
+ADD CONSTRAINT `fk_assigned_risk_owner` 
+FOREIGN KEY (`assigned_risk_owner_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+
+ALTER TABLE `users` 
+ADD CONSTRAINT `fk_users_department` 
+FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`);
+
+COMMIT;
