@@ -1,10 +1,75 @@
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
-START TRANSACTION;
 SET time_zone = "+00:00";
 
--- Drop table if it exists to avoid errors
-DROP TABLE IF EXISTS `departments`;
+-- Risk Management System Database Schema
 
+-- Table structure for table `account_lockouts`
+CREATE TABLE `account_lockouts` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `user_email` varchar(255) NOT NULL,
+  `failed_attempts` int(11) DEFAULT 0,
+  `locked_at` timestamp NULL DEFAULT NULL,
+  `unlock_at` timestamp NULL DEFAULT NULL,
+  `is_locked` tinyint(1) DEFAULT 0,
+  `lock_reason` varchar(255) DEFAULT 'Too many failed login attempts',
+  `locked_by_admin` tinyint(1) DEFAULT 0,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_user_email` (`user_email`),
+  KEY `idx_locked_at` (`locked_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `active_sessions`
+CREATE TABLE `active_sessions` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `session_id` varchar(255) NOT NULL,
+  `user_email` varchar(255) NOT NULL,
+  `user_name` varchar(255) NOT NULL,
+  `user_role` varchar(50) NOT NULL,
+  `ip_address` varchar(45) NOT NULL,
+  `user_agent` text DEFAULT NULL,
+  `login_time` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_activity` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `is_active` tinyint(1) DEFAULT 1,
+  `logout_time` timestamp NULL DEFAULT NULL,
+  `session_data` text DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `session_id` (`session_id`),
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_session_id` (`session_id`),
+  KEY `idx_last_activity` (`last_activity`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `activity_logs`
+CREATE TABLE `activity_logs` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `action` varchar(100) NOT NULL,
+  `description` text DEFAULT NULL,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `user_agent` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `audit_logs`
+CREATE TABLE `audit_logs` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) DEFAULT NULL,
+  `action` varchar(255) NOT NULL,
+  `details` text DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `departments`
 CREATE TABLE `departments` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(100) NOT NULL,
@@ -14,4 +79,638 @@ CREATE TABLE `departments` (
   UNIQUE KEY `uk_abbreviation` (`abbreviation`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
-COMMIT;
+-- Table structure for table `users`
+CREATE TABLE `users` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `username` varchar(50) NOT NULL,
+  `email` varchar(100) NOT NULL,
+  `password` varchar(255) NOT NULL,
+  `full_name` varchar(100) NOT NULL,
+  `role` enum('staff','risk_owner','compliance_team','admin') NOT NULL,
+  `department_id` int(11) DEFAULT NULL,
+  `phone` varchar(20) DEFAULT NULL,
+  `is_active` tinyint(1) DEFAULT 1,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `status` enum('pending','approved','rejected') DEFAULT 'approved',
+  `area_of_responsibility` varchar(255) DEFAULT NULL,
+  `assigned_risk_owner_id` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `username` (`username`),
+  UNIQUE KEY `email` (`email`),
+  KEY `idx_users_role` (`role`),
+  KEY `idx_assigned_risk_owner_id` (`assigned_risk_owner_id`),
+  KEY `idx_department_id` (`department_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `risk_incidents`
+CREATE TABLE `risk_incidents` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `date_of_risk_entry` date NOT NULL DEFAULT (curdate()),
+  `existing_or_new` varchar(255) DEFAULT NULL,
+  `to_be_reported_to_board` varchar(255) DEFAULT NULL,
+  `risk_name` varchar(200) NOT NULL,
+  `risk_description` text NOT NULL,
+  `cause_of_risk` text NOT NULL,
+  `cause_of_risk_description` text DEFAULT NULL,
+  `inherent_likelihood` int(11) DEFAULT NULL,
+  `inherent_consequence` int(11) DEFAULT NULL,
+  `inherent_rating` decimal(3,1) DEFAULT NULL,
+  `residual_likelihood` int(11) DEFAULT NULL,
+  `residual_consequence` int(11) DEFAULT NULL,
+  `residual_rating` decimal(3,1) DEFAULT NULL,
+  `risk_rating` decimal(10,2) DEFAULT NULL COMMENT 'Calculated risk rating (likelihood × impact)',
+  `treatment_action` text DEFAULT NULL,
+  `controls_action_plan` text DEFAULT NULL,
+  `planned_completion_date` date DEFAULT NULL,
+  `risk_owner_id` int(11) DEFAULT NULL,
+  `progress_update_report` text DEFAULT NULL,
+  `status` enum('open','in_progress','completed','overdue','closed') DEFAULT 'open',
+  `reported_by` int(11) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `updated_by` int(11) DEFAULT NULL,
+  `monitoring_frequency` enum('weekly','monthly','quarterly','annually') DEFAULT NULL,
+  `next_review_date` date DEFAULT NULL,
+  `risk_appetite` text DEFAULT NULL,
+  `escalation_criteria` text DEFAULT NULL,
+  `progress_update` text DEFAULT NULL,
+  `risk_status` enum('Not Started','In Progress','Completed','Overdue') DEFAULT 'Not Started',
+  `department_id` int(11) NOT NULL,
+  `department` varchar(100) DEFAULT NULL,
+  `normalized_department` varchar(100) NOT NULL,
+  `department_abbreviation` varchar(10) NOT NULL,
+  `collaborators` text DEFAULT NULL,
+  `treatment_documents` text DEFAULT NULL,
+  `involves_money_loss` varchar(10) DEFAULT NULL COMMENT 'Whether the risk involves money loss',
+  `money_amount` decimal(15,2) DEFAULT NULL COMMENT 'Estimated amount of money loss',
+  `probability` int(11) DEFAULT NULL COMMENT 'Risk probability (1-5 scale)',
+  `impact` int(11) DEFAULT NULL COMMENT 'Risk impact (1-5 scale)',
+  `risk_level` varchar(20) DEFAULT 'Not Assessed' COMMENT 'Calculated risk level (Low, Medium, High, Critical)',
+  `risk_categories` text DEFAULT NULL COMMENT 'JSON array of selected risk categories',
+  `risk_id_number` varchar(50) DEFAULT NULL,
+  `controls_action_plans` text DEFAULT NULL,
+  `target_completion_date` date DEFAULT NULL,
+  `treatment_status` varchar(50) DEFAULT 'Not Started',
+  `document_path` varchar(255) DEFAULT NULL,
+  `section_b_locked` tinyint(1) NOT NULL DEFAULT 0,
+  `section_c_locked` tinyint(1) NOT NULL DEFAULT 0,
+  `category_details` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Category-specific dropdown selections as JSON object',
+  `custom_risk_id` varchar(50) DEFAULT NULL,
+  `inherent_risk_level` varchar(50) DEFAULT NULL,
+  `residual_risk_level` varchar(50) DEFAULT NULL,
+  `general_inherent_risk_level` varchar(50) DEFAULT NULL,
+  `general_residual_risk_level` varchar(50) DEFAULT NULL,
+  `control_assessment` text DEFAULT NULL,
+  `general_inherent_risk_score` decimal(10,2) DEFAULT NULL,
+  `general_residual_risk_score` decimal(10,2) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `reported_by` (`reported_by`),
+  KEY `idx_risk_owner` (`risk_owner_id`),
+  KEY `idx_status` (`status`),
+  KEY `idx_inherent_rating` (`inherent_rating`),
+  KEY `idx_residual_rating` (`residual_rating`),
+  KEY `idx_updated_by` (`updated_by`),
+  KEY `idx_created_at` (`created_at`),
+  KEY `idx_treatment_status` (`treatment_status`),
+  KEY `idx_target_completion` (`target_completion_date`),
+  KEY `idx_risk_incidents_risk_owner_id` (`risk_owner_id`),
+  KEY `idx_risk_incidents_risk_status` (`risk_status`),
+  KEY `idx_risk_categories` (`risk_categories`(255)),
+  KEY `idx_department_id` (`department_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `risk_category_details`
+CREATE TABLE `risk_category_details` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `risk_id` int(11) NOT NULL,
+  `risk_category` varchar(100) NOT NULL,
+  `category_value` decimal(15,2) DEFAULT NULL COMMENT 'For numeric categories',
+  `category_description` text DEFAULT NULL COMMENT 'For dropdown selections and text-based categories',
+  `category_type` enum('numeric','text') NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_risk_category_details` (`risk_id`,`risk_category`),
+  KEY `idx_risk_category` (`risk_id`,`risk_category`),
+  KEY `idx_risk_category_details_risk_id` (`risk_id`),
+  KEY `idx_risk_category_details_category` (`risk_category`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Sample data for risk_category_details
+INSERT INTO `risk_category_details` (`id`, `risk_id`, `risk_category`, `category_value`, `category_description`, `category_type`, `created_at`) VALUES
+(1, 13, 'operations', NULL, 'ertyu', '', '2025-08-30 08:57:08'),
+(2, 14, 'people', NULL, ' cvbnbm', '', '2025-08-30 09:13:24'),
+(3, 21, 'networks', NULL, 'bnm,.', '', '2025-08-30 16:40:13'),
+(4, 46, 'compliance', NULL, '', '', '2025-09-04 09:11:50'),
+(5, 47, 'it_cyber', NULL, '', '', '2025-09-04 09:31:10'),
+(6, 48, 'people', NULL, '', '', '2025-09-04 11:52:26'),
+(7, 50, 'people', NULL, '', '', '2025-09-05 08:09:27'),
+(8, 52, 'people', NULL, '', '', '2025-09-05 09:07:59'),
+(9, 53, 'people', NULL, '', '', '2025-09-05 09:18:16');
+
+-- Table structure for table `chat_rooms`
+CREATE TABLE `chat_rooms` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) NOT NULL,
+  `type` enum('group','private') DEFAULT 'group',
+  `description` text DEFAULT NULL,
+  `created_by` int(11) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `is_archived` tinyint(4) DEFAULT 0,
+  `archived_at` timestamp NULL DEFAULT NULL,
+  `is_permanent` tinyint(4) DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `created_by` (`created_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `chat_messages`
+CREATE TABLE `chat_messages` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `room_id` int(11) DEFAULT NULL,
+  `sender_id` int(11) DEFAULT NULL,
+  `message` text NOT NULL,
+  `message_type` enum('text','file','system') DEFAULT 'text',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `is_deleted` tinyint(4) DEFAULT 0,
+  `file_name` varchar(255) DEFAULT NULL,
+  `file_path` varchar(500) DEFAULT NULL,
+  `file_size` int(11) DEFAULT NULL,
+  `file_type` varchar(100) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_chat_messages_room_id` (`room_id`),
+  KEY `idx_chat_messages_sender_id` (`sender_id`),
+  KEY `idx_chat_messages_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `chat_participants`
+CREATE TABLE `chat_participants` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `room_id` int(11) DEFAULT NULL,
+  `user_id` int(11) DEFAULT NULL,
+  `joined_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_seen` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_message_read` int(11) DEFAULT 0,
+  `is_archived` tinyint(4) DEFAULT 0,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_participant` (`room_id`,`user_id`),
+  KEY `idx_chat_participants_room_user` (`room_id`,`user_id`),
+  KEY `idx_chat_participants_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `chat_files`
+CREATE TABLE `chat_files` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `message_id` int(11) DEFAULT NULL,
+  `original_name` varchar(255) NOT NULL,
+  `stored_name` varchar(255) NOT NULL,
+  `file_path` varchar(500) NOT NULL,
+  `file_size` int(11) NOT NULL,
+  `file_type` varchar(100) NOT NULL,
+  `uploaded_by` int(11) DEFAULT NULL,
+  `uploaded_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `message_id` (`message_id`),
+  KEY `uploaded_by` (`uploaded_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for remaining tables
+CREATE TABLE `deleted_users` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `original_user_id` int(11) NOT NULL,
+  `full_name` varchar(255) NOT NULL,
+  `email` varchar(255) NOT NULL,
+  `username` varchar(255) DEFAULT NULL,
+  `password` varchar(255) DEFAULT NULL,
+  `role` enum('admin','staff','risk_owner','compliance_team') NOT NULL,
+  `department` varchar(255) DEFAULT NULL,
+  `status` varchar(50) DEFAULT NULL,
+  `is_active` tinyint(1) DEFAULT 0,
+  `original_created_at` datetime DEFAULT NULL,
+  `original_updated_at` datetime DEFAULT NULL,
+  `deleted_at` datetime DEFAULT current_timestamp(),
+  `deleted_by` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_original_user_id` (`original_user_id`),
+  KEY `idx_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Department related tables
+CREATE TABLE `department_assignment_queue` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `department` varchar(100) NOT NULL,
+  `next_assignee_index` int(11) DEFAULT 0,
+  `last_updated` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `department_assignment_tracker` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `department` varchar(100) NOT NULL,
+  `last_assigned_owner_id` int(11) DEFAULT NULL,
+  `last_assignment_date` timestamp NOT NULL DEFAULT current_timestamp(),
+  `total_assignments` int(11) DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `department` (`department`),
+  KEY `idx_department` (`department`),
+  KEY `idx_last_assigned` (`last_assigned_owner_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `department_mappings` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `original_name` varchar(100) NOT NULL,
+  `normalized_name` varchar(100) NOT NULL,
+  `abbreviation` varchar(10) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `original_name` (`original_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Authentication and security tables
+CREATE TABLE `invite_tokens` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `email` varchar(255) NOT NULL,
+  `token` varchar(255) NOT NULL,
+  `role` varchar(50) NOT NULL,
+  `expires_at` datetime NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `email` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `login_history` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) DEFAULT NULL,
+  `email` varchar(255) NOT NULL,
+  `ip_address` varchar(45) NOT NULL,
+  `user_agent` text DEFAULT NULL,
+  `login_status` enum('success','failed') NOT NULL,
+  `failure_reason` varchar(255) DEFAULT NULL,
+  `location_info` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `password_resets` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `token` varchar(64) NOT NULL,
+  `expires_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `used` tinyint(1) DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `token` (`token`),
+  KEY `idx_token` (`token`),
+  KEY `idx_expires` (`expires_at`),
+  KEY `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `password_reset_tokens` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `token` varchar(64) NOT NULL,
+  `expires_at` datetime NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `token` (`token`),
+  KEY `user_id` (`user_id`),
+  KEY `idx_token` (`token`),
+  KEY `idx_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Risk management related tables
+CREATE TABLE `notifications` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `risk_id` int(11) NOT NULL,
+  `owner_id` int(11) NOT NULL,
+  `message` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `risk_id` (`risk_id`),
+  KEY `owner_id` (`owner_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `risk_assignments` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `risk_id` int(11) NOT NULL,
+  `assigned_to` int(11) NOT NULL,
+  `assigned_by` int(11) NOT NULL,
+  `assignment_date` timestamp NOT NULL DEFAULT current_timestamp(),
+  `status` enum('Pending','Accepted','In Progress','Completed') DEFAULT 'Pending',
+  `notes` text DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `risk_id` (`risk_id`),
+  KEY `assigned_to` (`assigned_to`),
+  KEY `assigned_by` (`assigned_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `risk_attachments` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `risk_id` int(11) NOT NULL,
+  `filename` varchar(255) NOT NULL,
+  `original_name` varchar(255) NOT NULL,
+  `file_size` int(11) DEFAULT NULL,
+  `mime_type` varchar(100) DEFAULT NULL,
+  `uploaded_by` int(11) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `risk_id` (`risk_id`),
+  KEY `uploaded_by` (`uploaded_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `risk_categories_reference` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `category_name` varchar(100) NOT NULL,
+  `input_type` enum('numeric','text') NOT NULL,
+  `description` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `category_name` (`category_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `risk_category_options` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `category_name` varchar(100) NOT NULL,
+  `option_value` varchar(255) NOT NULL,
+  `option_label` varchar(255) NOT NULL,
+  `sort_order` int(11) DEFAULT 0,
+  `is_active` tinyint(1) DEFAULT 1,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_category_name` (`category_name`),
+  KEY `idx_active` (`is_active`),
+  KEY `idx_risk_category_options_category` (`category_name`),
+  KEY `idx_risk_category_options_active` (`is_active`),
+  KEY `idx_risk_category_options_sort` (`category_name`,`sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `risk_comments` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `risk_id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `comment` text NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `risk_id` (`risk_id`),
+  KEY `user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `risk_documents` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `risk_id` int(11) NOT NULL,
+  `section_type` enum('controls_action_plans','progress_update') NOT NULL,
+  `original_filename` varchar(255) NOT NULL,
+  `stored_filename` varchar(255) NOT NULL,
+  `file_path` varchar(500) NOT NULL,
+  `file_size` int(11) NOT NULL,
+  `document_content` longblob DEFAULT NULL,
+  `mime_type` varchar(100) DEFAULT NULL,
+  `uploaded_by` int(11) NOT NULL,
+  `uploaded_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_risk_id` (`risk_id`),
+  KEY `idx_section_type` (`section_type`),
+  KEY `uploaded_by` (`uploaded_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `risk_history` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `risk_id` int(11) NOT NULL,
+  `change_type` varchar(100) NOT NULL,
+  `change_description` text NOT NULL,
+  `old_value` text DEFAULT NULL,
+  `new_value` text DEFAULT NULL,
+  `updated_by` int(11) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_risk_id` (`risk_id`),
+  KEY `idx_updated_by` (`updated_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `risk_monitoring` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `risk_id` int(11) NOT NULL,
+  `review_date` date NOT NULL,
+  `review_notes` text NOT NULL,
+  `current_risk_level` enum('Low','Medium','High','Critical') DEFAULT NULL,
+  `effectiveness_rating` int(11) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `risk_id` (`risk_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `risk_owners` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `risk_owner_assignments` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `department` varchar(100) NOT NULL,
+  `risk_owner_id` int(11) NOT NULL,
+  `assignment_count` int(11) DEFAULT 0,
+  `last_assigned` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `risk_owner_id` (`risk_owner_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `risk_sequences` (
+  `department` varchar(100) NOT NULL,
+  `year_month` varchar(7) NOT NULL,
+  `last_number` int(11) NOT NULL,
+  PRIMARY KEY (`department`,`year_month`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `risk_treatments` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `risk_id` int(11) NOT NULL,
+  `treatment_title` varchar(255) NOT NULL,
+  `treatment_description` text NOT NULL,
+  `assigned_to` int(11) NOT NULL,
+  `target_completion_date` date DEFAULT NULL,
+  `status` enum('pending','in_progress','completed','cancelled') DEFAULT 'pending',
+  `progress_notes` text DEFAULT NULL,
+  `created_by` int(11) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `risk_id` (`risk_id`),
+  KEY `assigned_to` (`assigned_to`),
+  KEY `created_by` (`created_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- System and security tables
+CREATE TABLE `security_settings` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `setting_name` varchar(100) NOT NULL,
+  `setting_value` varchar(255) NOT NULL,
+  `description` text DEFAULT NULL,
+  `updated_by` int(11) DEFAULT NULL,
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `setting_name` (`setting_name`),
+  KEY `updated_by` (`updated_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `suspicious_activities` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) DEFAULT NULL,
+  `activity_type` varchar(100) NOT NULL,
+  `description` text NOT NULL,
+  `severity` enum('low','medium','high','critical') DEFAULT 'medium',
+  `ip_address` varchar(45) DEFAULT NULL,
+  `user_agent` text DEFAULT NULL,
+  `additional_data` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `system_audit_logs` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `timestamp` datetime NOT NULL DEFAULT current_timestamp(),
+  `user` varchar(255) NOT NULL,
+  `action` varchar(255) NOT NULL,
+  `details` text DEFAULT NULL,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `severity` varchar(20) DEFAULT NULL,
+  `user_id` int(11) DEFAULT NULL,
+  `resolved` tinyint(1) DEFAULT 0,
+  `resolved_at` timestamp NULL DEFAULT NULL,
+  `resolved_by` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `timestamp` (`timestamp`),
+  KEY `user` (`user`),
+  KEY `action` (`action`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `system_settings` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `setting_key` varchar(100) DEFAULT NULL,
+  `setting_value` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `setting_key` (`setting_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `treatment_documents` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `treatment_id` int(11) NOT NULL,
+  `original_filename` varchar(255) NOT NULL,
+  `file_path` varchar(500) NOT NULL,
+  `file_size` int(11) NOT NULL,
+  `file_type` varchar(100) NOT NULL,
+  `uploaded_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `treatment_id` (`treatment_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `user_sessions` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `ip_address` varchar(45) NOT NULL,
+  `device` text DEFAULT NULL,
+  `last_activity` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Add foreign key constraints
+ALTER TABLE `account_lockouts`
+  ADD CONSTRAINT `account_lockouts_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+
+ALTER TABLE `active_sessions`
+  ADD CONSTRAINT `active_sessions_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+
+ALTER TABLE `activity_logs`
+  ADD CONSTRAINT `activity_logs_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`);
+
+ALTER TABLE `audit_logs`
+  ADD CONSTRAINT `audit_logs_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+
+ALTER TABLE `chat_files`
+  ADD CONSTRAINT `chat_files_ibfk_1` FOREIGN KEY (`message_id`) REFERENCES `chat_messages` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `chat_files_ibfk_2` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`id`);
+
+ALTER TABLE `chat_messages`
+  ADD CONSTRAINT `chat_messages_ibfk_1` FOREIGN KEY (`room_id`) REFERENCES `chat_rooms` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `chat_messages_ibfk_2` FOREIGN KEY (`sender_id`) REFERENCES `users` (`id`);
+
+ALTER TABLE `chat_participants`
+  ADD CONSTRAINT `chat_participants_ibfk_1` FOREIGN KEY (`room_id`) REFERENCES `chat_rooms` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `chat_participants_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`);
+
+ALTER TABLE `chat_rooms`
+  ADD CONSTRAINT `chat_rooms_ibfk_1` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`);
+
+ALTER TABLE `department_assignment_tracker`
+  ADD CONSTRAINT `department_assignment_tracker_ibfk_1` FOREIGN KEY (`last_assigned_owner_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+
+ALTER TABLE `notifications`
+  ADD CONSTRAINT `notifications_ibfk_1` FOREIGN KEY (`risk_id`) REFERENCES `risk_incidents` (`id`),
+  ADD CONSTRAINT `notifications_ibfk_2` FOREIGN KEY (`owner_id`) REFERENCES `risk_owners` (`id`);
+
+ALTER TABLE `password_resets`
+  ADD CONSTRAINT `password_resets_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+
+ALTER TABLE `password_reset_tokens`
+  ADD CONSTRAINT `password_reset_tokens_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+
+ALTER TABLE `risk_assignments`
+  ADD CONSTRAINT `risk_assignments_ibfk_1` FOREIGN KEY (`risk_id`) REFERENCES `risk_incidents` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `risk_assignments_ibfk_2` FOREIGN KEY (`assigned_to`) REFERENCES `users` (`id`),
+  ADD CONSTRAINT `risk_assignments_ibfk_3` FOREIGN KEY (`assigned_by`) REFERENCES `users` (`id`);
+
+ALTER TABLE `risk_attachments`
+  ADD CONSTRAINT `risk_attachments_ibfk_1` FOREIGN KEY (`risk_id`) REFERENCES `risk_incidents` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `risk_attachments_ibfk_2` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`id`);
+
+ALTER TABLE `risk_category_details`
+  ADD CONSTRAINT `risk_category_details_ibfk_1` FOREIGN KEY (`risk_id`) REFERENCES `risk_incidents` (`id`) ON DELETE CASCADE;
+
+ALTER TABLE `risk_comments`
+  ADD CONSTRAINT `risk_comments_ibfk_1` FOREIGN KEY (`risk_id`) REFERENCES `risk_incidents` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `risk_comments_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`);
+
+ALTER TABLE `risk_documents`
+  ADD CONSTRAINT `risk_documents_ibfk_1` FOREIGN KEY (`risk_id`) REFERENCES `risk_incidents` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `risk_documents_ibfk_2` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`id`);
+
+ALTER TABLE `risk_history`
+  ADD CONSTRAINT `risk_history_ibfk_1` FOREIGN KEY (`risk_id`) REFERENCES `risk_incidents` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `risk_history_ibfk_2` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+
+ALTER TABLE `risk_incidents`
+  ADD CONSTRAINT `fk_risk_incidents_department` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`),
+  ADD CONSTRAINT `risk_incidents_ibfk_1` FOREIGN KEY (`reported_by`) REFERENCES `users` (`id`),
+  ADD CONSTRAINT `risk_incidents_ibfk_3` FOREIGN KEY (`risk_owner_id`) REFERENCES `users` (`id`),
+  ADD CONSTRAINT `risk_incidents_ibfk_4` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+
+ALTER TABLE `risk_monitoring`
+  ADD CONSTRAINT `risk_monitoring_ibfk_1` FOREIGN KEY (`risk_id`) REFERENCES `risk_incidents` (`id`) ON DELETE CASCADE;
+
+ALTER TABLE `risk_owner_assignments`
+  ADD CONSTRAINT `risk_owner_assignments_ibfk_1` FOREIGN KEY (`risk_owner_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+
+ALTER TABLE `risk_treatments`
+  ADD CONSTRAINT `risk_treatments_ibfk_1` FOREIGN KEY (`risk_id`) REFERENCES `risk_incidents` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `risk_treatments_ibfk_2` FOREIGN KEY (`assigned_to`) REFERENCES `users` (`id`),
+  ADD CONSTRAINT `risk_treatments_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`);
+
+ALTER TABLE `security_settings`
+  ADD CONSTRAINT `security_settings_ibfk_1` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+
+ALTER TABLE `suspicious_activities`
+  ADD CONSTRAINT `suspicious_activities_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+
+ALTER TABLE `treatment_documents`
+  ADD CONSTRAINT `fk_treatment_documents_treatment_id` FOREIGN KEY (`treatment_id`) REFERENCES `risk_treatments` (`id`) ON DELETE CASCADE;
+
+ALTER TABLE `users`
+  ADD CONSTRAINT `fk_assigned_risk_owner` FOREIGN KEY (`assigned_risk_owner_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  ADD CONSTRAINT `fk_users_department` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`);
+
+ALTER TABLE `user_sessions`
+  ADD CONSTRAINT `user_sessions_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
