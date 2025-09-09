@@ -23,7 +23,6 @@ if (file_exists('includes/php_compatibility.php')) {
         ];
     }
 }
-
 // Function to get real IP address
 function getRealIPAddress() {
     // Check if we're running on localhost and return a more recognizable IP
@@ -70,13 +69,11 @@ function getRealIPAddress() {
     // Fallback to a simulated IP for testing
     return '192.168.1.' . rand(100, 200);
 }
-
 $error = '';
 $database = new Database();
 $db = $database->getConnection();
-
 // Function to create or update user session
-function createUserSession($db, $userId, $email, $fullName, $role) {
+function createUserSession($db, $userId, $email, $fullName, $role, $departmentId, $departmentName) {
     // Get current session ID
     $sessionId = session_id();
     
@@ -135,7 +132,6 @@ function createUserSession($db, $userId, $email, $fullName, $role) {
     
     // Note: Removed concurrent session limiting as we're now enforcing single session per user
 }
-
 // Function to check if account is locked
 function isAccountLocked($db, $userId) {
     $query = "SELECT * FROM account_lockouts WHERE user_id = :user_id AND is_locked = 1";
@@ -167,7 +163,6 @@ function isAccountLocked($db, $userId) {
     
     return false;
 }
-
 // Function to handle failed login attempt
 function handleFailedLogin($db, $userId, $email) {
     // Get security settings
@@ -231,10 +226,15 @@ function handleFailedLogin($db, $userId, $email) {
         $insertStmt->bindParam(':email', $email);
         $insertStmt->bindParam(':failed_attempts', $failedAttempts);
         $insertStmt->bindParam(':is_locked', $isLocked);
-        $insertStmt->bindParam(':ip_address', getRealIPAddress());
+        
+        // Fixed: Assign function result to variable before binding
+        $ipAddress = getRealIPAddress();
+        $insertStmt->bindParam(':ip_address', $ipAddress);
         
         if ($isLocked) {
-            $insertStmt->bindParam(':locked_at', date('Y-m-d H:i:s'));
+            // Fixed: Assign function result to variable before binding
+            $lockedAt = date('Y-m-d H:i:s');
+            $insertStmt->bindParam(':locked_at', $lockedAt);
             $insertStmt->bindParam(':unlock_at', $unlockAt);
         } else {
             $insertStmt->bindValue(':locked_at', null, PDO::PARAM_NULL);
@@ -247,12 +247,15 @@ function handleFailedLogin($db, $userId, $email) {
     // Return true if account is now locked
     return isAccountLocked($db, $userId);
 }
-
 if ($_POST) {
     $email = $_POST['email'];
     $password = $_POST['password'];
     
-    $query = "SELECT id, email, password, full_name, role, status FROM users WHERE email = :email";
+    // Updated query to include department information
+    $query = "SELECT u.id, u.email, u.password, u.full_name, u.role, u.status, d.name as department_name, u.department_id 
+              FROM users u 
+              LEFT JOIN departments d ON u.department_id = d.id 
+              WHERE u.email = :email";
     $stmt = $db->prepare($query);
     $stmt->bindParam(':email', $email);
     $stmt->execute();
@@ -277,13 +280,16 @@ if ($_POST) {
             $resetStmt->bindParam(':user_id', $user['id']);
             $resetStmt->execute();
             
+            // Set session variables including department information
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['email'] = $user['email'];
             $_SESSION['full_name'] = $user['full_name'];
             $_SESSION['role'] = $user['role'];
+            $_SESSION['department'] = $user['department_name'] ?? 'General'; // Default to 'General' if null
+            $_SESSION['department_id'] = $user['department_id'] ?? 1; // Default to 1 if null
             
             // Create or update user session in active_sessions table
-            createUserSession($db, $user['id'], $user['email'], $user['full_name'], $user['role']);
+            createUserSession($db, $user['id'], $user['email'], $user['full_name'], $user['role'], $user['department_id'], $user['department_name']);
             
             // Log successful login
             $database->logActivity($_SESSION['user_id'], 'Successful Login', 'User ' . $_SESSION['email'] . ' logged in successfully.', $_SERVER['REMOTE_ADDR']);
