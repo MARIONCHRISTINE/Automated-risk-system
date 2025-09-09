@@ -878,12 +878,10 @@ if ($show_all_logs) {
 $audit_logs_stmt = $db->prepare($audit_logs_query);
 $audit_logs_stmt->execute();
 $audit_logs = $audit_logs_stmt->fetchAll(PDO::FETCH_ASSOC);
-
 // Add severity to each audit log
 foreach ($audit_logs as &$log) {
     $log['severity'] = getSeverityFromAction($log['action']);
 }
-
 // Get total count for "View All" functionality
 $total_logs_query = "SELECT COUNT(*) as total FROM system_audit_logs";
 $total_logs_stmt = $db->prepare($total_logs_query);
@@ -972,45 +970,76 @@ $system_info = [
     'last_backup' => $last_backup,
     'storage_used' => $storage_used
 ];
-
 // Function to determine severity based on action
 function getSeverityFromAction($action) {
+    $action = strtolower($action);
+    
+    // Define severity levels for different actions
     $criticalActions = [
-        'Risk Escalated',
-        'Risk Assessment Updated',
-        'Risk Status Changed'
+        'account disabled',
+        'user moved to recycle bin',
+        'risk escalated',
+        'failed login - invalid password',
+        'login attempt - account locked'
     ];
     
     $highActions = [
-        'Risk Treatment Plan Updated',
-        'Risk Classification Updated'
+        'user suspended',
+        'password reset',
+        'role changed',
+        'database backup performed',
+        'risk assessment updated',
+        'risk status changed'
     ];
     
     $mediumActions = [
-        'Risk Self-Assigned',
-        'Risk Assignment Accepted',
-        'Bulk Upload Completed'
+        'user approved',
+        'user restored',
+        'individual invitation sent',
+        'user approved & invited',
+        'system cache cleared',
+        'risk self-assigned',
+        'risk assignment accepted',
+        'bulk upload completed'
     ];
     
+    $lowActions = [
+        'successful login',
+        'user logout',
+        'new user registration',
+        'registration failed - invalid email domain'
+    ];
+    
+    // Check if action contains any of the critical patterns
     foreach ($criticalActions as $criticalAction) {
         if (strpos($action, $criticalAction) !== false) {
             return 'critical';
         }
     }
     
+    // Check if action contains any of the high patterns
     foreach ($highActions as $highAction) {
         if (strpos($action, $highAction) !== false) {
             return 'high';
         }
     }
     
+    // Check if action contains any of the medium patterns
     foreach ($mediumActions as $mediumAction) {
         if (strpos($action, $mediumAction) !== false) {
             return 'medium';
         }
     }
     
-    return 'low';
+    // Check if action contains any of the low patterns
+    foreach ($lowActions as $lowAction) {
+        if (strpos($action, $lowAction) !== false) {
+            return 'low';
+        }
+    }
+    
+    // Default to medium if no match found
+    return 'medium';
 }
 ?>
 <!DOCTYPE html>
@@ -2413,6 +2442,127 @@ function getSeverityFromAction($action) {
                 </div>
             </div>
         </div>
+        
+        <!-- 3. Notifications Tab -->
+        <div id="notifications-tab" class="tab-content">
+            <div class="card">
+                <h2>📢 Broadcast Message</h2>
+                <p>Send important announcements to all users in the system.</p>
+                
+                <form method="POST" style="margin-top: 1.5rem;">
+                    <div class="form-group">
+                        <label for="broadcast_message">Message Content:</label>
+                        <textarea name="broadcast_message" id="broadcast_message" required placeholder="Enter your broadcast message here..." style="height: 120px;"></textarea>
+                    </div>
+                    <button type="submit" name="send_broadcast" class="btn" style="background-color: #E60012;">
+                        <i class="fas fa-bullhorn"></i> Send Broadcast
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        <!-- 4. Settings Tab -->
+        <div id="settings-tab" class="tab-content">
+            <div class="card">
+                <h2>⚙️ System Settings</h2>
+                
+                <!-- Removed language selection section and updated system information to use plain English -->
+                <div style="margin-top: 2rem;">
+                    <h3>System Information</h3>
+                    <table class="audit-table" style="margin-top: 1rem;">
+                        <tr>
+                            <td><strong>System Version</strong></td>
+                            <td><?php echo $system_info['version']; ?></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Database Status</strong></td>
+                            <td><span style="color: <?php echo $system_info['db_status'] === 'Connected' ? 'green' : 'red'; ?>;"><?php echo $system_info['db_status']; ?></span></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Last Backup</strong></td>
+                            <td><?php echo $system_info['last_backup']; ?></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Total Storage Used</strong></td>
+                            <td><?php echo $system_info['storage_used']; ?></td>
+                        </tr>
+                    </table>
+                </div>
+                <div style="margin-top: 2rem;">
+                    <h3>Database Backup</h3>
+                    
+                    <!-- Modified form to handle backup submission properly -->
+                    <form method="POST" style="margin-top: 1rem;" onsubmit="return handleBackupSubmit(event);">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                            <div>
+                                <label for="backup_format" style="display: block; margin-bottom: 0.5rem; font-weight: bold;">Backup Format:</label>
+                                <select name="backup_format" id="backup_format" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+                                    <option value="sql">SQL Dump (.sql)</option>
+                                    <option value="csv">CSV Files (.zip)</option>
+                                    <option value="json">JSON Format (.json)</option>
+                                    <option value="xml">XML Format (.xml)</option>
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label for="backup_tables" style="display: block; margin-bottom: 0.5rem; font-weight: bold;">Tables to Backup:</label>
+                                <select name="backup_tables" id="backup_tables" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+                                    <option value="all">All Tables</option>
+                                    <option value="users,user_sessions">User Data Only</option>
+                                    <option value="system_audit_logs">Audit Logs Only</option>
+                                    <option value="system_settings">System Settings Only</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- Added hidden input to maintain current tab and made buttons inline -->
+                        <input type="hidden" name="current_tab" value="settings">
+                        <div style="display: flex; gap: 1rem; align-items: center;">
+                            <button type="submit" name="perform_backup" style="background: #007cba; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem;">
+                                Create Backup
+                            </button>
+                            
+                            <!-- Always visible download button -->
+                            <button type="button" id="downloadBackupBtn" onclick="downloadLatestBackup()" 
+                                    style="background: #28a745; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; <?php echo !isset($backup_filename) ? 'opacity: 0.5; cursor: not-allowed;' : ''; ?>"
+                                    <?php echo !isset($backup_filename) ? 'disabled' : ''; ?>>
+                                📥 Download Backup
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <?php if (isset($success_message)): ?>
+                        <!-- Modified success message to auto-hide after 1 second -->
+                        <div id="success-message" style="background: #d4edda; color: #155724; padding: 1rem; border-radius: 4px; margin-top: 1rem; border: 1px solid #c3e6cb;">
+                            ✅ <?php echo $success_message; ?>
+                        </div>
+                        <script>
+                            setTimeout(function() {
+                                var successMsg = document.getElementById('success-message');
+                                if (successMsg) {
+                                    successMsg.style.transition = 'opacity 0.5s';
+                                    successMsg.style.opacity = '0';
+                                    setTimeout(function() {
+                                        successMsg.style.display = 'none';
+                                    }, 500);
+                                }
+                                // Enable download button
+                                var downloadBtn = document.getElementById('downloadBackupBtn');
+                                if (downloadBtn) {
+                                    downloadBtn.disabled = false;
+                                    downloadBtn.style.opacity = '1';
+                                    downloadBtn.style.cursor = 'pointer';
+                                }
+                            }, 1000);
+                            
+                            showTab('settings');
+                        </script>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 <!-- View All Risks Modal -->
 <div id="viewAllModal" class="view-all-modal">
     <div class="view-all-modal-content">
@@ -2484,127 +2634,6 @@ function getSeverityFromAction($action) {
                         <?php endif; ?>
                     </tbody>
                 </table>
-            </div>
-        </div>
-    </div>
-</div>
-        <!-- 3. Notifications Tab -->
-        <div id="notifications-tab" class="tab-content">
-            <div class="card">
-                <h2>📢 Broadcast Message</h2>
-                <p>Send important announcements to all users in the system.</p>
-                
-                <form method="POST" style="margin-top: 1.5rem;">
-                    <div class="form-group">
-                        <label for="broadcast_message">Message Content:</label>
-                        <textarea name="broadcast_message" id="broadcast_message" required placeholder="Enter your broadcast message here..." style="height: 120px;"></textarea>
-                    </div>
-                    <button type="submit" name="send_broadcast" class="btn" style="background-color: #E60012;">
-                        <i class="fas fa-bullhorn"></i> Send Broadcast
-                    </button>
-                </form>
-            </div>
-        </div>
-        
-        <!-- 4. Settings Tab -->
-        <div id="settings-tab" class="tab-content">
-            <div class="card">
-                <h2>⚙️ System Settings</h2>
-                
-                
-                <!-- Removed language selection section and updated system information to use plain English -->
-                <div style="margin-top: 2rem;">
-                    <h3>System Information</h3>
-                    <table class="audit-table" style="margin-top: 1rem;">
-                        <tr>
-                            <td><strong>System Version</strong></td>
-                            <td><?php echo $system_info['version']; ?></td>
-                        </tr>
-                        <tr>
-                            <td><strong>Database Status</strong></td>
-                            <td><span style="color: <?php echo $system_info['db_status'] === 'Connected' ? 'green' : 'red'; ?>;"><?php echo $system_info['db_status']; ?></span></td>
-                        </tr>
-                        <tr>
-                            <td><strong>Last Backup</strong></td>
-                            <td><?php echo $system_info['last_backup']; ?></td>
-                        </tr>
-                        <tr>
-                            <td><strong>Total Storage Used</strong></td>
-                            <td><?php echo $system_info['storage_used']; ?></td>
-                        </tr>
-                    </table>
-                </div>
-                <div style="margin-top: 2rem;">
-                    <h3>Database Backup</h3>
-                    
-                    
-                    <form method="POST" style="margin-top: 1rem;" onsubmit="return handleBackupSubmit(event);">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-                            <div>
-                                <label for="backup_format" style="display: block; margin-bottom: 0.5rem; font-weight: bold;">Backup Format:</label>
-                                <select name="backup_format" id="backup_format" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
-                                    <option value="sql">SQL Dump (.sql)</option>
-                                    <option value="csv">CSV Files (.zip)</option>
-                                    <option value="json">JSON Format (.json)</option>
-                                    <option value="xml">XML Format (.xml)</option>
-                                </select>
-                            </div>
-                            
-                            <div>
-                                <label for="backup_tables" style="display: block; margin-bottom: 0.5rem; font-weight: bold;">Tables to Backup:</label>
-                                <select name="backup_tables" id="backup_tables" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
-                                    <option value="all">All Tables</option>
-                                    <option value="users,user_sessions">User Data Only</option>
-                                    <option value="system_audit_logs">Audit Logs Only</option>
-                                    <option value="system_settings">System Settings Only</option>
-                                </select>
-                            </div>
-                        </div>
-                        
-                        <!-- Added hidden input to maintain current tab and made buttons inline -->
-                        <input type="hidden" name="current_tab" value="settings">
-                        <div style="display: flex; gap: 1rem; align-items: center;">
-                            <button type="submit" name="perform_backup" style="background: #007cba; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem;">
-                                Create Backup
-                            </button>
-                            
-                            <!-- Always visible download button -->
-                            <button type="button" id="downloadBackupBtn" onclick="downloadLatestBackup()" 
-                                    style="background: #28a745; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; <?php echo !isset($backup_filename) ? 'opacity: 0.5; cursor: not-allowed;' : ''; ?>"
-                                    <?php echo !isset($backup_filename) ? 'disabled' : ''; ?>>
-                                📥 Download Backup
-                            </button>
-                        </div>
-                    </form>
-                    
-                    <?php if (isset($success_message)): ?>
-                        <!-- Modified success message to auto-hide after 1 second -->
-                        <div id="success-message" style="background: #d4edda; color: #155724; padding: 1rem; border-radius: 4px; margin-top: 1rem; border: 1px solid #c3e6cb;">
-                            ✅ <?php echo $success_message; ?>
-                        </div>
-                        <script>
-                            setTimeout(function() {
-                                var successMsg = document.getElementById('success-message');
-                                if (successMsg) {
-                                    successMsg.style.transition = 'opacity 0.5s';
-                                    successMsg.style.opacity = '0';
-                                    setTimeout(function() {
-                                        successMsg.style.display = 'none';
-                                    }, 500);
-                                }
-                                // Enable download button
-                                var downloadBtn = document.getElementById('downloadBackupBtn');
-                                if (downloadBtn) {
-                                    downloadBtn.disabled = false;
-                                    downloadBtn.style.opacity = '1';
-                                    downloadBtn.style.cursor = 'pointer';
-                                }
-                            }, 1000);
-                            
-                            showTab('settings');
-                        </script>
-                    <?php endif; ?>
-                </div>
             </div>
         </div>
     </div>
@@ -2718,19 +2747,66 @@ function getSeverityFromAction($action) {
     </div>
 </div>
 <script>
+// CORRECTED: Tab switching function
 function showTab(event, tabId) {
-    event.preventDefault();
-    var i, tabcontent, tablinks;
-    tabcontent = document.getElementsByClassName("tab-content");
-    for (i = 0; i < tabcontent.length; i++) {
-        tabcontent[i].classList.remove("active");
+    // Prevent default action if event exists
+    if (event && typeof event.preventDefault === 'function') {
+        event.preventDefault();
     }
-    tablinks = document.getElementsByClassName("nav-item");
-    for (i = 0; i < tablinks.length; i++) {
-        tablinks[i].querySelector('a').classList.remove("active");
+    
+    // Hide all tab content
+    const tabContents = document.querySelectorAll('.tab-content');
+    tabContents.forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    // Remove active class from all nav links
+    const navLinks = document.querySelectorAll('.nav-item a');
+    navLinks.forEach(link => {
+        link.classList.remove('active');
+    });
+    
+    // Show selected tab content
+    const selectedTab = document.getElementById(tabId + '-tab');
+    if (selectedTab) {
+        selectedTab.classList.add('active');
     }
-    document.getElementById(tabId + "-tab").classList.add("active");
-    event.currentTarget.classList.add("active");
+    
+    // Add active class to the clicked nav link
+    if (event && event.currentTarget) {
+        event.currentTarget.classList.add('active');
+    }
+}
+// CORRECTED: Cross-page navigation functions
+function showDatabaseTab() {
+    window.location.href = 'admin_dashboard.php';
+    setTimeout(function() {
+        // Activate the database tab after page loads
+        const databaseTab = document.querySelector('.nav-item a[onclick*="database"]');
+        if (databaseTab) {
+            databaseTab.click();
+        }
+    }, 100);
+}
+function showNotificationsTab() {
+    window.location.href = 'admin_dashboard.php';
+    setTimeout(function() {
+        // Activate the notifications tab after page loads
+        const notificationsTab = document.querySelector('.nav-item a[onclick*="notifications"]');
+        if (notificationsTab) {
+            notificationsTab.click();
+        }
+    }, 100);
+}
+function showSettingsTab() {
+    window.location.href = 'admin_dashboard.php';
+    setTimeout(function() {
+        // Activate the settings tab after page loads
+        const settingsTab = document.querySelector('.nav-item a[onclick*="settings"]');
+        if (settingsTab) {
+            settingsTab.click();
+        }
+    }, 100);
 }
 function filterAuditLogTable() {
     var searchTerm = document.getElementById("auditLogSearchInput").value.toLowerCase();
@@ -3154,37 +3230,6 @@ document.addEventListener('DOMContentLoaded', function() {
         showTab({preventDefault: function(){}, currentTarget: document.querySelector('.nav-item a[href="#"]')}, 'settings');
     <?php endif; ?>
 });
-function showDatabaseTab() {
-    window.location.href = 'admin_dashboard.php';
-    setTimeout(function() {
-        if (window.showTab) {
-            showTab({preventDefault: function(){}, currentTarget: document.querySelector('.nav-item a[href="#"]')}, 'database');
-        }
-    }, 100);
-}
-function showNotificationsTab() {
-    window.location.href = 'admin_dashboard.php';
-    setTimeout(function() {
-        if (window.showTab) {
-            showTab({preventDefault: function(){}, currentTarget: document.querySelector('.nav-item a[href="#"]')}, 'notifications');
-        }
-    }, 100);
-}
-function showSettingsTab() {
-    window.location.href = 'admin_dashboard.php';
-    setTimeout(function() {
-        if (window.showTab) {
-            showTab({preventDefault: function(){}, currentTarget: document.querySelector('.nav-item a[href="#"]')}, 'settings');
-        }
-    }, 100);
-}
-function handleBackupSubmit(event) {
-    // Let the form submit normally, but ensure we stay in settings tab
-    setTimeout(function() {
-        showTab({preventDefault: function(){}, currentTarget: document.querySelector('.nav-item a[href="#"]')}, 'settings');
-    }, 100);
-    return true;
-}
 function downloadLatestBackup() {
     <?php if (isset($backup_filename)): ?>
         window.location.href = '?download_backup=1&file=<?php echo urlencode($backup_filename); ?>';
