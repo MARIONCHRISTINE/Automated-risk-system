@@ -1970,9 +1970,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                             </div>
                             
                             <input type="hidden" name="inherent_risk_rating" id="inherent_risk_rating">
-                            <!-- Added hidden fields to capture risk level words -->
-                            <input type="hidden" name="inherent_risk_level" id="inherent_risk_level">
-                            <input type="hidden" name="residual_risk_level" id="residual_risk_level">
                             <div id="inherent_risk_display" class="rating-display" style="margin-top: 15px;">Inherent Risk Rating will appear here</div>
                         </div>
                         
@@ -2037,10 +2034,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                 General Residual Risk Score will appear here
                             </div>
                             <input type="hidden" name="general_residual_risk_score" id="general_residual_risk_score">
-                            </div>
-                            <!-- Added hidden fields for general risk level words -->
-                            <input type="hidden" name="general_inherent_risk_level" id="general_inherent_risk_level">
-                            <input type="hidden" name="general_residual_risk_level" id="general_residual_risk_level">
                         </div>
                     </div>
 
@@ -2156,8 +2149,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                             <!-- Added JavaScript to clear all form fields before submission -->
                             <button type="button" class="btn btn-secondary" onclick="clearEntireForm()">Cancel</button>
                         </form>
-                        <!-- Added value attribute to submit button to fix form submission -->
-                        <button type="submit" name="submit_risk" value="1" class="btn">
+                        <button type="submit" name="submit_risk" class="btn">
                             <i class="fas fa-save"></i> Submit Risk Report
                         </button>
                     </div>
@@ -2561,26 +2553,21 @@ document.addEventListener('DOMContentLoaded', function() {
         function displayInherentRiskRating(rating) {
             var display = document.getElementById('inherent_risk_display');
             var ratingText = '';
-            var riskLevel = ''; // Added variable to capture risk level word
             
             if (rating >= 12) {
                 ratingText = 'CRITICAL (' + rating + ')';
-                riskLevel = 'CRITICAL'; // Extract risk level word
                 display.style.backgroundColor = '#ff4444';
                 display.style.color = 'white';
             } else if (rating >= 8) {
                 ratingText = 'HIGH (' + rating + ')';
-                riskLevel = 'HIGH'; // Extract risk level word
                 display.style.backgroundColor = '#ff8800';
                 display.style.color = 'white';
             } else if (rating >= 4) {
                 ratingText = 'MEDIUM (' + rating + ')';
-                riskLevel = 'MEDIUM'; // Extract risk level word
                 display.style.backgroundColor = '#ffdd00';
                 display.style.color = 'black';
             } else {
                 ratingText = 'LOW (' + rating + ')';
-                riskLevel = 'LOW'; // Extract risk level word
                 display.style.backgroundColor = '#88dd88';
                 display.style.color = 'black';
             }
@@ -2591,33 +2578,26 @@ document.addEventListener('DOMContentLoaded', function() {
             display.style.fontWeight = 'bold';
             display.style.textAlign = 'center';
             display.style.fontStyle = 'normal';
-            
-            document.getElementById('inherent_risk_level').value = riskLevel;
         }
 
         function displayResidualRiskRating(rating) {
             var display = document.getElementById('residual_risk_display');
             var ratingText = '';
-            var riskLevel = ''; // Added variable to capture risk level word
             
             if (rating >= 12) {
                 ratingText = 'CRITICAL (' + rating + ')';
-                riskLevel = 'CRITICAL'; // Extract risk level word
                 display.style.backgroundColor = '#ff4444';
                 display.style.color = 'white';
             } else if (rating >= 8) {
                 ratingText = 'HIGH (' + rating + ')';
-                riskLevel = 'HIGH'; // Extract risk level word
                 display.style.backgroundColor = '#ff8800';
                 display.style.color = 'white';
             } else if (rating >= 4) {
                 ratingText = 'MEDIUM (' + rating + ')';
-                riskLevel = 'MEDIUM'; // Extract risk level word
                 display.style.backgroundColor = '#ffdd00';
                 display.style.color = 'black';
             } else {
                 ratingText = 'LOW (' + rating + ')';
-                riskLevel = 'LOW'; // Extract risk level word
                 display.style.backgroundColor = '#88dd88';
                 display.style.color = 'black';
             }
@@ -2627,8 +2607,6 @@ document.addEventListener('DOMContentLoaded', function() {
             display.style.borderRadius = '4px';
             display.style.fontWeight = 'bold';
             display.style.textAlign = 'center';
-            
-            document.getElementById('residual_risk_level').value = riskLevel;
             
             calculateGeneralRiskScores();
         }
@@ -2704,23 +2682,17 @@ document.addEventListener('DOMContentLoaded', function() {
         function displayGeneralInherentRisk(score, maxScale) {
             const display = document.getElementById('general_inherent_risk_display');
             const ratingText = getGeneralRiskRating(score, maxScale);
-            const riskLevel = ratingText.split(' ')[0];
             
             display.textContent = 'General Inherent Risk Score: ' + ratingText;
             applyGeneralRiskStyling(display, score, maxScale);
-            
-            document.getElementById('general_inherent_risk_level').value = riskLevel;
         }
         
         function displayGeneralResidualRisk(score, maxScale) {
             const display = document.getElementById('general_residual_risk_display');
             const ratingText = getGeneralRiskRating(score, maxScale);
-            const riskLevel = ratingText.split(' ')[0];
             
             display.textContent = 'General Residual Risk Score: ' + ratingText;
             applyGeneralRiskStyling(display, score, maxScale);
-            
-            document.getElementById('general_residual_risk_level').value = riskLevel;
         }
         
         function getGeneralRiskRating(score, maxScale) {
@@ -3179,75 +3151,71 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         
-        
-        // window.addEventListener('beforeunload', function(e) {
-        //     // Only show warning if there are unsaved treatments
-        //     if (<?php echo count($_SESSION['temp_treatments'] ?? []); ?> > 0) {
-        //         e.preventDefault();
-        //         e.returnValue = 'You have unsaved risk treatments. Are you sure you want to leave?';
-        //         return e.returnValue;
-        //     }
-        // });
+        window.addEventListener('beforeunload', function(e) {
+            // Only show warning if there are unsaved treatments
+            if (<?php echo count($_SESSION['temp_treatments'] ?? []); ?> > 0) {
+                e.preventDefault();
+                e.returnValue = 'You have unsaved risk treatments. Are you sure you want to leave?';
+                return e.returnValue;
+            }
+        });
 
         function clearEntireForm() {
-            // Clear all text inputs
-            document.querySelectorAll('input[type="text"], input[type="number"], input[type="email"], input[type="tel"]').forEach(function(input) {
-                input.value = '';
-            });
-            
-            // Clear all textareas
-            document.querySelectorAll('textarea').forEach(function(textarea) {
-                textarea.value = '';
-            });
-            
-            // Clear all select dropdowns
-            document.querySelectorAll('select').forEach(function(select) {
-                select.selectedIndex = 0;
-            });
-            
-            // Clear all radio buttons
-            document.querySelectorAll('input[type="radio"]').forEach(function(radio) {
-                radio.checked = false;
-            });
-            
-            // Clear all checkboxes
-            document.querySelectorAll('input[type="checkbox"]').forEach(function(checkbox) {
-                checkbox.checked = false;
-            });
-            
-            // Clear all file inputs
-            document.querySelectorAll('input[type="file"]').forEach(function(fileInput) {
-                fileInput.value = '';
-            });
-            
-            // Clear all hidden inputs (except CSRF tokens if any)
-            document.querySelectorAll('input[type="hidden"]').forEach(function(hidden) {
-                if (!hidden.name.includes('csrf') && !hidden.name.includes('token')) {
-                    hidden.value = '';
-                }
-            });
-            
-            // Reset likelihood and impact selections
-            document.querySelectorAll('.likelihood-box, .impact-box').forEach(function(box) {
-                box.style.border = '3px solid transparent';
-            });
-            
-            // Hide conditional sections
-            document.getElementById('money-amount-section').style.display = 'none';
-            document.getElementById('selected-risk-category-header').style.display = 'none';
-            document.getElementById('secondary-risk-selection').style.display = 'none';
-            
-            // Clear risk rating displays
-            document.getElementById('inherent_risk_display').innerHTML = 'Inherent Risk Rating will appear here';
-            document.getElementById('residual_risk_display').innerHTML = 'Residual Risk Rating will appear here';
-            document.getElementById('general_inherent_risk_display').innerHTML = 'General Inherent Risk Score will appear here';
-            document.getElementById('general_residual_risk_display').innerHTML = 'General Residual Risk Score will appear here';
-            
-            selectedRisks = [];
-            currentSecondaryRiskIndex = 0;
-            
-            // Only submit form to clear session data when explicitly called (not on page load)
-            if (arguments[0] === 'submit') {
+            if (confirm('Are you sure you want to cancel? All data including risk treatments will be lost.')) {
+                // Clear all text inputs
+                document.querySelectorAll('input[type="text"], input[type="number"], input[type="email"], input[type="tel"]').forEach(function(input) {
+                    input.value = '';
+                });
+                
+                // Clear all textareas
+                document.querySelectorAll('textarea').forEach(function(textarea) {
+                    textarea.value = '';
+                });
+                
+                // Clear all select dropdowns
+                document.querySelectorAll('select').forEach(function(select) {
+                    select.selectedIndex = 0;
+                });
+                
+                // Clear all radio buttons
+                document.querySelectorAll('input[type="radio"]').forEach(function(radio) {
+                    radio.checked = false;
+                });
+                
+                // Clear all checkboxes
+                document.querySelectorAll('input[type="checkbox"]').forEach(function(checkbox) {
+                    checkbox.checked = false;
+                });
+                
+                // Clear all file inputs
+                document.querySelectorAll('input[type="file"]').forEach(function(fileInput) {
+                    fileInput.value = '';
+                });
+                
+                // Clear all hidden inputs (except CSRF tokens if any)
+                document.querySelectorAll('input[type="hidden"]').forEach(function(hidden) {
+                    if (!hidden.name.includes('csrf') && !hidden.name.includes('token')) {
+                        hidden.value = '';
+                    }
+                });
+                
+                // Reset likelihood and impact selections
+                document.querySelectorAll('.likelihood-box, .impact-box').forEach(function(box) {
+                    box.style.border = '3px solid transparent';
+                });
+                
+                // Hide conditional sections
+                document.getElementById('money-amount-section').style.display = 'none';
+                document.getElementById('selected-risk-category-header').style.display = 'none';
+                document.getElementById('secondary-risk-selection').style.display = 'none';
+                
+                // Clear risk rating displays
+                document.getElementById('inherent_risk_display').innerHTML = 'Inherent Risk Rating will appear here';
+                document.getElementById('residual_risk_display').innerHTML = 'Residual Risk Rating will appear here';
+                document.getElementById('general_inherent_risk_display').innerHTML = 'General Inherent Risk Score will appear here';
+                document.getElementById('general_residual_risk_display').innerHTML = 'General Residual Risk Score will appear here';
+                
+                // Submit form to clear session data
                 var form = document.createElement('form');
                 form.method = 'POST';
                 form.style.display = 'none';
@@ -3262,18 +3230,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 form.submit();
             }
         }
-
-        // that was causing the infinite loading loop
-
-        document.addEventListener('DOMContentLoaded', function() {
-            const submitButton = document.querySelector('button[name="submit_risk"]');
-            if (submitButton) {
-                submitButton.addEventListener('click', function(e) {
-                    console.log('[v0] Submit button clicked');
-                    // Let the form submit naturally without any preventDefault
-                });
-            }
-        });
 
     </script>
 </body>
