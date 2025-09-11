@@ -3,19 +3,21 @@ include_once 'includes/auth.php';
 requireRole('risk_owner');
 include_once 'config/database.php';
 include_once 'includes/shared_notifications.php';
-
 // Verify session data exists
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['email'])) {
     header("Location: login.php");
     exit();
 }
 
+// Initialize form data session variable if not exists
+if (!isset($_SESSION['form_data'])) {
+    $_SESSION['form_data'] = [];
+}
+
 $database = new Database();
 $db = $database->getConnection();
-
 // Get current user info
 $user = getCurrentUser();
-
 // Debug: Ensure department is available
 if (empty($user['department'])) {
     if (isset($_SESSION['department'])) {
@@ -31,24 +33,169 @@ if (empty($user['department'])) {
         }
     }
 }
-
+// Get department_id from department name
+$department_id = null;
+if (!empty($user['department'])) {
+    $dept_id_query = "SELECT id FROM departments WHERE name = :department_name LIMIT 1";
+    $dept_id_stmt = $db->prepare($dept_id_query);
+    $dept_id_stmt->bindParam(':department_name', $user['department']);
+    $dept_id_stmt->execute();
+    $dept_id_result = $dept_id_stmt->fetch(PDO::FETCH_ASSOC);
+    if ($dept_id_result) {
+        $department_id = $dept_id_result['id'];
+    } else {
+        // If department doesn't exist, create it
+        $insert_dept_query = "INSERT INTO departments (name) VALUES (:department_name)";
+        $insert_dept_stmt = $db->prepare($insert_dept_query);
+        $insert_dept_stmt->bindParam(':department_name', $user['department']);
+        if ($insert_dept_stmt->execute()) {
+            $department_id = $db->lastInsertId();
+        }
+    }
+}
+// Create risk_sequences table if it doesn't exist
+$check_table_query = "SHOW TABLES LIKE 'risk_sequences'";
+$stmt = $db->prepare($check_table_query);
+$stmt->execute();
+if ($stmt->rowCount() == 0) {
+    $create_table_query = "CREATE TABLE `risk_sequences` (
+        `department` varchar(100) NOT NULL,
+        `year_month` varchar(7) NOT NULL,
+        `last_number` int(11) NOT NULL,
+        PRIMARY KEY (`department`, `year_month`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+    $db->exec($create_table_query);
+}
+// Check if custom_risk_id column exists, if not add it
+$check_column_query = "SHOW COLUMNS FROM `risk_incidents` LIKE 'custom_risk_id'";
+$stmt = $db->prepare($check_column_query);
+$stmt->execute();
+if ($stmt->rowCount() == 0) {
+    $alter_table_query = "ALTER TABLE `risk_incidents` ADD COLUMN `custom_risk_id` VARCHAR(50) DEFAULT NULL";
+    $db->exec($alter_table_query);
+}
+// Check if risk_level column exists, if not add it
+$check_column_query = "SHOW COLUMNS FROM `risk_incidents` LIKE 'risk_level'";
+$stmt = $db->prepare($check_column_query);
+$stmt->execute();
+if ($stmt->rowCount() == 0) {
+    $alter_table_query = "ALTER TABLE `risk_incidents` ADD COLUMN `risk_level` VARCHAR(50) DEFAULT NULL";
+    $db->exec($alter_table_query);
+}
+// Check if general_inherent_risk_score column exists, if not add it
+$check_column_query = "SHOW COLUMNS FROM `risk_incidents` LIKE 'general_inherent_risk_score'";
+$stmt = $db->prepare($check_column_query);
+$stmt->execute();
+if ($stmt->rowCount() == 0) {
+    $alter_table_query = "ALTER TABLE `risk_incidents` ADD COLUMN `general_inherent_risk_score` INT(11) DEFAULT NULL";
+    $db->exec($alter_table_query);
+}
+// Check if general_residual_risk_score column exists, if not add it
+$check_column_query = "SHOW COLUMNS FROM `risk_incidents` LIKE 'general_residual_risk_score'";
+$stmt = $db->prepare($check_column_query);
+$stmt->execute();
+if ($stmt->rowCount() == 0) {
+    $alter_table_query = "ALTER TABLE `risk_incidents` ADD COLUMN `general_residual_risk_score` INT(11) DEFAULT NULL";
+    $db->exec($alter_table_query);
+}
+// Check if general_inherent_risk_level column exists, if not add it
+$check_column_query = "SHOW COLUMNS FROM `risk_incidents` LIKE 'general_inherent_risk_level'";
+$stmt = $db->prepare($check_column_query);
+$stmt->execute();
+if ($stmt->rowCount() == 0) {
+    $alter_table_query = "ALTER TABLE `risk_incidents` ADD COLUMN `general_inherent_risk_level` VARCHAR(50) DEFAULT NULL";
+    $db->exec($alter_table_query);
+}
+// Check if general_residual_risk_level column exists, if not add it
+$check_column_query = "SHOW COLUMNS FROM `risk_incidents` LIKE 'general_residual_risk_level'";
+$stmt = $db->prepare($check_column_query);
+$stmt->execute();
+if ($stmt->rowCount() == 0) {
+    $alter_table_query = "ALTER TABLE `risk_incidents` ADD COLUMN `general_residual_risk_level` VARCHAR(50) DEFAULT NULL";
+    $db->exec($alter_table_query);
+}
+// Function to get department abbreviation
+function getDepartmentAbbreviation($department) {
+    // Normalize the department string
+    $department = trim($department);
+    $department = preg_replace('/\s+/', ' ', $department);
+    $department = str_replace('&', 'and', $department);
+    
+    // Check for IT department patterns
+    $it_patterns = [
+        '/information\s*(and|&)?\s*technology/i',
+        '/it\s*(and|&)?\s*technology/i',
+        '/^it$/i',
+        '/i\s*&\s*t/i',
+        '/i\s*and\s*t/i',
+        '/it\s*department/i',
+        '/information\s*technology\s*department/i',
+        '/department\s*of\s*it/i',
+        '/department\s*of\s*information\s*technology/i',
+        '/i\.t\./i',
+        '/^i$/i'
+    ];
+    
+    foreach ($it_patterns as $pattern) {
+        if (preg_match($pattern, $department)) {
+            return 'IT';
+        }
+    }
+    
+    // Check for common department abbreviations
+    $abbreviations = [
+        'Risk and Compliance' => 'RC',
+        'Finance' => 'FIN',
+        'Information Technology' => 'IT',
+        'Information and Technology' => 'IT',
+        'IT and Technology' => 'IT',
+        'IT & Technology' => 'IT',
+        'Human Resources' => 'HR',
+        'Operations' => 'OPS',
+        'Marketing' => 'MKT',
+        'Sales' => 'SLS',
+        'Legal' => 'LGL',
+        'Customer Service' => 'CS',
+        'Research and Development' => 'RD',
+        'Quality Assurance' => 'QA',
+        'Procurement' => 'PRC',
+        'Administration' => 'ADM',
+        'General' => 'GEN'
+    ];
+    
+    if (isset($abbreviations[$department])) {
+        return $abbreviations[$department];
+    }
+    
+    // For unknown departments, create abbreviation from first letters of each word
+    $words = explode(' ', $department);
+    $abbr = '';
+    foreach ($words as $word) {
+        if (!empty($word)) {
+            $abbr .= strtoupper(substr($word, 0, 1));
+        }
+    }
+    
+    // Limit to 4 characters max
+    return substr($abbr, 0, 4);
+}
 if (!isset($_SESSION['temp_treatments'])) {
     $_SESSION['temp_treatments'] = [];
 }
-
 $treatments = $_SESSION['temp_treatments']; // Load treatments from session instead of database
 $treatment_docs = [];
 $risk_owners = [];
-
-// Get risk owners for user assignment
-$risk_owners_query = "SELECT id, full_name, department FROM users WHERE role IN ('risk_owner', 'admin') ORDER BY full_name";
+// Get risk owners for user assignment - FIXED QUERY
+$risk_owners_query = "SELECT u.id, u.full_name, u.department_id, d.name as department 
+                      FROM users u 
+                      LEFT JOIN departments d ON u.department_id = d.id 
+                      WHERE u.role IN ('risk_owner', 'admin') 
+                      ORDER BY u.full_name";
 $risk_owners_stmt = $db->prepare($risk_owners_query);
 $risk_owners_stmt->execute();
 $risk_owners = $risk_owners_stmt->fetchAll(PDO::FETCH_ASSOC);
-
 $success = '';
 $error = '';
-
 if (isset($_GET['remove_treatment']) && isset($_GET['treatment_id'])) {
     $treatment_id = $_GET['treatment_id'];
     
@@ -66,10 +213,12 @@ if (isset($_GET['remove_treatment']) && isset($_GET['treatment_id'])) {
         }
     }
     
+    // Save form data before redirecting
+    saveFormData();
+    
     header("Location: " . $_SERVER['PHP_SELF']);
     exit();
 }
-
 if ($_POST && isset($_POST['cancel_risk'])) {
     // Clear session treatments and uploaded files
     if (isset($_SESSION['temp_treatments'])) {
@@ -92,25 +241,25 @@ if ($_POST && isset($_POST['cancel_risk'])) {
     header("Location: " . $_SERVER['PHP_SELF']);
     exit();
 }
-
-if ($_POST && isset($_POST['add_treatment'])) {
+// Handle AJAX request for adding treatment
+if ($_POST && isset($_POST['add_treatment_ajax'])) {
     try {
         $treatment_title = $_POST['treatment_title'] ?? '';
         $treatment_description = $_POST['treatment_description'] ?? '';
         $assigned_to = $_POST['assigned_to'] ?? $_SESSION['user_id'];
         $target_date = $_POST['treatment_target_date'] ?? null;
-
+        
         if (empty($treatment_title) || empty($treatment_description)) {
             throw new Exception("Treatment title and description are required");
         }
-
+        
         // Get assigned user info for display
         $assigned_user_query = "SELECT full_name FROM users WHERE id = :user_id";
         $assigned_user_stmt = $db->prepare($assigned_user_query);
         $assigned_user_stmt->bindParam(':user_id', $assigned_to);
         $assigned_user_stmt->execute();
         $assigned_user = $assigned_user_stmt->fetch(PDO::FETCH_ASSOC);
-
+        
         // Create treatment array for session storage
         $treatment_data = [
             'id' => uniqid(), // Temporary ID for session management
@@ -124,26 +273,24 @@ if ($_POST && isset($_POST['add_treatment'])) {
             'created_at' => date('Y-m-d H:i:s'),
             'files' => []
         ];
-
+        
         // Handle file uploads for the new treatment
         if (isset($_FILES['treatment_files']) && !empty($_FILES['treatment_files']['name'][0])) {
             $files = $_FILES['treatment_files'];
-
             for ($i = 0; $i < count($files['name']); $i++) {
                 if ($files['error'][$i] === UPLOAD_ERR_OK) {
                     $original_filename = $files['name'][$i];
                     $file_size = $files['size'][$i];
                     $file_type = $files['type'][$i];
                     $tmp_name = $files['tmp_name'][$i];
-
                     $file_extension = pathinfo($original_filename, PATHINFO_EXTENSION);
                     $unique_filename = uniqid() . '_' . time() . '.' . $file_extension;
                     $upload_path = 'uploads/temp_treatments/' . $unique_filename;
-
+                    
                     if (!file_exists('uploads/temp_treatments/')) {
                         mkdir('uploads/temp_treatments/', 0755, true);
                     }
-
+                    
                     if (move_uploaded_file($tmp_name, $upload_path)) {
                         $treatment_data['files'][] = [
                             'original_filename' => $original_filename,
@@ -155,23 +302,130 @@ if ($_POST && isset($_POST['add_treatment'])) {
                 }
             }
         }
-
+        
         // Add treatment to session
         $_SESSION['temp_treatments'][] = $treatment_data;
+        
+        // Return success response
+        echo json_encode([
+            'success' => true,
+            'message' => 'Treatment method added successfully!',
+            'treatment' => $treatment_data
+        ]);
+        exit();
+    } catch (Exception $e) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Error adding treatment: ' . $e->getMessage()
+        ]);
+        exit();
+    }
+}
+// Function to save form data to session
+function saveFormData() {
+    // Save all non-treatment related form data
+    $excludeFields = [
+        'add_treatment', 'add_treatment_ajax', 'treatment_title', 
+        'treatment_description', 'assigned_to', 'treatment_target_date', 
+        'treatment_files', 'cancel_risk', 'submit_risk'
+    ];
+    
+    $_SESSION['form_data'] = [];
+    
+    foreach ($_POST as $key => $value) {
+        if (!in_array($key, $excludeFields)) {
+            if (is_array($value)) {
+                $_SESSION['form_data'][$key] = $value;
+            } else {
+                $_SESSION['form_data'][$key] = htmlspecialchars($value);
+            }
+        }
+    }
+    
+    // Save file information separately
+    if (isset($_FILES)) {
+        foreach ($_FILES as $key => $file) {
+            if ($file['error'] == UPLOAD_ERR_OK) {
+                $_SESSION['form_data']['files'][$key] = [
+                    'name' => $file['name'],
+                    'type' => $file['type'],
+                    'size' => $file['size']
+                ];
+            }
+        }
+    }
+}
+
+if ($_POST && isset($_POST['add_treatment'])) {
+    try {
+        $treatment_title = $_POST['treatment_title'] ?? '';
+        $treatment_description = $_POST['treatment_description'] ?? '';
+        $assigned_to = $_POST['assigned_to'] ?? $_SESSION['user_id'];
+        $target_date = $_POST['treatment_target_date'] ?? null;
+        if (empty($treatment_title) || empty($treatment_description)) {
+            throw new Exception("Treatment title and description are required");
+        }
+        // Get assigned user info for display
+        $assigned_user_query = "SELECT full_name FROM users WHERE id = :user_id";
+        $assigned_user_stmt = $db->prepare($assigned_user_query);
+        $assigned_user_stmt->bindParam(':user_id', $assigned_to);
+        $assigned_user_stmt->execute();
+        $assigned_user = $assigned_user_stmt->fetch(PDO::FETCH_ASSOC);
+        // Create treatment array for session storage
+        $treatment_data = [
+            'id' => uniqid(), // Temporary ID for session management
+            'treatment_title' => $treatment_title,
+            'treatment_description' => $treatment_description,
+            'assigned_to' => $assigned_to,
+            'assigned_user_name' => $assigned_user['full_name'] ?? 'Unknown User',
+            'target_completion_date' => $target_date,
+            'status' => 'pending',
+            'created_by' => $_SESSION['user_id'],
+            'created_at' => date('Y-m-d H:i:s'),
+            'files' => []
+        ];
+        // Handle file uploads for the new treatment
+        if (isset($_FILES['treatment_files']) && !empty($_FILES['treatment_files']['name'][0])) {
+            $files = $_FILES['treatment_files'];
+            for ($i = 0; $i < count($files['name']); $i++) {
+                if ($files['error'][$i] === UPLOAD_ERR_OK) {
+                    $original_filename = $files['name'][$i];
+                    $file_size = $files['size'][$i];
+                    $file_type = $files['type'][$i];
+                    $tmp_name = $files['tmp_name'][$i];
+                    $file_extension = pathinfo($original_filename, PATHINFO_EXTENSION);
+                    $unique_filename = uniqid() . '_' . time() . '.' . $file_extension;
+                    $upload_path = 'uploads/temp_treatments/' . $unique_filename;
+                    if (!file_exists('uploads/temp_treatments/')) {
+                        mkdir('uploads/temp_treatments/', 0755, true);
+                    }
+                    if (move_uploaded_file($tmp_name, $upload_path)) {
+                        $treatment_data['files'][] = [
+                            'original_filename' => $original_filename,
+                            'file_path' => $upload_path,
+                            'file_size' => $file_size,
+                            'file_type' => $file_type
+                        ];
+                    }
+                }
+            }
+        }
+        // Add treatment to session
+        $_SESSION['temp_treatments'][] = $treatment_data;
+        
+        // Save form data before redirecting
+        saveFormData();
         
         $_SESSION['success_message'] = "Treatment method added successfully!";
         header("Location: " . $_SERVER['PHP_SELF'] . "?success=1");
         exit();
-
     } catch (Exception $e) {
         $error_message = "Error adding treatment: " . $e->getMessage();
     }
 }
-
 if ($_POST && isset($_POST['submit_risk'])) {
     try {
         $db->beginTransaction();
-
         // Validate required fields
         if (empty($_POST['risk_description']) || empty($_POST['cause_of_risk'])) {
             throw new Exception('Risk description and cause are required');
@@ -213,84 +467,132 @@ if ($_POST && isset($_POST['submit_risk'])) {
         
         $risk_categories_json = json_encode($all_risk_categories);
         
-        $all_likelihood_values = [];
-        if (!empty($inherent_likelihood)) {
-            $all_likelihood_values[] = $inherent_likelihood;
+        // Calculate primary inherent risk rating
+        $primary_inherent_rating = intval($inherent_likelihood) * intval($inherent_impact);
+        
+        // Calculate primary residual risk rating (assuming control assessment is 1)
+        $primary_residual_rating = $primary_inherent_rating * 1;
+        
+        // Calculate inherent risk level
+        $inherent_risk_level = 'Low';
+        if ($primary_inherent_rating >= 12) {
+            $inherent_risk_level = 'Critical';
+        } else if ($primary_inherent_rating >= 8) {
+            $inherent_risk_level = 'High';
+        } else if ($primary_inherent_rating >= 4) {
+            $inherent_risk_level = 'Medium';
         }
         
+        // Calculate residual risk level
+        $residual_risk_level = 'Low';
+        if ($primary_residual_rating >= 12) {
+            $residual_risk_level = 'Critical';
+        } else if ($primary_residual_rating >= 8) {
+            $residual_risk_level = 'High';
+        } else if ($primary_residual_rating >= 4) {
+            $residual_risk_level = 'Medium';
+        }
+        
+        // Calculate general inherent and residual risk scores
+        $general_inherent_risk_score = $primary_inherent_rating;
+        $general_residual_risk_score = $primary_residual_rating;
+        
+        // Calculate general inherent and residual risk levels
+        $general_inherent_risk_level = $inherent_risk_level;
+        $general_residual_risk_level = $residual_risk_level;
+        
+        // Include secondary risks in general scores if they exist
         $secondary_index = 1;
-        while (isset($_POST["secondary_likelihood_$secondary_index"])) {
-            $secondary_likelihood = $_POST["secondary_likelihood_$secondary_index"];
-            if (!empty($secondary_likelihood)) {
-                $all_likelihood_values[] = $secondary_likelihood;
+        while (isset($_POST["secondary_risk_rating_$secondary_index"])) {
+            $secondary_rating = $_POST["secondary_risk_rating_$secondary_index"];
+            if (!empty($secondary_rating)) {
+                $general_inherent_risk_score += intval($secondary_rating);
+                $general_residual_risk_score += intval($secondary_rating); // Assuming control assessment is 1
             }
             $secondary_index++;
         }
         
-        $inherent_likelihood_values = implode(',', $all_likelihood_values);
-        
-        $all_consequence_values = [];
-        if (!empty($inherent_impact)) {
-            $all_consequence_values[] = $inherent_impact;
+        // Calculate general risk levels
+        if ($general_inherent_risk_score >= 12) {
+            $general_inherent_risk_level = 'Critical';
+        } else if ($general_inherent_risk_score >= 8) {
+            $general_inherent_risk_level = 'High';
+        } else if ($general_inherent_risk_score >= 4) {
+            $general_inherent_risk_level = 'Medium';
         }
         
-        $secondary_index = 1;
-        while (isset($_POST["secondary_impact_$secondary_index"])) {
-            $secondary_impact = $_POST["secondary_impact_$secondary_index"];
-            if (!empty($secondary_impact)) {
-                $all_consequence_values[] = $secondary_impact;
-            }
-            $secondary_index++;
+        if ($general_residual_risk_score >= 12) {
+            $general_residual_risk_level = 'Critical';
+        } else if ($general_residual_risk_score >= 8) {
+            $general_residual_risk_level = 'High';
+        } else if ($general_residual_risk_score >= 4) {
+            $general_residual_risk_level = 'Medium';
         }
-        
-        $inherent_consequence_values = implode(',', $all_consequence_values);
-        
-        $all_risk_ratings = [];
-        $primary_risk_rating = intval($inherent_likelihood) * intval($inherent_impact);
-        $all_risk_ratings[] = $primary_risk_rating;
-        
-        $secondary_index = 1;
-        while (isset($_POST["secondary_likelihood_$secondary_index"]) && isset($_POST["secondary_impact_$secondary_index"])) {
-            $sec_likelihood = $_POST["secondary_likelihood_$secondary_index"];
-            $sec_impact = $_POST["secondary_impact_$secondary_index"];
-            if (!empty($sec_likelihood) && !empty($sec_impact)) {
-                $secondary_risk_rating = intval($sec_likelihood) * intval($sec_impact);
-                $all_risk_ratings[] = $secondary_risk_rating;
-            }
-            $secondary_index++;
-        }
-        
-        $risk_rating_values = implode(',', $all_risk_ratings);
-        
-        $control_assessment_values = implode(',', array_fill(0, count($all_risk_ratings), '1'));
-        
-        $all_residual_ratings = [];
-        foreach ($all_risk_ratings as $rating) {
-            $all_residual_ratings[] = $rating * 1; // control assessment is 1
-        }
-        $residual_rating_values = implode(',', $all_residual_ratings);
-        
-        $general_inherent_risk_score = $_POST['general_inherent_risk_score'] ?? null;
-        $general_residual_risk_score = $_POST['general_residual_risk_score'] ?? null;
         
         $cause_of_risk_json = json_encode($_POST['cause_of_risk']);
         
+        // Generate custom risk ID
+        $department = $user['department'];
+        $date_of_risk_entry = date('Y-m-d');
+        $risk_year = date('Y', strtotime($date_of_risk_entry));
+        $risk_month = date('m', strtotime($date_of_risk_entry));
+        $year_month = date('Y-m', strtotime($date_of_risk_entry));
+        
+        // Get the next number for this department and year_month
+        $query = "SELECT last_number FROM risk_sequences WHERE department = :department AND `year_month` = :year_month FOR UPDATE";
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':department', $department);
+        $stmt->bindParam(':year_month', $year_month);
+        $stmt->execute();
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($result) {
+            $next_number = $result['last_number'] + 1;
+            $update_query = "UPDATE risk_sequences SET last_number = :next_number WHERE department = :department AND `year_month` = :year_month";
+            $update_stmt = $db->prepare($update_query);
+            $update_stmt->bindParam(':next_number', $next_number);
+            $update_stmt->bindParam(':department', $department);
+            $update_stmt->bindParam(':year_month', $year_month);
+            $update_stmt->execute();
+        } else {
+            $next_number = 1;
+            $insert_query = "INSERT INTO risk_sequences (department, `year_month`, last_number) VALUES (:department, :year_month, :next_number)";
+            $insert_stmt = $db->prepare($insert_query);
+            $insert_stmt->bindParam(':department', $department);
+            $insert_stmt->bindParam(':year_month', $year_month);
+            $insert_stmt->bindParam(':next_number', $next_number);
+            $insert_stmt->execute();
+        }
+        
+        // Get department abbreviation
+        $dept_abbr = getDepartmentAbbreviation($department);
+        
+        // Format sequence number with leading zeros (3 digits)
+        $formatted_sequence = str_pad($next_number, 3, '0', STR_PAD_LEFT);
+        
+        // Form the custom risk ID
+        $custom_risk_id = $dept_abbr . '/' . $risk_year . '/' . $risk_month . '/' . $formatted_sequence;
+        
         $query = "INSERT INTO risk_incidents (
-            risk_name, risk_description, cause_of_risk, department, reported_by, risk_owner_id,
+            custom_risk_id,
+            risk_name, risk_description, cause_of_risk, department, department_id, reported_by, risk_owner_id,
             existing_or_new, risk_categories,
             inherent_likelihood, inherent_consequence, 
-            risk_rating, inherent_risk_level, residual_risk_level,
-            control_assessment, residual_rating,
+            inherent_rating, inherent_risk_level, 
+            residual_rating, residual_risk_level,
+            risk_level,
             general_inherent_risk_score, general_residual_risk_score,
             general_inherent_risk_level, general_residual_risk_level,
             involves_money_loss, money_amount,
             created_at, updated_at
         ) VALUES (
-            :risk_name, :risk_description, :cause_of_risk, :department, :reported_by, :risk_owner_id,
+            :custom_risk_id,
+            :risk_name, :risk_description, :cause_of_risk, :department, :department_id, :reported_by, :risk_owner_id,
             :existing_or_new, :risk_categories,
             :inherent_likelihood, :inherent_consequence,
-            :risk_rating, :inherent_risk_level, :residual_risk_level,
-            :control_assessment, :residual_rating,
+            :inherent_rating, :inherent_risk_level,
+            :residual_rating, :residual_risk_level,
+            :risk_level,
             :general_inherent_risk_score, :general_residual_risk_score,
             :general_inherent_risk_level, :general_residual_risk_level,
             :involves_money_loss, :money_amount,
@@ -298,31 +600,32 @@ if ($_POST && isset($_POST['submit_risk'])) {
         )";
         
         $stmt = $db->prepare($query);
+        $stmt->bindParam(':custom_risk_id', $custom_risk_id);
         $stmt->bindParam(':risk_name', $risk_name);
         $stmt->bindParam(':risk_description', $_POST['risk_description']);
         $stmt->bindParam(':cause_of_risk', $cause_of_risk_json);
         $stmt->bindParam(':department', $user['department']);
+        $stmt->bindParam(':department_id', $department_id);
         $stmt->bindParam(':reported_by', $_SESSION['user_id']);
         $stmt->bindParam(':risk_owner_id', $_SESSION['user_id']);
         $stmt->bindParam(':existing_or_new', $_POST['existing_or_new']);
         $stmt->bindParam(':risk_categories', $risk_categories_json);
-        $stmt->bindParam(':inherent_likelihood', $inherent_likelihood_values);
-        $stmt->bindParam(':inherent_consequence', $inherent_consequence_values);
-        $stmt->bindParam(':risk_rating', $risk_rating_values);
-        $stmt->bindParam(':inherent_risk_level', $_POST['inherent_risk_level']);
-        $stmt->bindParam(':residual_risk_level', $_POST['residual_risk_level']);
-        $stmt->bindParam(':control_assessment', $control_assessment_values);
-        $stmt->bindParam(':residual_rating', $residual_rating_values);
+        $stmt->bindParam(':inherent_likelihood', $inherent_likelihood);
+        $stmt->bindParam(':inherent_consequence', $inherent_impact);
+        $stmt->bindParam(':inherent_rating', $primary_inherent_rating);
+        $stmt->bindParam(':inherent_risk_level', $inherent_risk_level);
+        $stmt->bindParam(':residual_rating', $primary_residual_rating);
+        $stmt->bindParam(':residual_risk_level', $residual_risk_level);
+        $stmt->bindParam(':risk_level', $residual_risk_level); // Set the overall risk level
         $stmt->bindParam(':general_inherent_risk_score', $general_inherent_risk_score);
         $stmt->bindParam(':general_residual_risk_score', $general_residual_risk_score);
-        $stmt->bindParam(':general_inherent_risk_level', $_POST['general_inherent_risk_level']);
-        $stmt->bindParam(':general_residual_risk_level', $_POST['general_residual_risk_level']);
+        $stmt->bindParam(':general_inherent_risk_level', $general_inherent_risk_level);
+        $stmt->bindParam(':general_residual_risk_level', $general_residual_risk_level);
         $stmt->bindParam(':involves_money_loss', $_POST['involves_money_loss']);
         $stmt->bindParam(':money_amount', $_POST['money_amount']);
         
         if ($stmt->execute()) {
             $risk_id = $db->lastInsertId();
-            
             
             if (isset($_FILES['controls_documents']) && !empty($_FILES['controls_documents']['name'][0])) {
                 $controls_files = handleFileUploads($_FILES['controls_documents'], $risk_id, 'controls_action_plans', $db);
@@ -342,7 +645,6 @@ if ($_POST && isset($_POST['submit_risk'])) {
                     $treatment_query = "INSERT INTO risk_treatments
                                        (risk_id, treatment_title, treatment_description, assigned_to, target_completion_date, status, created_by, created_at)
                                        VALUES (:risk_id, :title, :description, :assigned_to, :target_date, :status, :created_by, :created_at)";
-
                     $treatment_stmt = $db->prepare($treatment_query);
                     $treatment_stmt->bindParam(':risk_id', $risk_id); // Use the newly created risk_id
                     $treatment_stmt->bindParam(':title', $treatment['treatment_title']);
@@ -352,10 +654,8 @@ if ($_POST && isset($_POST['submit_risk'])) {
                     $treatment_stmt->bindParam(':status', $treatment['status']);
                     $treatment_stmt->bindParam(':created_by', $treatment['created_by']);
                     $treatment_stmt->bindParam(':created_at', $treatment['created_at']);
-
                     if ($treatment_stmt->execute()) {
                         $treatment_id = $db->lastInsertId();
-
                         // Insert treatment files
                         foreach ($treatment['files'] as $file) {
                             // Move file from temp to permanent location
@@ -381,12 +681,17 @@ if ($_POST && isset($_POST['submit_risk'])) {
                 }
             }
             
-            // Clear session treatments after successful submission
+            // Clear session treatments and form data after successful submission
             unset($_SESSION['temp_treatments']);
+            unset($_SESSION['form_data']);
             
             $db->commit();
-            $_SESSION['success_message'] = "Risk and all treatment methods submitted successfully!";
-            header("Location: risk_owner_dashboard.php?success=1");
+            
+            // Set success message in session for toast notification
+            $_SESSION['toast_message'] = "Risk reported successfully with ID: " . $custom_risk_id;
+            $_SESSION['toast_type'] = "success";
+            
+            header("Location: risk_owner_dashboard.php");
             exit();
         } else {
             $db->rollback();
@@ -397,7 +702,6 @@ if ($_POST && isset($_POST['submit_risk'])) {
         $error = $e->getMessage();
     }
 }
-
 $all_notifications = getNotifications($db, $_SESSION['user_id']);
 ?>
 <!DOCTYPE html>
@@ -408,6 +712,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
     <title>Report New Risk - Airtel Risk Management</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
+        /* CSS styles remain the same as in the original code */
         * {
             margin: 0;
             padding: 0;
@@ -612,14 +917,60 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             padding: 2rem;
         }
         
+        /* IMPROVED SECTION HEADER STYLES */
         .section-header {
-            padding: 0.75rem 1rem;
-            margin: 2rem 0 1rem 0;
-            border-radius: 0.25rem;
-            font-weight: 600;
+            padding: 1rem 1.5rem;
+            margin: 2rem 0 1.5rem 0;
+            border-radius: 8px;
+            font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 1px;
             position: relative;
+            display: flex;
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        /* Section numbering with distinctive styling */
+        .section-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            margin-right: 12px;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: white;
+            background: #E60012;
+            box-shadow: 0 2px 4px rgba(230, 0, 18, 0.3);
+        }
+        
+        /* Updated color scheme for all sections */
+        .section-1 {
+            background: linear-gradient(135deg, #E60012, #ff4d4d);
+            color: white;
+        }
+        
+        .section-2 {
+            background: linear-gradient(135deg, #E60012, #ff4d4d);
+            color: white;
+        }
+        
+        .section-3 {
+            background: linear-gradient(135deg, #E60012, #ff4d4d);
+            color: white;
+        }
+        
+        .section-4 {
+            background: linear-gradient(135deg, #E60012, #ff4d4d);
+            color: white;
+        }
+        
+        .section-header i {
+            margin-right: 10px;
+            font-size: 1.2rem;
         }
         
         .progress-indicator {
@@ -687,7 +1038,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             resize: vertical;
         }
         
-        /* Updated styling for single selection radio buttons */
+        /* Risk Categories Styling */
         .risk-categories-container {
             background: #f8f9fa;
             border: 1px solid #ddd;
@@ -695,8 +1046,11 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             border-radius: 5px;
             max-height: 400px;
             overflow-y: auto;
+            /* Updated to use grid layout with 2 columns */
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
         }
-
         .category-item {
             margin-bottom: 20px;
             padding: 15px;
@@ -704,12 +1058,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             border-radius: 8px;
             background: #fafafa;
         }
-
-        .category-item:last-child {
-            border-bottom: 2px solid #e3f2fd;
-        }
-
-        /* Enhanced category name styling with color distinction for radio buttons */
         .radio-category-label {
             display: flex;
             align-items: center;
@@ -723,20 +1071,17 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             color: white;
             transition: all 0.3s ease;
         }
-
         .radio-category-label:hover {
             background: linear-gradient(135deg,rgb(248, 4, 4),rgb(241, 2, 2));
             transform: translateY(-1px);
         }
-
-        /* Updated radio-category-label to handle both radio and checkbox inputs */
         .radio-category-label input[type="radio"],
         .radio-category-label input[type="checkbox"] {
             margin-right: 12px;
             transform: scale(1.4);
             accent-color: white;
         }
-
+        
         /* Cause of Risk checkbox styling */
         .cause-checkboxes {
             display: grid;
@@ -744,7 +1089,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             gap: 15px;
             margin-top: 10px;
         }
-
         .cause-checkbox-item {
             padding: 15px;
             border: 2px solid #4caf50;
@@ -752,14 +1096,12 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             background: linear-gradient(135deg, #e8f5e8, #f1f8e9);
             transition: all 0.3s ease;
         }
-
         .cause-checkbox-item:hover {
             background: linear-gradient(135deg, #c8e6c9, #dcedc8);
             border-color: #388e3c;
             transform: scale(1.02);
             box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
         }
-
         .cause-checkbox-label {
             display: flex;
             align-items: center;
@@ -768,14 +1110,13 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             font-size: 14px;
             color: #2e7d32;
         }
-
         .cause-checkbox-label input[type="checkbox"] {
             margin-right: 10px;
             transform: scale(1.3);
             accent-color: #4caf50;
         }
-
-        /* 2x2 grid layout for impact levels */
+        
+        /* Impact levels styling */
         .impact-levels {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -784,8 +1125,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             margin-top: 15px;
             padding: 10px;
         }
-
-        /* Square-styled radio buttons with distinct colors */
         .radio-label {
             display: flex;
             align-items: center;
@@ -801,37 +1140,23 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             font-size: 13px;
             line-height: 1.3;
         }
-
         .radio-label:hover {
             background: linear-gradient(135deg, #c8e6c9, #dcedc8);
             border-color: #388e3c;
             transform: scale(1.02);
             box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
         }
-
         .radio-label input[type="radio"] {
             margin-right: 8px;
             transform: scale(1.3);
             accent-color: #4caf50;
         }
-
         .radio-label input[type="radio"]:checked + span {
             font-weight: 600;
             color: #2e7d32;
         }
-
-        /* Responsive design for smaller screens */
-        @media (max-width: 768px) {
-            .impact-levels {
-                grid-template-columns: 1fr;
-                grid-template-rows: repeat(4, 1fr);
-            }
-            
-            .cause-checkboxes {
-                grid-template-columns: 1fr;
-            }
-        }
         
+        /* Risk matrix styling */
         .risk-matrix {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -913,35 +1238,13 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             .risk-matrix {
                 grid-template-columns: 1fr;
             }
+            
+            /* Update risk categories for mobile */
+            .risk-categories-container {
+                grid-template-columns: 1fr;
+            }
         }
-
-        .impact-levels {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .radio-label {
-            display: flex;
-            align-items: center;
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            margin-bottom: 5px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        .radio-label:hover {
-            background-color: rgba(230, 0, 18, 0.05);
-        }
-
-        .radio-label input[type="radio"] {
-            margin-right: 8px;
-            transform: scale(1.2);
-            accent-color: #E60012;
-        }
-
-        /* Added comprehensive treatment styling from manage-risk.php */
+        
         /* Treatment Methods Section */
         .treatments-section {
             background: white;
@@ -951,7 +1254,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             box-shadow: 0 4px 15px rgba(0,0,0,0.08);
             border-top: 4px solid #17a2b8;
         }
-
         .treatment-card {
             background: #f8f9fa;
             border: 2px solid #dee2e6;
@@ -960,39 +1262,33 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             margin-bottom: 1.5rem;
             transition: all 0.3s ease;
         }
-
         .treatment-card:hover {
             border-color: #17a2b8;
             transform: translateY(-2px);
             box-shadow: 0 4px 15px rgba(23, 162, 184, 0.2);
         }
-
         .treatment-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
             margin-bottom: 1rem;
         }
-
         .treatment-title {
             font-size: 1.2rem;
             font-weight: 600;
             color: #17a2b8;
             margin: 0;
         }
-
         .treatment-status {
             padding: 0.25rem 0.75rem;
             border-radius: 15px;
             font-size: 0.8rem;
             font-weight: 600;
         }
-
         .status-pending { background: #fff3cd; color: #856404; }
         .status-in-progress { background: #cce5ff; color: #004085; }
         .status-completed { background: #d4edda; color: #155724; }
         .status-cancelled { background: #f8d7da; color: #721c24; }
-
         .treatment-meta {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -1003,24 +1299,20 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             border-radius: 8px;
             border: 1px solid #dee2e6;
         }
-
         .meta-item {
             display: flex;
             flex-direction: column;
         }
-
         .meta-label {
             font-size: 0.8rem;
             color: #666;
             font-weight: 500;
             margin-bottom: 0.25rem;
         }
-
         .meta-value {
             font-weight: 600;
             color: #333;
         }
-
         .treatment-description {
             background: white;
             padding: 1rem;
@@ -1029,14 +1321,12 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             margin: 1rem 0;
             line-height: 1.6;
         }
-
         .treatment-actions {
             display: flex;
             gap: 0.5rem;
             flex-wrap: wrap;
             margin-top: 1rem;
         }
-
         .add-treatment-btn {
             background: linear-gradient(135deg, #17a2b8, #138496);
             color: white;
@@ -1052,12 +1342,11 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             transition: all 0.3s;
             box-shadow: 0 4px 15px rgba(23, 162, 184, 0.3);
         }
-
         .add-treatment-btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(23, 162, 184, 0.4);
         }
-
+        
         /* Modal Styles */
         .modal {
             display: none;
@@ -1070,13 +1359,11 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             background-color: rgba(0,0,0,0.5);
             backdrop-filter: blur(5px);
         }
-
         .modal.show {
             display: flex;
             align-items: center;
             justify-content: center;
         }
-
         .modal-content {
             background: white;
             border-radius: 12px;
@@ -1087,7 +1374,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             overflow-y: auto;
             box-shadow: 0 10px 30px rgba(0,0,0,0.3);
         }
-
         .modal-header {
             background: linear-gradient(135deg, #17a2b8, #138496);
             color: white;
@@ -1097,13 +1383,11 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             justify-content: space-between;
             align-items: center;
         }
-
         .modal-title {
             font-size: 1.3rem;
             font-weight: 600;
             margin: 0;
         }
-
         .close {
             color: white;
             font-size: 28px;
@@ -1113,21 +1397,18 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             border: none;
             transition: opacity 0.3s;
         }
-
         .close:hover {
             opacity: 0.7;
         }
-
         .modal-body {
             padding: 2rem;
         }
-
+        
         /* User Selection Styles */
         .user-search-container {
             position: relative;
             margin-bottom: 1rem;
         }
-
         .user-search-input {
             width: 100%;
             padding: 0.9rem;
@@ -1136,13 +1417,11 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             font-size: 1rem;
             transition: border-color 0.3s;
         }
-
         .user-search-input:focus {
             outline: none;
             border-color: #17a2b8;
             box-shadow: 0 0 0 3px rgba(23, 162, 184, 0.1);
         }
-
         .user-dropdown {
             position: absolute;
             top: 100%;
@@ -1157,37 +1436,31 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             z-index: 1001;
             display: none;
         }
-
         .user-dropdown.show {
             display: block;
         }
-
         .user-option {
             padding: 1rem;
             cursor: pointer;
             border-bottom: 1px solid #f8f9fa;
             transition: background-color 0.2s;
         }
-
         .user-option:hover {
             background-color: #f8f9fa;
         }
-
         .user-option:last-child {
             border-bottom: none;
         }
-
         .user-name {
             font-weight: 600;
             color: #333;
         }
-
         .user-dept {
             font-size: 0.9rem;
             color: #666;
             margin-top: 0.25rem;
         }
-
+        
         /* File Upload Styles */
         .file-upload-area {
             border: 2px dashed #17a2b8;
@@ -1198,38 +1471,31 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             transition: all 0.3s ease;
             background: #f8f9fa;
         }
-
         .file-upload-area:hover {
             border-color: #138496;
             background: #e9ecef;
         }
-
         .file-upload-area.dragover {
             border-color: #138496;
             background: #e3f2fd;
         }
-
         .upload-icon {
             font-size: 2.5rem;
             color: #17a2b8;
             margin-bottom: 1rem;
         }
-
         .file-upload-area h4 {
             color: #17a2b8;
             margin-bottom: 0.5rem;
             font-weight: 600;
         }
-
         .file-upload-area p {
             color: #666;
             margin-bottom: 0.5rem;
         }
-
         .file-upload-area small {
             color: #999;
         }
-
         .existing-files {
             margin: 1rem 0;
             padding: 1rem;
@@ -1237,7 +1503,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             border-radius: 8px;
             border: 1px solid #dee2e6;
         }
-
         .file-item {
             display: flex;
             justify-content: space-between;
@@ -1245,56 +1510,45 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             padding: 0.75rem 0;
             border-bottom: 1px solid #e9ecef;
         }
-
         .file-item:last-child {
             border-bottom: none;
         }
-
         .file-info {
             display: flex;
             align-items: center;
             gap: 0.75rem;
         }
-
         .file-icon {
             color: #17a2b8;
             font-size: 1.2rem;
         }
-
         .btn-info {
             background: #17a2b8;
             color: white;
         }
-
         .btn-info:hover {
             background: #138496;
         }
-
         .btn-outline {
             background: transparent;
             color: #17a2b8;
             border: 1px solid #17a2b8;
         }
-
         .btn-outline:hover {
             background: #17a2b8;
             color: white;
         }
-
         .btn-sm {
             padding: 0.5rem 1rem;
             font-size: 0.875rem;
         }
-
         .btn-secondary {
             background: #6c757d;
             color: white;
         }
-
         .btn-secondary:hover {
             background: #545b62;
         }
-
         .readonly-display {
             padding: 0.75rem;
             background: #f8f9fa;
@@ -1303,19 +1557,17 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             color: #333;
             font-weight: 500;
         }
-
         .required {
             color: #dc3545;
         }
-
-        /* New styling for Risk Description textarea to match the category styling */
+        
+        /* Risk Description textarea styling */
         .styled-textarea-container {
             background: #f8f9fa;
             border: 1px solid #ddd;
             padding: 15px;
             border-radius: 5px;
         }
-
         .styled-textarea {
             width: 100%;
             min-height: 120px;
@@ -1329,7 +1581,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             resize: vertical;
             transition: all 0.3s ease;
         }
-
         .styled-textarea:focus {
             outline: none;
             border-color: #E60012;
@@ -1337,26 +1588,23 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             box-shadow: 0 4px 8px rgba(230, 0, 18, 0.1);
             transform: translateY(-1px);
         }
-
         .styled-textarea:hover {
             border-color: #c5c5c5;
             background: linear-gradient(135deg, #fff, #fafafa);
         }
-
-        /* New styling for file upload to match the category styling */
+        
+        /* File upload styling */
         .styled-file-container {
             background: #f8f9fa;
             border: 1px solid #ddd;
             padding: 15px;
             border-radius: 5px;
         }
-
         .styled-file-upload {
             position: relative;
             display: inline-block;
             width: 100%;
         }
-
         .styled-file-input {
             position: absolute;
             opacity: 0;
@@ -1364,7 +1612,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             height: 100%;
             cursor: pointer;
         }
-
         .styled-file-label {
             display: flex;
             align-items: center;
@@ -1380,20 +1627,18 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             color: #333;
             text-align: center;
         }
-
         .styled-file-label:hover {
             background: linear-gradient(135deg, #fff, #fafafa);
             border-color: #c5c5c5;
             transform: translateY(-1px);
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
-
         .styled-file-label i {
             margin-right: 10px;
             font-size: 20px;
             color: #17a2b8;
         }
-
+        
         /* Risk badges */
         .risk-badge {
             display: inline-block;
@@ -1407,54 +1652,46 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             vertical-align: baseline;
             border-radius: 0.25rem;
         }
-
         .risk-badge.low {
             color: #000;
             background-color: #88dd88;
         }
-
         .risk-badge.medium {
             color: #000;
             background-color: #ffdd00;
         }
-
         .risk-badge.high {
             background-color: #ff8800;
         }
-
         .risk-badge.critical {
             background-color: #ff4444;
         }
-
-        /* Added unified secondary risk assessment styling */
+        
+        /* IMPROVED SECONDARY RISK ASSESSMENT STYLING */
         .secondary-risk-assessment {
             margin: 20px 0;
             padding: 20px;
             background: #fff;
-            border: 2px solid #E60012;
+            border: 2px solid #007bff;
             border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(230, 0, 18, 0.1);
+            box-shadow: 0 2px 8px rgba(0, 123, 255, 0.1);
         }
-
         .secondary-risk-header {
-            color: #E60012;
+            color: #007bff;
             margin-bottom: 15px;
             font-weight: 600;
             font-size: 18px;
         }
-
         .secondary-risk-content {
             display: flex;
             gap: 20px;
             flex-wrap: wrap;
         }
-
         .secondary-likelihood-section,
         .secondary-impact-section {
             flex: 1;
             min-width: 300px;
         }
-
         .secondary-likelihood-boxes,
         .secondary-impact-boxes {
             display: grid;
@@ -1462,7 +1699,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             gap: 10px;
             margin-top: 10px;
         }
-
         .secondary-likelihood-box,
         .secondary-impact-box {
             padding: 15px;
@@ -1473,13 +1709,11 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             font-weight: bold;
             transition: all 0.3s ease;
         }
-
         .secondary-likelihood-box:hover,
         .secondary-impact-box:hover {
             transform: scale(1.02);
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
         }
-
         .secondary-risk-rating-display {
             text-align: center;
             padding: 10px;
@@ -1487,7 +1721,24 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             border-radius: 4px;
             font-weight: bold;
         }
-
+        
+        /* IMPROVED ADDITIONAL RISK ASSESSMENT STYLING */
+        .additional-risk-assessment {
+            margin: 20px 0;
+            padding: 20px;
+            background: #fff;
+            border: 2px solid #E60012;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(230, 0, 18, 0.1);
+        }
+        .additional-risk-header {
+            color: #E60012;
+            margin-bottom: 15px;
+            font-weight: 600;
+            font-size: 18px;
+        }
+        
+        /* IMPROVED NEXT RISK QUESTION STYLING */
         .next-risk-question {
             margin: 20px 0;
             padding: 15px;
@@ -1495,13 +1746,11 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             border: 1px solid #ddd;
             border-radius: 6px;
         }
-
         .next-risk-options {
             display: flex;
             gap: 20px;
             margin-top: 10px;
         }
-
         .next-risk-option {
             display: flex;
             align-items: center;
@@ -1511,17 +1760,15 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             border-radius: 6px;
             transition: all 0.3s;
         }
-
         .next-risk-option:hover {
-            border-color: #E60012;
-            background-color: rgba(230, 0, 18, 0.05);
+            border-color: #6f42c1;
+            background-color: rgba(111, 66, 193, 0.05);
         }
-
         .next-risk-option input[type="radio"] {
             margin-right: 8px;
         }
-
-        /* New styles for treatment section */
+        
+        /* Treatments container */
         .treatments-container {
             margin-top: 20px;
             padding: 15px;
@@ -1529,38 +1776,32 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             border-radius: 6px;
             background: #f8f9fa;
         }
-
         .empty-treatments {
             text-align: center;
             padding: 20px;
             color: #666;
         }
-
         .empty-icon {
             font-size: 3em;
             margin-bottom: 10px;
         }
-
         .treatments-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 15px;
         }
-
         .treatment-card {
             padding: 15px;
             border: 1px solid #ccc;
             border-radius: 6px;
             background: #fff;
         }
-
         .treatment-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 10px;
         }
-
         .status-badge {
             padding: 5px 10px;
             border-radius: 4px;
@@ -1568,29 +1809,175 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             font-weight: bold;
             color: #fff;
         }
-
         .status-pending { background-color: #ffc107; }
         .status-in-progress { background-color: #007bff; }
         .status-completed { background-color: #28a745; }
         .status-cancelled { background-color: #dc3545; }
-
         .treatment-meta {
             margin-bottom: 10px;
             font-size: 0.9em;
             color: #666;
         }
-
         .meta-item {
             margin-bottom: 5px;
         }
-
         .treatment-description {
             margin-bottom: 10px;
             font-style: italic;
         }
-
         .treatment-actions {
             text-align: right;
+        }
+        
+        /* Toast Notification Styles */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+        }
+        
+        .toast {
+            background-color: #E60012;
+            color: white;
+            padding: 16px 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-width: 300px;
+            transform: translateX(120%);
+            transition: transform 0.3s ease-out;
+        }
+        
+        .toast.show {
+            transform: translateX(0);
+        }
+        
+        .toast-content {
+            display: flex;
+            align-items: center;
+        }
+        
+        .toast-icon {
+            margin-right: 12px;
+            font-size: 20px;
+        }
+        
+        .toast-message {
+            font-weight: 500;
+            font-size: 16px;
+        }
+        
+        .toast-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            margin-left: 15px;
+            opacity: 0.8;
+        }
+        
+        .toast-close:hover {
+            opacity: 1;
+        }
+        
+        /* IMPROVED RISK SCORE SECTION STYLING */
+        .risk-score-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .risk-score-header {
+            font-weight: 600;
+            font-size: 18px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+        }
+        
+        .risk-score-section.inherent {
+            border: 2px solid #007bff;
+        }
+        .risk-score-section.inherent .risk-score-header {
+            color: #007bff;
+        }
+        
+        .risk-score-section.residual {
+            border: 2px solid #ffc107;
+        }
+        .risk-score-section.residual .risk-score-header {
+            color: #ffc107;
+        }
+        
+        .risk-score-section.general-inherent {
+            border: 2px solid #E60012;
+        }
+        .risk-score-section.general-inherent .risk-score-header {
+            color: #E60012;
+        }
+        
+        .risk-score-section.general-residual {
+            border: 2px solid #E60012;
+        }
+        .risk-score-section.general-residual .risk-score-header {
+            color: #E60012;
+        }
+        
+        .risk-score-display {
+            text-align: center;
+            padding: 15px;
+            margin-top: 15px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 16px;
+            background: #f8f9fa;
+            border: 1px dashed #ddd;
+        }
+        
+        /* IMPROVED FORM SECTION STYLING */
+        .form-section {
+            margin-top: 30px;
+        }
+        
+        /* AJAX loading spinner */
+        .ajax-loading {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 10000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .ajax-loading.show {
+            display: flex;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #E60012;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
@@ -1673,88 +2060,88 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                     <div class="alert alert-danger"><?php echo $error; ?></div>
                 <?php endif; ?>
                 
-                <form method="POST" enctype="multipart/form-data">
-                    <div class="section-header">
-                        <i class="fas fa-search"></i> Section 1: Risk Identification
+                <form method="POST" enctype="multipart/form-data" id="risk-form">
+                    <div class="section-header section-1">
+                        <span class="section-number">1</span>
+                        <i class="fas fa-search"></i> Risk Identification
                     </div>
-                    
                     
                     <div class="form-group">
                         <label class="form-label">Risk Categories * <small>(Select one primary risk)</small></label>
                         <div class="risk-categories-container">
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="radio" name="risk_categories" value="Financial Exposure" required>
+                                    <input type="radio" name="risk_categories" value="Financial Exposure" <?php echo (isset($_SESSION['form_data']['risk_categories']) && $_SESSION['form_data']['risk_categories'] == 'Financial Exposure') ? 'checked' : ''; ?> required>
                                     <span class="checkmark">Financial Exposure [Revenue, Operating Expenditure, Book value]</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="radio" name="risk_categories" value="Decrease in market share" required>
+                                    <input type="radio" name="risk_categories" value="Decrease in market share" <?php echo (isset($_SESSION['form_data']['risk_categories']) && $_SESSION['form_data']['risk_categories'] == 'Decrease in market share') ? 'checked' : ''; ?> required>
                                     <span class="checkmark">Decrease in market share</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="radio" name="risk_categories" value="Customer Experience" required>
+                                    <input type="radio" name="risk_categories" value="Customer Experience" <?php echo (isset($_SESSION['form_data']['risk_categories']) && $_SESSION['form_data']['risk_categories'] == 'Customer Experience') ? 'checked' : ''; ?> required>
                                     <span class="checkmark">Customer Experience</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="radio" name="risk_categories" value="Compliance" required>
+                                    <input type="radio" name="risk_categories" value="Compliance" <?php echo (isset($_SESSION['form_data']['risk_categories']) && $_SESSION['form_data']['risk_categories'] == 'Compliance') ? 'checked' : ''; ?> required>
                                     <span class="checkmark">Compliance</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="radio" name="risk_categories" value="Reputation" required>
+                                    <input type="radio" name="risk_categories" value="Reputation" <?php echo (isset($_SESSION['form_data']['risk_categories']) && $_SESSION['form_data']['risk_categories'] == 'Reputation') ? 'checked' : ''; ?> required>
                                     <span class="checkmark">Reputation</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="radio" name="risk_categories" value="Fraud" required>
+                                    <input type="radio" name="risk_categories" value="Fraud" <?php echo (isset($_SESSION['form_data']['risk_categories']) && $_SESSION['form_data']['risk_categories'] == 'Fraud') ? 'checked' : ''; ?> required>
                                     <span class="checkmark">Fraud</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="radio" name="risk_categories" value="Operations" required>
+                                    <input type="radio" name="risk_categories" value="Operations" <?php echo (isset($_SESSION['form_data']['risk_categories']) && $_SESSION['form_data']['risk_categories'] == 'Operations') ? 'checked' : ''; ?> required>
                                     <span class="checkmark">Operations (Business continuity)</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="radio" name="risk_categories" value="Networks" required>
+                                    <input type="radio" name="risk_categories" value="Networks" <?php echo (isset($_SESSION['form_data']['risk_categories']) && $_SESSION['form_data']['risk_categories'] == 'Networks') ? 'checked' : ''; ?> required>
                                     <span class="checkmark">Networks</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="radio" name="risk_categories" value="People" required>
+                                    <input type="radio" name="risk_categories" value="People" <?php echo (isset($_SESSION['form_data']['risk_categories']) && $_SESSION['form_data']['risk_categories'] == 'People') ? 'checked' : ''; ?> required>
                                     <span class="checkmark">People</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="radio" name="risk_categories" value="IT" required>
+                                    <input type="radio" name="risk_categories" value="IT" <?php echo (isset($_SESSION['form_data']['risk_categories']) && $_SESSION['form_data']['risk_categories'] == 'IT') ? 'checked' : ''; ?> required>
                                     <span class="checkmark">IT (Cybersecurity & Data Privacy)</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="radio" name="risk_categories" value="Other" required>
+                                    <input type="radio" name="risk_categories" value="Other" <?php echo (isset($_SESSION['form_data']['risk_categories']) && $_SESSION['form_data']['risk_categories'] == 'Other') ? 'checked' : ''; ?> required>
                                     <span class="checkmark">Other</span>
                                 </label>
                             </div>
@@ -1766,60 +2153,59 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                         <div class="risk-categories-container">
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="radio" name="involves_money_loss" value="yes" onchange="toggleMoneyAmount(this)" required>
+                                    <input type="radio" name="involves_money_loss" value="yes" <?php echo (isset($_SESSION['form_data']['involves_money_loss']) && $_SESSION['form_data']['involves_money_loss'] == 'yes') ? 'checked' : ''; ?> onchange="toggleMoneyAmount(this)" required>
                                     <span class="checkmark">Yes</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="radio" name="involves_money_loss" value="no" onchange="toggleMoneyAmount(this)" required>
+                                    <input type="radio" name="involves_money_loss" value="no" <?php echo (isset($_SESSION['form_data']['involves_money_loss']) && $_SESSION['form_data']['involves_money_loss'] == 'no') ? 'checked' : ''; ?> onchange="toggleMoneyAmount(this)" required>
                                     <span class="checkmark">No</span>
                                 </label>
                             </div>
                         </div>
                         
-                        <div id="money-amount-section" style="display: none; margin-top: 15px;">
+                        <div id="money-amount-section" style="display: <?php echo (isset($_SESSION['form_data']['involves_money_loss']) && $_SESSION['form_data']['involves_money_loss'] == 'yes') ? 'block' : 'none'; ?>; margin-top: 15px;">
                             <label class="form-label">Amount (in your local currency) *</label>
-                            <input type="number" name="money_amount" class="form-control" placeholder="Enter the estimated amount" step="0.01" min="0">
+                            <input type="number" name="money_amount" class="form-control" placeholder="Enter the estimated amount" step="0.01" min="0" value="<?php echo isset($_SESSION['form_data']['money_amount']) ? htmlspecialchars($_SESSION['form_data']['money_amount']) : ''; ?>">
                         </div>
                     </div>
                     
                     <div class="form-group">
                         <label class="form-label">Risk Description *</label>
                         <div class="styled-textarea-container">
-                            <textarea name="risk_description" class="styled-textarea" required placeholder="Provide a detailed description of the risk"></textarea>
+                            <textarea name="risk_description" class="styled-textarea" required placeholder="Provide a detailed description of the risk"><?php echo isset($_SESSION['form_data']['risk_description']) ? htmlspecialchars($_SESSION['form_data']['risk_description']) : ''; ?></textarea>
                         </div>
                     </div>
                     
                     <div class="form-group">
                         <label class="form-label">Cause of Risk *</label>
-                        <!-- Updated cause of risk to use same styling as risk categories -->
                         <div class="risk-categories-container">
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="checkbox" name="cause_of_risk[]" value="People">
+                                    <input type="checkbox" name="cause_of_risk[]" value="People" <?php echo (isset($_SESSION['form_data']['cause_of_risk']) && is_array($_SESSION['form_data']['cause_of_risk']) && in_array('People', $_SESSION['form_data']['cause_of_risk'])) ? 'checked' : ''; ?>>
                                     <span class="checkmark">People</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="checkbox" name="cause_of_risk[]" value="Process">
+                                    <input type="checkbox" name="cause_of_risk[]" value="Process" <?php echo (isset($_SESSION['form_data']['cause_of_risk']) && is_array($_SESSION['form_data']['cause_of_risk']) && in_array('Process', $_SESSION['form_data']['cause_of_risk'])) ? 'checked' : ''; ?>>
                                     <span class="checkmark">Process</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="checkbox" name="cause_of_risk[]" value="IT Systems">
+                                    <input type="checkbox" name="cause_of_risk[]" value="IT Systems" <?php echo (isset($_SESSION['form_data']['cause_of_risk']) && is_array($_SESSION['form_data']['cause_of_risk']) && in_array('IT Systems', $_SESSION['form_data']['cause_of_risk'])) ? 'checked' : ''; ?>>
                                     <span class="checkmark">IT Systems</span>
                                 </label>
                             </div>
                             
                             <div class="category-item">
                                 <label class="radio-category-label">
-                                    <input type="checkbox" name="cause_of_risk[]" value="External Environment">
+                                    <input type="checkbox" name="cause_of_risk[]" value="External Environment" <?php echo (isset($_SESSION['form_data']['cause_of_risk']) && is_array($_SESSION['form_data']['cause_of_risk']) && in_array('External Environment', $_SESSION['form_data']['cause_of_risk'])) ? 'checked' : ''; ?>>
                                     <span class="checkmark">External Environment</span>
                                 </label>
                             </div>
@@ -1840,33 +2226,32 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                         </div>
                     </div>
                     
-                    
-                    
-                    <div class="section-header">
-                        <i class="fas fa-calculator"></i> Section 2: Risk Assessment
+                    <div class="section-header section-2">
+                        <span class="section-number">2</span>
+                        <i class="fas fa-calculator"></i> Risk Assessment
                     </div>
                     
                     <div class="form-group">
                         <label class="form-label">a. Existing or New Risk *</label>
                         <select name="existing_or_new" class="form-control" required>
                             <option value="">Select Type</option>
-                            <option value="New">New Risk</option>
-                            <option value="Existing">Existing Risk</option>
+                            <option value="New" <?php echo (isset($_SESSION['form_data']['existing_or_new']) && $_SESSION['form_data']['existing_or_new'] == 'New') ? 'selected' : ''; ?>>New Risk</option>
+                            <option value="Existing" <?php echo (isset($_SESSION['form_data']['existing_or_new']) && $_SESSION['form_data']['existing_or_new'] == 'Existing') ? 'selected' : ''; ?>>Existing Risk</option>
                         </select>
                     </div>
                     
-                    <!-- Updated Section 2b to show dynamic risk category and restructured risk assessment -->
                     <div class="form-group">
                         <label class="form-label">b. Risk Rating</label>
                         
-                        <!-- Dynamic sub-header showing selected risk category -->
-                        <div id="selected-risk-category-header" style="display: none; margin: 15px 0; padding: 10px; background: #f8f9fa; border-left: 4px solid #E60012; border-radius: 4px;">
-                            <h4 style="margin: 0; color: #E60012; font-size: 16px;">i. <span id="selected-category-name"></span></h4>
+                        <div id="selected-risk-category-header" style="display: <?php echo (isset($_SESSION['form_data']['risk_categories'])) ? 'block' : 'none'; ?>; margin: 15px 0; padding: 10px; background: #f8f9fa; border-left: 4px solid #E60012; border-radius: 4px;">
+                            <h4 style="margin: 0; color: #E60012; font-size: 16px;">i. <span id="selected-category-name"><?php echo isset($_SESSION['form_data']['risk_categories']) ? htmlspecialchars($_SESSION['form_data']['risk_categories']) : ''; ?></span></h4>
                         </div>
                         
-                        <!-- Inherent Risk Section -->
-                        <div style="margin: 20px 0; padding: 20px; background: #fff; border: 2px solid #28a745; border-radius: 8px;">
-                            <h5 style="color: #28a745; margin-bottom: 15px; font-weight: 600;">Inherent Risk</h5>
+                        <div class="risk-score-section inherent">
+                            <div class="risk-score-header">
+                                <i class="fas fa-exclamation-triangle" style="margin-right: 10px;"></i>
+                                Inherent Risk
+                            </div>
                             
                             <div style="display: flex; gap: 20px; flex-wrap: wrap;">
                                 <div style="flex: 1; min-width: 300px;">
@@ -1875,7 +2260,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                         <div class="likelihood-boxes" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
                                             
                                             <div class="likelihood-box" 
-                                                 style="background-color: #ff4444; color: white; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                                 style="background-color: #ff4444; color: white; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid <?php echo (isset($_SESSION['form_data']['inherent_likelihood_level']) && $_SESSION['form_data']['inherent_likelihood_level'] == 4) ? '#E60012' : 'transparent'; ?>; text-align: center; font-weight: bold;"
                                                  onclick="selectInherentLikelihood(this, 4)"
                                                  data-value="4">
                                                 <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">ALMOST CERTAIN</div>
@@ -1887,7 +2272,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                             </div>
                                             
                                             <div class="likelihood-box" 
-                                                 style="background-color: #ff8800; color: white; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                                 style="background-color: #ff8800; color: white; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid <?php echo (isset($_SESSION['form_data']['inherent_likelihood_level']) && $_SESSION['form_data']['inherent_likelihood_level'] == 3) ? '#E60012' : 'transparent'; ?>; text-align: center; font-weight: bold;"
                                                  onclick="selectInherentLikelihood(this, 3)"
                                                  data-value="3">
                                                 <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">LIKELY</div>
@@ -1897,7 +2282,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                             </div>
                                             
                                             <div class="likelihood-box" 
-                                                 style="background-color: #ffdd00; color: black; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                                 style="background-color: #ffdd00; color: black; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid <?php echo (isset($_SESSION['form_data']['inherent_likelihood_level']) && $_SESSION['form_data']['inherent_likelihood_level'] == 2) ? '#E60012' : 'transparent'; ?>; text-align: center; font-weight: bold;"
                                                  onclick="selectInherentLikelihood(this, 2)"
                                                  data-value="2">
                                                 <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">POSSIBLE</div>
@@ -1908,7 +2293,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                             </div>
                                             
                                             <div class="likelihood-box" 
-                                                 style="background-color: #88dd88; color: black; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                                 style="background-color: #88dd88; color: black; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid <?php echo (isset($_SESSION['form_data']['inherent_likelihood_level']) && $_SESSION['form_data']['inherent_likelihood_level'] == 1) ? '#E60012' : 'transparent'; ?>; text-align: center; font-weight: bold;"
                                                  onclick="selectInherentLikelihood(this, 1)"
                                                  data-value="1">
                                                 <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">UNLIKELY</div>
@@ -1920,7 +2305,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                             </div>
                                             
                                         </div>
-                                        <input type="hidden" name="inherent_likelihood_level" id="inherent_likelihood_value" required>
+                                        <input type="hidden" name="inherent_likelihood_level" id="inherent_likelihood_value" value="<?php echo isset($_SESSION['form_data']['inherent_likelihood_level']) ? htmlspecialchars($_SESSION['form_data']['inherent_likelihood_level']) : ''; ?>" required>
                                     </div>
                                 </div>
                                 
@@ -1928,11 +2313,10 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                     <div class="form-group">
                                         <label class="form-label">Impact *</label>
                                         
-                                        <!-- Removed dropdown menu, impact boxes now show based on selected risk category -->
                                         <div class="impact-boxes" id="inherent_impact_boxes_container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
                                             
                                             <div class="impact-box" id="inherent_extreme_box"
-                                                 style="background-color: #ff4444; color: white; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                                 style="background-color: #ff4444; color: white; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid <?php echo (isset($_SESSION['form_data']['inherent_impact_level']) && $_SESSION['form_data']['inherent_impact_level'] == 4) ? '#E60012' : 'transparent'; ?>; text-align: center; font-weight: bold;"
                                                  onclick="selectInherentImpact(this, 4)"
                                                  data-value="4">
                                                 <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">EXTREME</div>
@@ -1940,7 +2324,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                             </div>
                                             
                                             <div class="impact-box" id="inherent_significant_box"
-                                                 style="background-color: #ff8800; color: white; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                                 style="background-color: #ff8800; color: white; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid <?php echo (isset($_SESSION['form_data']['inherent_impact_level']) && $_SESSION['form_data']['inherent_impact_level'] == 3) ? '#E60012' : 'transparent'; ?>; text-align: center; font-weight: bold;"
                                                  onclick="selectInherentImpact(this, 3)"
                                                  data-value="3">
                                                 <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">SIGNIFICANT</div>
@@ -1948,7 +2332,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                             </div>
                                             
                                             <div class="impact-box" id="inherent_moderate_box"
-                                                 style="background-color: #ffdd00; color: black; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                                 style="background-color: #ffdd00; color: black; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid <?php echo (isset($_SESSION['form_data']['inherent_impact_level']) && $_SESSION['form_data']['inherent_impact_level'] == 2) ? '#E60012' : 'transparent'; ?>; text-align: center; font-weight: bold;"
                                                  onclick="selectInherentImpact(this, 2)"
                                                  data-value="2">
                                                 <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">MODERATE</div>
@@ -1956,7 +2340,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                             </div>
                                             
                                             <div class="impact-box" id="inherent_minor_box"
-                                                 style="background-color: #88dd88; color: black; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid transparent; text-align: center; font-weight: bold;"
+                                                 style="background-color: #88dd88; color: black; padding: 15px; border-radius: 8px; cursor: pointer; border: 3px solid <?php echo (isset($_SESSION['form_data']['inherent_impact_level']) && $_SESSION['form_data']['inherent_impact_level'] == 1) ? '#E60012' : 'transparent'; ?>; text-align: center; font-weight: bold;"
                                                  onclick="selectInherentImpact(this, 1)"
                                                  data-value="1">
                                                 <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">MINOR</div>
@@ -1964,46 +2348,47 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                                             </div>
                                             
                                         </div>
-                                        <input type="hidden" name="inherent_impact_level" id="inherent_impact_value" required>
+                                        <input type="hidden" name="inherent_impact_level" id="inherent_impact_value" value="<?php echo isset($_SESSION['form_data']['inherent_impact_level']) ? htmlspecialchars($_SESSION['form_data']['inherent_impact_level']) : ''; ?>" required>
                                     </div>
                                 </div>
                             </div>
                             
-                            <input type="hidden" name="inherent_risk_rating" id="inherent_risk_rating">
-                            <div id="inherent_risk_display" class="rating-display" style="margin-top: 15px;">Inherent Risk Rating will appear here</div>
+                            <input type="hidden" name="inherent_risk_rating" id="inherent_risk_rating" value="<?php echo isset($_SESSION['form_data']['inherent_risk_rating']) ? htmlspecialchars($_SESSION['form_data']['inherent_risk_rating']) : ''; ?>">
+                            <div id="inherent_risk_display" class="risk-score-display">Inherent Risk Rating will appear here</div>
                         </div>
                         
-                        <!-- Residual Risk Section (placeholder for future implementation) -->
-                        <div style="margin: 20px 0; padding: 20px; background: #fff; border: 2px solid #ffc107; border-radius: 8px;">
-                            <h5 style="color: #ffc107; margin-bottom: 15px; font-weight: 600;">Residual Risk</h5>
-                            <input type="hidden" name="residual_risk_rating" id="residual_risk_rating">
-                            <div id="residual_risk_display" class="rating-display" style="margin-top: 15px;">Residual Risk Rating will appear here</div>
+                        <div class="risk-score-section residual">
+                            <div class="risk-score-header">
+                                <i class="fas fa-shield-alt" style="margin-right: 10px;"></i>
+                                Residual Risk
+                            </div>
+                            <input type="hidden" name="residual_risk_rating" id="residual_risk_rating" value="<?php echo isset($_SESSION['form_data']['residual_risk_rating']) ? htmlspecialchars($_SESSION['form_data']['residual_risk_rating']) : ''; ?>">
+                            <div id="residual_risk_display" class="risk-score-display">Residual Risk Rating will appear here</div>
                         </div>
                         
-                        <!-- Completely replaced secondary risk section with unified system -->
-                        <div style="margin: 20px 0; padding: 20px; background: #fff; border: 2px solid #6f42c1; border-radius: 8px;">
-                            <h5 style="color: #6f42c1; margin-bottom: 15px; font-weight: 600;">Additional Risk Assessment</h5>
+                        <div class="additional-risk-assessment">
+                            <div class="additional-risk-header">
+                                <i class="fas fa-plus-circle" style="margin-right: 10px;"></i>
+                                Additional Risk Assessment
+                            </div>
                             
-                            <!-- Container for all secondary risks -->
                             <div id="secondary-risks-container"></div>
                             
-                            <!-- Initial question for first secondary risk -->
                             <div id="initial-secondary-question" class="next-risk-question">
                                 <label style="font-weight: 600; color: #333; margin-bottom: 10px; display: block;">Is there any other triggered risk?</label>
                                 <div class="next-risk-options">
                                     <label class="next-risk-option">
-                                        <input type="radio" name="has_secondary_risk" value="yes" onclick="showSecondaryRiskSelection()">
+                                        <input type="radio" name="has_secondary_risk" value="yes" <?php echo (isset($_SESSION['form_data']['has_secondary_risk']) && $_SESSION['form_data']['has_secondary_risk'] == 'yes') ? 'checked' : ''; ?> onclick="showSecondaryRiskSelection()">
                                         <span style="font-weight: 500;">Yes</span>
                                     </label>
                                     <label class="next-risk-option">
-                                        <input type="radio" name="has_secondary_risk" value="no" onclick="hideSecondaryRiskSelection()">
+                                        <input type="radio" name="has_secondary_risk" value="no" <?php echo (isset($_SESSION['form_data']['has_secondary_risk']) && $_SESSION['form_data']['has_secondary_risk'] == 'no') ? 'checked' : ''; ?> onclick="hideSecondaryRiskSelection()">
                                         <span style="font-weight: 500;">No</span>
                                     </label>
                                 </div>
                             </div>
                             
-                            <!-- Secondary risk selection (initially hidden) -->
-                            <div id="secondary-risk-selection" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+                            <div id="secondary-risk-selection" style="display: <?php echo (isset($_SESSION['form_data']['has_secondary_risk']) && $_SESSION['form_data']['has_secondary_risk'] == 'yes') ? 'block' : 'none'; ?>; margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
                                 <div class="form-group">
                                     <label class="form-label">Risk Categories * <small>(Select one secondary risk)</small></label>
                                     <div class="risk-categories-container" id="secondary-risk-categories">
@@ -2014,139 +2399,125 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                         </div>
                     </div>
                     
-                    <!-- Added Section 2c: GENERAL RISK SCORE -->
                     <div class="form-group">
                         <label class="form-label">c. GENERAL RISK SCORE</label>
                         
-                        <!-- General Inherent Risk Score Display -->
-                        <div style="margin: 20px 0; padding: 20px; background: #fff; border: 2px solid #17a2b8; border-radius: 8px;">
-                            <h5 style="color: #17a2b8; margin-bottom: 15px; font-weight: 600;">General Inherent Risk Score</h5>
-                            <div id="general_inherent_risk_display" class="rating-display" style="margin-top: 15px; font-size: 16px; font-weight: 600; padding: 15px; background: #f8f9fa; border-radius: 4px; text-align: center;">
-                                General Inherent Risk Score will appear here
+                        <div class="risk-score-section general-inherent">
+                            <div class="risk-score-header">
+                                <i class="fas fa-chart-line" style="margin-right: 10px;"></i>
+                                General Inherent Risk Score
                             </div>
-                            <input type="hidden" name="general_inherent_risk_score" id="general_inherent_risk_score">
+                            <div id="general_inherent_risk_display" class="risk-score-display">General Inherent Risk Score will appear here</div>
+                            <input type="hidden" name="general_inherent_risk_score" id="general_inherent_risk_score" value="<?php echo isset($_SESSION['form_data']['general_inherent_risk_score']) ? htmlspecialchars($_SESSION['form_data']['general_inherent_risk_score']) : ''; ?>">
                         </div>
                         
-                        <!-- General Residual Risk Score Display -->
-                        <div style="margin: 20px 0; padding: 20px; background: #fff; border: 2px solid #dc3545; border-radius: 8px;">
-                            <h5 style="color: #dc3545; margin-bottom: 15px; font-weight: 600;">General Residual Risk Score</h5>
-                            <div id="general_residual_risk_display" class="rating-display" style="margin-top: 15px; font-size: 16px; font-weight: 600; padding: 15px; background: #f8f9fa; border-radius: 4px; text-align: center;">
-                                General Residual Risk Score will appear here
+                        <div class="risk-score-section general-residual">
+                            <div class="risk-score-header">
+                                <i class="fas fa-chart-pie" style="margin-right: 10px;"></i>
+                                General Residual Risk Score
                             </div>
-                            <input type="hidden" name="general_residual_risk_score" id="general_residual_risk_score">
+                            <div id="general_residual_risk_display" class="risk-score-display">General Residual Risk Score will appear here</div>
+                            <input type="hidden" name="general_residual_risk_score" id="general_residual_risk_score" value="<?php echo isset($_SESSION['form_data']['general_residual_risk_score']) ? htmlspecialchars($_SESSION['form_data']['general_residual_risk_score']) : ''; ?>">
                         </div>
                     </div>
-
-                    <!-- Reordered sections - Section 3 is now General Risk Status -->
+                    
                     <div class="form-section">
-                        <div class="section-header">
-                            <i class="fas fa-chart-line"></i> SECTION 3: GENERAL RISK STATUS
+                        <div class="section-header section-3">
+                            <span class="section-number">3</span>
+                            <i class="fas fa-chart-line"></i> GENERAL RISK STATUS
                         </div>
                         
                         <div class="form-group">
                             <label class="form-label">Overall Risk Status *</label>
                             <select name="general_risk_status" class="form-control" required>
                                 <option value="">Select Status</option>
-                                <option value="Open">Open</option>
-                                <option value="In Progress">In Progress</option>
-                                <option value="Closed">Closed</option>
-                                <option value="On Hold">On Hold</option>
+                                <option value="Open" <?php echo (isset($_SESSION['form_data']['general_risk_status']) && $_SESSION['form_data']['general_risk_status'] == 'Open') ? 'selected' : ''; ?>>Open</option>
+                                <option value="In Progress" <?php echo (isset($_SESSION['form_data']['general_risk_status']) && $_SESSION['form_data']['general_risk_status'] == 'In Progress') ? 'selected' : ''; ?>>In Progress</option>
+                                <option value="Closed" <?php echo (isset($_SESSION['form_data']['general_risk_status']) && $_SESSION['form_data']['general_risk_status'] == 'Closed') ? 'selected' : ''; ?>>Closed</option>
+                                <option value="On Hold" <?php echo (isset($_SESSION['form_data']['general_risk_status']) && $_SESSION['form_data']['general_risk_status'] == 'On Hold') ? 'selected' : ''; ?>>On Hold</option>
                             </select>
                         </div>
                     </div>
-
-                    <!-- Replaced treatment section with exact implementation from manage-risk.php -->
-                    <!-- Section 4 is now Risk Treatments with treatment management subsection -->
+                    
                     <div class="form-section">
-                        <div class="section-header">
-                            <i class="fas fa-cogs"></i> SECTION 4: RISK TREATMENTS
+                        <div class="section-header section-4">
+                            <span class="section-number">4</span>
+                            <i class="fas fa-cogs"></i> RISK TREATMENTS
                         </div>
-
-                        <!-- Section 4: Risk Treatment Methods -->
-                        <div class="form-section">
-                            <div class="section-header">
-                                <h3><i class="fas fa-shield-alt"></i> Section 4: Risk Treatment Methods</h3>
-                                <p>Define how this risk will be managed and mitigated</p>
-                            </div>
-
-                            <div class="treatments-container">
-                                <?php if (empty($treatments)): ?>
-                                    <div class="empty-treatments">
-                                        <div class="empty-icon">
-                                            <i class="fas fa-plus-circle"></i>
-                                        </div>
-                                        <h4>No Treatment Methods Added</h4>
-                                        <p>Add your first treatment method to begin risk mitigation planning</p>
-                                        <button type="button" class="btn btn-info" onclick="openAddTreatmentModal()">
-                                            <i class="fas fa-plus"></i> Add First Treatment Method
-                                        </button>
+                        
+                        <div class="treatments-container" id="treatments-container">
+                            <?php if (empty($treatments)): ?>
+                                <div class="empty-treatments">
+                                    <div class="empty-icon">
+                                        <i class="fas fa-plus-circle"></i>
                                     </div>
-                                <?php else: ?>
-                                    <div class="treatments-grid">
-                                        <?php foreach ($treatments as $treatment): ?>
-                                            <div class="treatment-card">
-                                                <div class="treatment-header">
-                                                    <h4><?php echo htmlspecialchars($treatment['treatment_title']); ?></h4>
-                                                    <span class="status-badge status-<?php echo $treatment['status']; ?>">
-                                                        <?php echo ucfirst($treatment['status']); ?>
-                                                    </span>
-                                                </div>
-                                                
-                                                <div class="treatment-meta">
-                                                    <div class="meta-item">
-                                                        <i class="fas fa-user"></i>
-                                                        <span>Assigned to: <?php echo htmlspecialchars($treatment['assigned_user_name']); ?></span>
-                                                    </div>
-                                                    
-                                                    <?php if (!empty($treatment['target_completion_date'])): ?>
-                                                        <div class="meta-item">
-                                                            <i class="fas fa-calendar"></i>
-                                                            <span>Target: <?php echo date('M j, Y', strtotime($treatment['target_completion_date'])); ?></span>
-                                                        </div>
-                                                    <?php endif; ?>
-                                                    
-                                                    <?php if (!empty($treatment['files'])): ?>
-                                                        <div class="meta-item">
-                                                            <i class="fas fa-paperclip"></i>
-                                                            <span><?php echo count($treatment['files']); ?> file(s) attached</span>
-                                                        </div>
-                                                    <?php endif; ?>
-                                                </div>
-                                                
-                                                <div class="treatment-description">
-                                                    <?php 
-                                                    $description = $treatment['treatment_description'];
-                                                    echo htmlspecialchars(strlen($description) > 100 ? substr($description, 0, 100) . '...' : $description);
-                                                    ?>
-                                                </div>
-                                                
-                                                <div class="treatment-actions">
-                                                    <!-- Changed to simple link to avoid form nesting issues -->
-                                                    <a href="<?php echo $_SERVER['PHP_SELF']; ?>?remove_treatment=1&treatment_id=<?php echo urlencode($treatment['id']); ?>" 
-                                                       class="btn btn-danger btn-sm" 
-                                                       onclick="return confirm('Are you sure you want to remove this treatment?');">
-                                                        <i class="fas fa-trash"></i> Remove
-                                                    </a>
-                                                </div>
+                                    <h4>No Treatment Methods Added</h4>
+                                    <p>Add your first treatment method to begin risk mitigation planning</p>
+                                    <button type="button" class="btn btn-info" onclick="openAddTreatmentModal()">
+                                        <i class="fas fa-plus"></i> Add First Treatment Method
+                                    </button>
+                                </div>
+                            <?php else: ?>
+                                <div class="treatments-grid" id="treatments-grid">
+                                    <?php foreach ($treatments as $treatment): ?>
+                                        <div class="treatment-card" id="treatment-<?php echo htmlspecialchars($treatment['id']); ?>">
+                                            <div class="treatment-header">
+                                                <h4><?php echo htmlspecialchars($treatment['treatment_title']); ?></h4>
+                                                <span class="status-badge status-<?php echo $treatment['status']; ?>">
+                                                    <?php echo ucfirst($treatment['status']); ?>
+                                                </span>
                                             </div>
-                                        <?php endforeach; ?>
-                                    </div>
-                                    
-                                    <div style="text-align: center; margin-top: 2rem;">
-                                        <button type="button" class="btn btn-info" onclick="openAddTreatmentModal()">
-                                            <i class="fas fa-plus"></i> Add Another Treatment Method
-                                        </button>
-                                    </div>
-                                <?php endif; ?>
-                            </div>
+                                            
+                                            <div class="treatment-meta">
+                                                <div class="meta-item">
+                                                    <i class="fas fa-user"></i>
+                                                    <span>Assigned to: <?php echo htmlspecialchars($treatment['assigned_user_name']); ?></span>
+                                                </div>
+                                                
+                                                <?php if (!empty($treatment['target_completion_date'])): ?>
+                                                    <div class="meta-item">
+                                                        <i class="fas fa-calendar"></i>
+                                                        <span>Target: <?php echo date('M j, Y', strtotime($treatment['target_completion_date'])); ?></span>
+                                                    </div>
+                                                <?php endif; ?>
+                                                
+                                                <?php if (!empty($treatment['files'])): ?>
+                                                    <div class="meta-item">
+                                                        <i class="fas fa-paperclip"></i>
+                                                        <span><?php echo count($treatment['files']); ?> file(s) attached</span>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </div>
+                                            
+                                            <div class="treatment-description">
+                                                <?php 
+                                                $description = $treatment['treatment_description'];
+                                                echo htmlspecialchars(strlen($description) > 100 ? substr($description, 0, 100) . '...' : $description);
+                                                ?>
+                                            </div>
+                                            
+                                            <div class="treatment-actions">
+                                                <a href="<?php echo $_SERVER['PHP_SELF']; ?>?remove_treatment=1&treatment_id=<?php echo urlencode($treatment['id']); ?>" 
+                                                   class="btn btn-danger btn-sm" 
+                                                   onclick="return confirm('Are you sure you want to remove this treatment?');">
+                                                    <i class="fas fa-trash"></i> Remove
+                                                </a>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                                
+                                <div style="text-align: center; margin-top: 2rem;">
+                                    <button type="button" class="btn btn-info" onclick="openAddTreatmentModal()">
+                                        <i class="fas fa-plus"></i> Add Another Treatment Method
+                                    </button>
+                                </div>
+                            <?php endif; ?>
                         </div>
                     </div>
-
-                    <!-- Added treatment modals from manage-risk.php -->
+                    
                     <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 2rem;">
-                        <!-- Separate form for cancel button to avoid main form validation -->
                         <form method="POST" style="display: inline;">
-                            <!-- Added JavaScript to clear all form fields before submission -->
                             <button type="button" class="btn btn-secondary" onclick="clearEntireForm()">Cancel</button>
                         </form>
                         <button type="submit" name="submit_risk" class="btn">
@@ -2157,7 +2528,7 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             </div>
         </div>
     </div>
-
+    
     <!-- Add Treatment Modal -->
     <div id="addTreatmentModal" class="modal">
         <div class="modal-content">
@@ -2166,17 +2537,15 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                 <button type="button" class="close" onclick="closeAddTreatmentModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <form method="POST" enctype="multipart/form-data" id="addTreatmentForm">
+                <form method="POST" enctype="multipart/form-data" id="addTreatmentForm" onsubmit="return false;">
                     <div class="form-group">
                         <label for="treatment_title">Treatment Title <span class="required">*</span></label>
                         <input type="text" id="treatment_title" name="treatment_title" class="form-control" required placeholder="e.g., Implement Security Controls">
                     </div>
-
                     <div class="form-group">
                         <label for="treatment_description">Treatment Description <span class="required">*</span></label>
                         <textarea id="treatment_description" name="treatment_description" class="form-control" required placeholder="Describe the specific treatment approach and actions to be taken..."></textarea>
                     </div>
-
                     <div class="form-group">
                         <label for="assigned_to">Assign To</label>
                         <div class="user-search-container">
@@ -2188,12 +2557,10 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                             Currently assigned to: <strong id="selected_user_display"><?php echo htmlspecialchars($user['full_name']); ?> (You)</strong>
                         </small>
                     </div>
-
                     <div class="form-group">
                         <label for="treatment_target_date">Target Completion Date</label>
                         <input type="date" id="treatment_target_date" name="treatment_target_date" class="form-control">
                     </div>
-
                     <div class="form-group">
                         <label for="treatment_files">Supporting Documents</label>
                         <div class="file-upload-area" onclick="document.getElementById('treatment_files').click()">
@@ -2206,7 +2573,6 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
                             <input type="file" id="treatment_files" name="treatment_files[]" multiple style="display: none;" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png">
                         </div>
                     </div>
-
                     <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 2rem;">
                         <button type="button" class="btn btn-secondary" onclick="closeAddTreatmentModal()">Cancel</button>
                         <button type="submit" name="add_treatment" class="btn btn-info">
@@ -2217,84 +2583,38 @@ $all_notifications = getNotifications($db, $_SESSION['user_id']);
             </div>
         </div>
     </div>
-
-    <!-- Update Treatment Modal -->
-    <div id="updateTreatmentModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">Update Treatment Progress</h3>
-                <button type="button" class="close" onclick="closeUpdateTreatmentModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <form method="POST" enctype="multipart/form-data" id="updateTreatmentForm">
-                    <input type="hidden" id="update_treatment_id" name="treatment_id">
-
-                    <div class="form-group">
-                        <label>Treatment Title</label>
-                        <div id="update_treatment_title_display" class="readonly-display"></div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="treatment_status">Status</label>
-                        <select id="treatment_status" name="treatment_status" class="form-control">
-                            <option value="pending">Pending</option>
-                            <option value="in_progress">In Progress</option>
-                            <option value="completed">Completed</option>
-                            <option value="cancelled">Cancelled</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="progress_notes">Progress Notes</label>
-                        <textarea id="progress_notes" name="progress_notes" class="form-control" placeholder="Add progress updates, challenges, or completion notes..."></textarea>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="treatment_update_files">Additional Documents</label>
-                        <div class="file-upload-area" onclick="document.getElementById('treatment_update_files').click()">
-                            <div class="upload-icon">
-                                <i class="fas fa-chart-bar"></i>
-                            </div>
-                            <h4>Upload Progress Evidence</h4>
-                            <p>Reports, screenshots, certificates, or other progress documentation</p>
-                            <small>Evidence of progress, completion certificates, reports, etc.</small>
-                            <input type="file" id="treatment_update_files" name="treatment_update_files[]" multiple style="display: none;" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png">
-                        </div>
-                    </div>
-
-                    <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 2rem;">
-                        <button type="button" class="btn btn-secondary" onclick="closeUpdateTreatmentModal()">Cancel</button>
-                        <button type="submit" name="update_treatment" class="btn btn-info">
-                            <i class="fas fa-save"></i> Update Treatment
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <script>
-function confirmRemoveTreatment() {
-    return true; // Allow immediate removal
-}
-
-function confirmCancelRisk() {
-    return confirm('Are you sure you want to cancel? All risk treatments will be lost.');
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('Risk form JavaScript loaded');
     
-    // Track form submissions for debugging
-    const forms = document.querySelectorAll('form');
-    forms.forEach(form => {
-        form.addEventListener('submit', function(e) {
-            console.log('Form submitted:', this);
+    <!-- Toast Notification Container -->
+    <div class="toast-container" id="toast-container"></div>
+    
+    <!-- AJAX Loading Spinner -->
+    <div class="ajax-loading" id="ajax-loading">
+        <div class="spinner"></div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if we need to show success toast
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('success') === '1') {
+                showToast('Treatment method added successfully!');
+                
+                // Remove the success parameter from URL to prevent toast showing on refresh
+                const newUrl = window.location.pathname;
+                window.history.replaceState({}, document.title, newUrl);
+            }
+            
+            // Check for session toast message
+            <?php if (isset($_SESSION['toast_message'])): ?>
+                showToast("<?php echo addslashes($_SESSION['toast_message']); ?>");
+                <?php unset($_SESSION['toast_message']); ?>
+            <?php endif; ?>
+            
+            // Restore form state if available
+            restoreFormState();
         });
-    });
-});
+        
         const riskOwners = <?php echo json_encode($risk_owners); ?>;
-
         let selectedRisks = [];
         let currentSecondaryRiskIndex = 0;
         
@@ -2311,27 +2631,22 @@ document.addEventListener('DOMContentLoaded', function() {
             { value: 'IT', display: 'IT (Cybersecurity & Data Privacy)' },
             { value: 'Other', display: 'Other' }
         ];
-
+        
         // Enhanced file upload handling
         document.addEventListener('DOMContentLoaded', function() {
             const fileInputs = document.querySelectorAll('input[type="file"]');
-
             fileInputs.forEach(input => {
                 input.addEventListener('change', function() {
                     const files = this.files;
                     const uploadArea = this.parentElement;
-
                     if (files.length > 0) {
                         let fileNames = [];
                         let totalSize = 0;
-
                         for (let i = 0; i < files.length; i++) {
                             fileNames.push(files[i].name);
                             totalSize += files[i].size;
                         }
-
                         const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(2);
-
                         uploadArea.innerHTML = `
                             <div class="upload-icon">
                                 <i class="fas fa-check-circle" style="color: #28a745;"></i>
@@ -2340,7 +2655,6 @@ document.addEventListener('DOMContentLoaded', function() {
                             <p style="font-size: 0.9rem; color: #666; margin: 0.5rem 0;">${fileNames.join(', ')}</p>
                             <small style="color: #999;">Total size: ${totalSizeMB} MB • Click to change files</small>
                         `;
-
                         uploadArea.style.transform = 'scale(1.02)';
                         setTimeout(() => {
                             uploadArea.style.transform = 'scale(1)';
@@ -2348,58 +2662,48 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 });
             });
-
+            
             // Enhanced drag and drop functionality
             const uploadAreas = document.querySelectorAll('.file-upload-area');
-
             uploadAreas.forEach(area => {
                 area.addEventListener('dragover', function(e) {
                     e.preventDefault();
                     this.classList.add('dragover');
                 });
-
                 area.addEventListener('dragleave', function(e) {
                     e.preventDefault();
                     this.classList.remove('dragover');
                 });
-
                 area.addEventListener('drop', function(e) {
                     e.preventDefault();
-                    this.classList.remove('dragover');
-
                     const fileInput = this.querySelector('input[type="file"]');
                     fileInput.files = e.dataTransfer.files;
-
                     const event = new Event('change', { bubbles: true });
                     fileInput.dispatchEvent(event);
                 });
             });
-
+            
             // User search functionality
             const userSearchInput = document.getElementById('user_search');
             const userDropdown = document.getElementById('user_dropdown');
             const assignedToInput = document.getElementById('assigned_to');
             const selectedUserDisplay = document.getElementById('selected_user_display');
-
             if (userSearchInput) {
                 userSearchInput.addEventListener('input', function() {
                     const searchTerm = this.value.toLowerCase();
-
                     if (searchTerm.length < 2) {
                         userDropdown.classList.remove('show');
                         return;
                     }
-
                     const filteredUsers = riskOwners.filter(user =>
                         user.full_name.toLowerCase().includes(searchTerm) ||
-                        user.department.toLowerCase().includes(searchTerm)
+                        (user.department && user.department.toLowerCase().includes(searchTerm))
                     );
-
                     if (filteredUsers.length > 0) {
                         userDropdown.innerHTML = filteredUsers.map(user => `
-                            <div class="user-option" onclick="selectUser(${user.id}, '${user.full_name}', '${user.department}')">
+                            <div class="user-option" onclick="selectUser(${user.id}, '${user.full_name.replace(/'/g, "\\'")}', '${user.department ? user.department.replace(/'/g, "\\'") : 'Unknown'}')">
                                 <div class="user-name">${user.full_name}</div>
-                                <div class="user-dept">${user.department}</div>
+                                <div class="user-dept">${user.department || 'Unknown Department'}</div>
                             </div>
                         `).join('');
                         userDropdown.classList.add('show');
@@ -2408,14 +2712,13 @@ document.addEventListener('DOMContentLoaded', function() {
                         userDropdown.classList.add('show');
                     }
                 });
-
                 userSearchInput.addEventListener('blur', function() {
                     setTimeout(() => {
                         userDropdown.classList.remove('show');
                     }, 200);
                 });
             }
-
+            
             // Add event listeners to primary risk category radio buttons
             const riskCategoryRadios = document.querySelectorAll('input[name="risk_categories"]');
             riskCategoryRadios.forEach(radio => {
@@ -2428,60 +2731,186 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 });
             });
+            
+            // AJAX form submission for treatment
+            const treatmentForm = document.getElementById('addTreatmentForm');
+            if (treatmentForm) {
+                treatmentForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    // Show loading spinner
+                    document.getElementById('ajax-loading').classList.add('show');
+                    
+                    const formData = new FormData(this);
+                    
+                    // Add AJAX flag
+                    formData.append('add_treatment_ajax', '1');
+                    
+                    fetch('<?php echo $_SERVER['PHP_SELF']; ?>', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        // Hide loading spinner
+                        document.getElementById('ajax-loading').classList.remove('show');
+                        
+                        if (data.success) {
+                            // Close the modal
+                            closeAddTreatmentModal();
+                            
+                            // Show success message
+                            showToast(data.message);
+                            
+                            // Add the new treatment to the list
+                            addTreatmentToUI(data.treatment);
+                        } else {
+                            // Show error message
+                            showToast(data.message, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        // Hide loading spinner
+                        document.getElementById('ajax-loading').classList.remove('show');
+                        
+                        // Show error message
+                        showToast('An error occurred while adding the treatment.', 'error');
+                        console.error('Error:', error);
+                    });
+                });
+            }
         });
-
+        
+        function addTreatmentToUI(treatment) {
+            const treatmentsContainer = document.getElementById('treatments-container');
+            const treatmentsGrid = document.getElementById('treatments-grid');
+            
+            // Check if this is the first treatment
+            if (treatmentsContainer.querySelector('.empty-treatments')) {
+                // Replace empty treatments message with treatments grid
+                treatmentsContainer.innerHTML = `
+                    <div class="treatments-grid" id="treatments-grid">
+                        <!-- Treatment cards will be added here -->
+                    </div>
+                    <div style="text-align: center; margin-top: 2rem;">
+                        <button type="button" class="btn btn-info" onclick="openAddTreatmentModal()">
+                            <i class="fas fa-plus"></i> Add Another Treatment Method
+                        </button>
+                    </div>
+                `;
+            }
+            
+            // Create treatment card HTML
+            const treatmentCard = document.createElement('div');
+            treatmentCard.className = 'treatment-card';
+            treatmentCard.id = `treatment-${treatment.id}`;
+            
+            // Format target date if available
+            let targetDateHtml = '';
+            if (treatment.target_completion_date) {
+                const date = new Date(treatment.target_completion_date);
+                const formattedDate = date.toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: 'short', 
+                    day: 'numeric' 
+                });
+                targetDateHtml = `
+                    <div class="meta-item">
+                        <i class="fas fa-calendar"></i>
+                        <span>Target: ${formattedDate}</span>
+                    </div>
+                `;
+            }
+            
+            // Format files count if available
+            let filesHtml = '';
+            if (treatment.files && treatment.files.length > 0) {
+                filesHtml = `
+                    <div class="meta-item">
+                        <i class="fas fa-paperclip"></i>
+                        <span>${treatment.files.length} file(s) attached</span>
+                    </div>
+                `;
+            }
+            
+            // Truncate description if too long
+            let description = treatment.treatment_description;
+            if (description.length > 100) {
+                description = description.substring(0, 100) + '...';
+            }
+            
+            // Set card HTML
+            treatmentCard.innerHTML = `
+                <div class="treatment-header">
+                    <h4>${treatment.treatment_title}</h4>
+                    <span class="status-badge status-${treatment.status}">
+                        ${treatment.status.charAt(0).toUpperCase() + treatment.status.slice(1)}
+                    </span>
+                </div>
+                
+                <div class="treatment-meta">
+                    <div class="meta-item">
+                        <i class="fas fa-user"></i>
+                        <span>Assigned to: ${treatment.assigned_user_name}</span>
+                    </div>
+                    ${targetDateHtml}
+                    ${filesHtml}
+                </div>
+                
+                <div class="treatment-description">
+                    ${description}
+                </div>
+                
+                <div class="treatment-actions">
+                    <a href="?remove_treatment=1&treatment_id=${encodeURIComponent(treatment.id)}" 
+                       class="btn btn-danger btn-sm" 
+                       onclick="return confirm('Are you sure you want to remove this treatment?');">
+                        <i class="fas fa-trash"></i> Remove
+                    </a>
+                </div>
+            `;
+            
+            // Add card to treatments grid
+            document.getElementById('treatments-grid').appendChild(treatmentCard);
+            
+            // Add animation effect
+            treatmentCard.style.opacity = '0';
+            treatmentCard.style.transform = 'translateY(20px)';
+            
+            setTimeout(() => {
+                treatmentCard.style.transition = 'opacity 0.3s, transform 0.3s';
+                treatmentCard.style.opacity = '1';
+                treatmentCard.style.transform = 'translateY(0)';
+            }, 100);
+        }
+        
         function selectUser(userId, userName, userDept) {
             document.getElementById('assigned_to').value = userId;
             document.getElementById('user_search').value = userName;
             document.getElementById('selected_user_display').textContent = `${userName} (${userDept})`;
             document.getElementById('user_dropdown').classList.remove('show');
         }
-
+        
         // Treatment Modal Functions
         function openAddTreatmentModal() {
             document.getElementById('addTreatmentModal').classList.add('show');
             document.body.style.overflow = 'hidden';
         }
-
+        
         function closeAddTreatmentModal() {
             document.getElementById('addTreatmentModal').classList.remove('show');
             document.body.style.overflow = 'auto';
             document.getElementById('addTreatmentForm').reset();
         }
-
-        function openUpdateTreatmentModal(treatmentId, title, status, progressNotes) {
-            document.getElementById('update_treatment_id').value = treatmentId;
-            document.getElementById('update_treatment_title_display').textContent = title;
-            document.getElementById('treatment_status').value = status;
-            document.getElementById('progress_notes').value = progressNotes || '';
-            document.getElementById('updateTreatmentModal').classList.add('show');
-            document.body.style.overflow = 'hidden';
-        }
-
-        function closeUpdateTreatmentModal() {
-            document.getElementById('updateTreatmentModal').classList.remove('show');
-            document.body.style.overflow = 'auto';
-            document.getElementById('updateTreatmentForm').reset();
-        }
-
-        function reassignTreatment(treatmentId) {
-            // Implementation for reassigning treatment
-            alert('Reassignment functionality to be implemented');
-        }
-
+        
         // Close modals when clicking outside
         window.addEventListener('click', function(event) {
             const addModal = document.getElementById('addTreatmentModal');
-            const updateModal = document.getElementById('updateTreatmentModal');
             
             if (event.target === addModal) {
                 closeAddTreatmentModal();
             }
-            if (event.target === updateModal) {
-                closeUpdateTreatmentModal();
-            }
         });
-
         
         function toggleMoneyAmount(radio) {
             var moneyAmountSection = document.getElementById('money-amount-section');
@@ -2492,25 +2921,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         
-        function selectLikelihood(element, value) {
-            document.querySelectorAll('.likelihood-box').forEach(box => {
-                box.style.border = '3px solid transparent';
-            });
-            element.style.border = '3px solid #E60012';
-            document.getElementById('likelihood_value').value = value;
-            calculateRiskRating();
-        }
-        
-        function selectImpact(element, value) {
-            console.log("Impact selected:", value);
-            document.querySelectorAll('.impact-box').forEach(box => {
-                box.style.border = '3px solid transparent';
-            });
-            element.style.border = '3px solid #E60012';
-            document.getElementById('inherent_impact_value').value = value;
-            calculateInherentRiskRating();
-        }
-
         function selectInherentLikelihood(element, value) {
             document.querySelectorAll('.likelihood-box').forEach(box => {
                 box.style.border = '3px solid transparent';
@@ -2528,7 +2938,7 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('inherent_impact_value').value = value;
             calculateInherentRiskRating();
         }
-
+        
         function calculateInherentRiskRating() {
             var likelihood = document.getElementById('inherent_likelihood_value').value;
             var impact = document.getElementById('inherent_impact_value').value;
@@ -2549,7 +2959,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateRiskSummary(inherentRating, residualRating);
             }
         }
-
+        
         function displayInherentRiskRating(rating) {
             var display = document.getElementById('inherent_risk_display');
             var ratingText = '';
@@ -2573,13 +2983,8 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             display.textContent = 'Inherent Risk Rating: ' + ratingText;
-            display.style.padding = '10px';
-            display.style.borderRadius = '4px';
-            display.style.fontWeight = 'bold';
-            display.style.textAlign = 'center';
-            display.style.fontStyle = 'normal';
         }
-
+        
         function displayResidualRiskRating(rating) {
             var display = document.getElementById('residual_risk_display');
             var ratingText = '';
@@ -2603,14 +3008,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             display.textContent = 'Residual Risk Rating: ' + ratingText;
-            display.style.padding = '10px';
-            display.style.borderRadius = '4px';
-            display.style.fontWeight = 'bold';
-            display.style.textAlign = 'center';
             
             calculateGeneralRiskScores();
         }
-
+        
         function updateRiskSummary(inherentRating, residualRating) {
             var summaryDiv = document.getElementById('overall_risk_summary');
             if (summaryDiv) {
@@ -2638,7 +3039,7 @@ document.addEventListener('DOMContentLoaded', function() {
         function getControlAssessmentValue() {
             return 1; // Default value, can be modified later
         }
-
+        
         function calculateGeneralRiskScores() {
             let totalInherentScore = 0;
             let totalResidualScore = 0;
@@ -2665,13 +3066,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
             
-            // Calculate maximum possible score based on number of risks
-            const maxScale = 16 * riskCount;
-            
             // Update displays
             if (riskCount > 0) {
-                displayGeneralInherentRisk(totalInherentScore, maxScale);
-                displayGeneralResidualRisk(totalResidualScore, maxScale);
+                displayGeneralInherentRisk(totalInherentScore);
+                displayGeneralResidualRisk(totalResidualScore);
                 
                 // Store values in hidden inputs
                 document.getElementById('general_inherent_risk_score').value = totalInherentScore;
@@ -2679,66 +3077,51 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         
-        function displayGeneralInherentRisk(score, maxScale) {
+        function displayGeneralInherentRisk(score) {
             const display = document.getElementById('general_inherent_risk_display');
-            const ratingText = getGeneralRiskRating(score, maxScale);
+            const ratingText = getGeneralRiskRating(score);
             
             display.textContent = 'General Inherent Risk Score: ' + ratingText;
-            applyGeneralRiskStyling(display, score, maxScale);
+            applyGeneralRiskStyling(display, score);
         }
         
-        function displayGeneralResidualRisk(score, maxScale) {
+        function displayGeneralResidualRisk(score) {
             const display = document.getElementById('general_residual_risk_display');
-            const ratingText = getGeneralRiskRating(score, maxScale);
+            const ratingText = getGeneralRiskRating(score);
             
             display.textContent = 'General Residual Risk Score: ' + ratingText;
-            applyGeneralRiskStyling(display, score, maxScale);
+            applyGeneralRiskStyling(display, score);
         }
         
-        function getGeneralRiskRating(score, maxScale) {
-            const lowThreshold = Math.floor(maxScale * 3 / 16);
-            const mediumThreshold = Math.floor(maxScale * 7 / 16);
-            const highThreshold = Math.floor(maxScale * 11 / 16);
-            
-            if (score > highThreshold) {
+        function getGeneralRiskRating(score) {
+            if (score >= 12) {
                 return 'CRITICAL (' + score + ')';
-            } else if (score > mediumThreshold) {
+            } else if (score >= 8) {
                 return 'HIGH (' + score + ')';
-            } else if (score > lowThreshold) {
+            } else if (score >= 4) {
                 return 'MEDIUM (' + score + ')';
             } else {
                 return 'LOW (' + score + ')';
             }
         }
         
-        function applyGeneralRiskStyling(display, score, maxScale) {
-            const lowThreshold = Math.floor(maxScale * 3 / 16);
-            const mediumThreshold = Math.floor(maxScale * 7 / 16);
-            const highThreshold = Math.floor(maxScale * 11 / 16);
-            
-            if (score > highThreshold) {
+        function applyGeneralRiskStyling(display, score) {
+            if (score >= 12) {
                 display.style.backgroundColor = '#ff4444';
                 display.style.color = 'white';
-            } else if (score > mediumThreshold) {
+            } else if (score >= 8) {
                 display.style.backgroundColor = '#ff8800';
                 display.style.color = 'white';
-            } else if (score > lowThreshold) {
+            } else if (score >= 4) {
                 display.style.backgroundColor = '#ffdd00';
                 display.style.color = 'black';
             } else {
                 display.style.backgroundColor = '#88dd88';
                 display.style.color = 'black';
             }
-            
-            display.style.padding = '10px';
-            display.style.borderRadius = '4px';
-            display.style.fontWeight = 'bold';
-            display.style.textAlign = 'center';
         }
         
         function showSecondaryRiskSelection() {
-            console.log("showSecondaryRiskSelection called");
-            
             if (selectedRisks.length === 0) {
                 alert("Please select a primary risk first before adding secondary risks.");
                 // Reset the radio button to "No" since we're not showing the secondary selection
@@ -2755,32 +3138,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateSecondaryRiskCategories();
             }
         }
-
+        
         function hideSecondaryRiskSelection() {
-            console.log("hideSecondaryRiskSelection called");
             const secondaryRiskSelection = document.getElementById('secondary-risk-selection');
             if (secondaryRiskSelection) {
                 secondaryRiskSelection.style.display = 'none';
             }
         }
-
+        
         function updateSecondaryRiskCategories() {
-            console.log("updateSecondaryRiskCategories called, selectedRisks:", selectedRisks);
             const container = document.getElementById('secondary-risk-categories');
             if (!container) return;
-
+            
             // Filter out already selected risks
             const availableCategories = allRiskCategories.filter(category => 
                 !selectedRisks.includes(category.value)
             );
-
-            console.log("Available categories:", availableCategories);
-
+            
             if (availableCategories.length === 0) {
                 container.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;">All risk categories have been selected.</p>';
                 return;
             }
-
+            
             // Generate category options
             container.innerHTML = availableCategories.map(category => `
                 <div class="category-item" data-value="${category.value}">
@@ -2791,10 +3170,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
             `).join('');
         }
-
+        
         function selectSecondaryRisk(value, displayText) {
-            console.log("selectSecondaryRisk called with:", value, displayText);
-            
             // Add to selected risks
             selectedRisks.push(value);
             currentSecondaryRiskIndex++;
@@ -2811,10 +3188,8 @@ document.addEventListener('DOMContentLoaded', function() {
             
             document.getElementById('initial-secondary-question').style.display = 'block';
         }
-
+        
         function createSecondaryRiskAssessment(riskValue, riskDisplay, riskIndex) {
-            console.log("createSecondaryRiskAssessment called for:", riskValue, riskIndex);
-            
             const container = document.getElementById('secondary-risks-container');
             const romanNumerals = ['', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x', 'xi'];
             const romanNumeral = romanNumerals[riskIndex] || `risk_${riskIndex}`;
@@ -2873,6 +3248,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                         3. Not expected to happen for sometime
                                     </div>
                                 </div>
+                                
                             </div>
                             <input type="hidden" name="secondary_likelihood_${riskIndex}" id="secondary_likelihood_${riskIndex}" required>
                         </div>
@@ -2897,10 +3273,8 @@ document.addEventListener('DOMContentLoaded', function() {
             // Update impact boxes for this secondary risk
             updateSecondaryImpactBoxes(riskIndex, riskValue);
         }
-
+        
         function selectSecondaryLikelihood(riskIndex, element, value) {
-            console.log("selectSecondaryLikelihood called:", riskIndex, value);
-            
             // Reset all likelihood boxes for this risk
             const likelihoodBoxes = document.querySelectorAll(`#secondary-risk-${riskIndex} .secondary-likelihood-box`);
             likelihoodBoxes.forEach(box => {
@@ -2916,10 +3290,8 @@ document.addEventListener('DOMContentLoaded', function() {
             // Calculate risk rating
             calculateSecondaryRiskRating(riskIndex);
         }
-
+        
         function selectSecondaryImpact(riskIndex, element, value) {
-            console.log("selectSecondaryImpact called:", riskIndex, value);
-            
             // Reset all impact boxes for this risk
             const impactBoxes = document.querySelectorAll(`#secondary-risk-${riskIndex} .secondary-impact-box`);
             impactBoxes.forEach(box => {
@@ -2935,10 +3307,8 @@ document.addEventListener('DOMContentLoaded', function() {
             // Calculate risk rating
             calculateSecondaryRiskRating(riskIndex);
         }
-
+        
         function calculateSecondaryRiskRating(riskIndex) {
-            console.log("calculateSecondaryRiskRating called for:", riskIndex);
-            
             const likelihood = document.getElementById(`secondary_likelihood_${riskIndex}`).value;
             const impact = document.getElementById(`secondary_impact_${riskIndex}`).value;
             
@@ -2948,7 +3318,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 displaySecondaryRiskRating(riskIndex, rating);
             }
         }
-
+        
         function displaySecondaryRiskRating(riskIndex, rating) {
             const display = document.getElementById(`secondary_risk_display_${riskIndex}`);
             const controlAssessment = 1.0; // Default control assessment
@@ -2988,17 +3358,11 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             display.innerHTML = 'Secondary Inherent Risk Rating: ' + inherentRatingText + '<br>Secondary Residual Risk Rating: ' + residualRatingText;
-            display.style.padding = '10px';
-            display.style.borderRadius = '4px';
-            display.style.fontWeight = 'bold';
-            display.style.textAlign = 'center';
             
             calculateGeneralRiskScores();
         }
-
+        
         function updateSecondaryImpactBoxes(riskIndex, categoryName) {
-            console.log("updateSecondaryImpactBoxes called:", riskIndex, categoryName);
-            
             const impacts = impactDefinitions[categoryName];
             if (!impacts) return;
             
@@ -3109,7 +3473,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 minor: { text: 'MINOR\nMinimal operational impact', value: 1 }
             }
         };
-
+        
         function updateRiskCategoryDisplay(categoryName) {
             const header = document.getElementById('selected-risk-category-header');
             const categoryNameSpan = document.getElementById('selected-category-name');
@@ -3119,7 +3483,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 header.style.display = 'block';
             }
         }
-
+        
         function updateImpactBoxes(categoryName) {
             const impacts = impactDefinitions[categoryName];
             if (!impacts) return;
@@ -3159,7 +3523,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return e.returnValue;
             }
         });
-
+        
         function clearEntireForm() {
             if (confirm('Are you sure you want to cancel? All data including risk treatments will be lost.')) {
                 // Clear all text inputs
@@ -3190,13 +3554,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Clear all file inputs
                 document.querySelectorAll('input[type="file"]').forEach(function(fileInput) {
                     fileInput.value = '';
-                });
-                
-                // Clear all hidden inputs (except CSRF tokens if any)
-                document.querySelectorAll('input[type="hidden"]').forEach(function(hidden) {
-                    if (!hidden.name.includes('csrf') && !hidden.name.includes('token')) {
-                        hidden.value = '';
-                    }
                 });
                 
                 // Reset likelihood and impact selections
@@ -3230,7 +3587,85 @@ document.addEventListener('DOMContentLoaded', function() {
                 form.submit();
             }
         }
-
+        
+        // Restore form state from session
+        function restoreFormState() {
+            // Restore money amount section visibility
+            const involvesMoneyLoss = document.querySelector('input[name="involves_money_loss"]:checked');
+            if (involvesMoneyLoss) {
+                toggleMoneyAmount(involvesMoneyLoss);
+            }
+            
+            // Restore risk category display
+            const riskCategory = document.querySelector('input[name="risk_categories"]:checked');
+            if (riskCategory) {
+                updateRiskCategoryDisplay(riskCategory.value);
+                updateImpactBoxes(riskCategory.value);
+            }
+            
+            // Restore secondary risk selection
+            const hasSecondaryRisk = document.querySelector('input[name="has_secondary_risk"]:checked');
+            if (hasSecondaryRisk && hasSecondaryRisk.value === 'yes') {
+                showSecondaryRiskSelection();
+            }
+            
+            // Restore risk ratings
+            const likelihood = document.getElementById('inherent_likelihood_value').value;
+            const impact = document.getElementById('inherent_impact_value').value;
+            if (likelihood && impact) {
+                calculateInherentRiskRating();
+            }
+        }
+        
+        // Toast notification function
+        function showToast(message, type = 'success') {
+            const toastContainer = document.getElementById('toast-container');
+            
+            // Create toast element
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            
+            // Set background color based on type
+            if (type === 'error') {
+                toast.style.backgroundColor = '#dc3545';
+            }
+            
+            // Create toast content
+            toast.innerHTML = `
+                <div class="toast-content">
+                    <i class="fas fa-${type === 'error' ? 'exclamation-circle' : 'check-circle'} toast-icon"></i>
+                    <span class="toast-message">${message}</span>
+                </div>
+                <button class="toast-close">&times;</button>
+            `;
+            
+            // Add toast to container
+            toastContainer.appendChild(toast);
+            
+            // Show toast with animation
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 100);
+            
+            // Add close button functionality
+            const closeBtn = toast.querySelector('.toast-close');
+            closeBtn.addEventListener('click', () => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    toastContainer.removeChild(toast);
+                }, 300);
+            });
+            
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    if (toastContainer.contains(toast)) {
+                        toastContainer.removeChild(toast);
+                    }
+                }, 300);
+            }, 3000);
+        }
     </script>
 </body>
 </html>
