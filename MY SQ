@@ -31,3 +31,36 @@ CREATE TABLE `risk_incidents` (
   KEY `reported_by` (`reported_by`),
   KEY `risk_owner_id` (`risk_owner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+
+
+-- Create departments table
+CREATE TABLE `departments` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `abbreviation` varchar(10) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `name` (`name`),
+  UNIQUE KEY `abbreviation` (`abbreviation`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Insert initial department data
+INSERT INTO `departments` (`name`, `abbreviation`) VALUES
+('Risk and Compliance', 'RC'),
+('Finance', 'FIN'),
+('Information Technology', 'IT'),
+('Information and Technology', 'IT'),
+('IT and Technology', 'IT'),
+('IT & Technology', 'IT'),
+('Human Resources', 'HR'),
+('Operations', 'OPS'),
+('Marketing', 'MKT'),
+('Sales', 'SLS'),
+('Legal', 'LGL'),
+('Customer Service', 'CS'),
+('Research and Development', 'RD'),
+('Quality Assurance', 'QA'),
+('Procurement', 'PRC'),
+('Administration', 'ADM'),
+('General', 'GEN');
