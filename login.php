@@ -73,7 +73,7 @@ $error = '';
 $database = new Database();
 $db = $database->getConnection();
 // Function to create or update user session
-function createUserSession($db, $userId, $email, $fullName, $role, $departmentId, $departmentName) {
+function createUserSession($db, $userId, $email, $fullName, $role, $departmentId, $departmentName, $departmentAbbr) {
     // Get current session ID
     $sessionId = session_id();
     
@@ -196,7 +196,7 @@ function handleFailedLogin($db, $userId, $email) {
         // If this is the max attempt, lock the account
         if ($newFailedAttempts >= $maxAttempts) {
             $unlockAt = (new DateTime())->add(new DateInterval("PT{$lockoutDuration}M"))->format('Y-m-d H:i:s');
-            $updateQuery .= ", is_locked = 1, locked_at = NOW(), unlock_at = :unlock_at";
+            $updateQuery .= ", is_locked = 1, locked_at = NOW(), unlock_at = :unlockAt";
         }
         
         $updateQuery .= " WHERE user_id = :user_id";
@@ -206,7 +206,7 @@ function handleFailedLogin($db, $userId, $email) {
         $updateStmt->bindParam(':failed_attempts', $newFailedAttempts);
         
         if ($newFailedAttempts >= $maxAttempts) {
-            $updateStmt->bindParam(':unlock_at', $unlockAt);
+            $updateStmt->bindParam(':unlockAt', $unlockAt);
         }
         
         $updateStmt->execute();
@@ -251,8 +251,9 @@ if ($_POST) {
     $email = $_POST['email'];
     $password = $_POST['password'];
     
-    // Updated query to include department information
-    $query = "SELECT u.id, u.email, u.password, u.full_name, u.role, u.status, d.name as department_name, u.department_id 
+    // Updated query to include department information and abbreviation
+    $query = "SELECT u.id, u.email, u.password, u.full_name, u.role, u.status, 
+                     d.name as department_name, d.abbreviation as department_abbr, u.department_id 
               FROM users u 
               LEFT JOIN departments d ON u.department_id = d.id 
               WHERE u.email = :email";
@@ -280,16 +281,18 @@ if ($_POST) {
             $resetStmt->bindParam(':user_id', $user['id']);
             $resetStmt->execute();
             
-            // Set session variables including department information
+            // Set session variables including department information and abbreviation
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['email'] = $user['email'];
             $_SESSION['full_name'] = $user['full_name'];
             $_SESSION['role'] = $user['role'];
             $_SESSION['department'] = $user['department_name'] ?? 'General'; // Default to 'General' if null
             $_SESSION['department_id'] = $user['department_id'] ?? 1; // Default to 1 if null
+            $_SESSION['department_abbr'] = $user['department_abbr'] ?? 'GEN'; // Default to 'GEN' if null
             
             // Create or update user session in active_sessions table
-            createUserSession($db, $user['id'], $user['email'], $user['full_name'], $user['role'], $user['department_id'], $user['department_name']);
+            createUserSession($db, $user['id'], $user['email'], $user['full_name'], $user['role'], 
+                              $user['department_id'], $user['department_name'], $user['department_abbr']);
             
             // Log successful login
             $database->logActivity($_SESSION['user_id'], 'Successful Login', 'User ' . $_SESSION['email'] . ' logged in successfully.', $_SERVER['REMOTE_ADDR']);
