@@ -102,7 +102,6 @@ INSERT INTO `users` (`email`, `password`, `full_name`, `role`, `status`, `depart
 ('pending.user@airtel.africa', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', 'Pending User', 'staff', 'pending', 1);
 
 
-
 -- phpMyAdmin SQL Dump
 -- version 5.2.1
 -- https://www.phpmyadmin.net/
@@ -116,18 +115,181 @@ SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 START TRANSACTION;
 SET time_zone = "+00:00";
 
---
 -- Database: `airtel_risk_system`
---
-
 -- --------------------------------------------------------
 
---
--- Table structure for table `system_audit_logs`
---
+-- Table structure for table `departments`
+CREATE TABLE `departments` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `abbreviation` varchar(10) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `name` (`name`),
+  UNIQUE KEY `abbreviation` (`abbreviation`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- Table structure for table `users`
+CREATE TABLE `users` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `email` varchar(255) NOT NULL,
+  `password` varchar(255) NOT NULL,
+  `full_name` varchar(255) NOT NULL,
+  `role` enum('staff','risk_owner','compliance_team','admin') NOT NULL DEFAULT 'staff',
+  `status` enum('approved','pending','suspended') NOT NULL DEFAULT 'pending',
+  `department_id` int(11) DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `email` (`email`),
+  KEY `department_id` (`department_id`),
+  KEY `role` (`role`),
+  KEY `status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `risk_sequences`
+CREATE TABLE `risk_sequences` (
+  `department` varchar(100) NOT NULL,
+  `year_month` varchar(7) NOT NULL,
+  `last_number` int(11) NOT NULL,
+  PRIMARY KEY (`department`, `year_month`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `risk_incidents`
+CREATE TABLE `risk_incidents` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `custom_risk_id` varchar(50) DEFAULT NULL,
+  `risk_name` varchar(255) NOT NULL,
+  `risk_description` text NOT NULL,
+  `cause_of_risk` text DEFAULT NULL,
+  `department` varchar(100) NOT NULL,
+  `department_id` int(11) DEFAULT NULL,
+  `reported_by` int(11) NOT NULL,
+  `risk_owner_id` int(11) NOT NULL,
+  `existing_or_new` enum('New','Existing') NOT NULL,
+  `risk_categories` text DEFAULT NULL,
+  `inherent_likelihood` int(11) DEFAULT NULL,
+  `inherent_consequence` int(11) DEFAULT NULL,
+  `inherent_rating` int(11) DEFAULT NULL,
+  `inherent_risk_level` varchar(50) DEFAULT NULL,
+  `residual_rating` int(11) DEFAULT NULL,
+  `residual_risk_level` varchar(50) DEFAULT NULL,
+  `risk_level` varchar(50) DEFAULT NULL,
+  `general_inherent_risk_score` int(11) DEFAULT NULL,
+  `general_residual_risk_score` int(11) DEFAULT NULL,
+  `general_inherent_risk_level` varchar(50) DEFAULT NULL,
+  `general_residual_risk_level` varchar(50) DEFAULT NULL,
+  `involves_money_loss` enum('yes','no') NOT NULL,
+  `money_amount` decimal(15,2) DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `custom_risk_id` (`custom_risk_id`),
+  KEY `department_id` (`department_id`),
+  KEY `reported_by` (`reported_by`),
+  KEY `risk_owner_id` (`risk_owner_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `risk_documents`
+CREATE TABLE `risk_documents` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `risk_id` int(11) NOT NULL,
+  `section_type` varchar(50) NOT NULL,
+  `original_filename` varchar(255) NOT NULL,
+  `stored_filename` varchar(255) NOT NULL,
+  `file_path` varchar(255) NOT NULL,
+  `file_size` int(11) NOT NULL,
+  `document_content` longblob DEFAULT NULL,
+  `mime_type` varchar(100) DEFAULT NULL,
+  `uploaded_by` int(11) NOT NULL,
+  `uploaded_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `risk_id` (`risk_id`),
+  KEY `uploaded_by` (`uploaded_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `risk_treatments`
+CREATE TABLE `risk_treatments` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `risk_id` int(11) NOT NULL,
+  `treatment_title` varchar(255) NOT NULL,
+  `treatment_description` text NOT NULL,
+  `assigned_to` int(11) NOT NULL,
+  `target_completion_date` date DEFAULT NULL,
+  `status` enum('pending','in_progress','completed','cancelled') NOT NULL DEFAULT 'pending',
+  `created_by` int(11) NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `risk_id` (`risk_id`),
+  KEY `assigned_to` (`assigned_to`),
+  KEY `created_by` (`created_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `treatment_documents`
+CREATE TABLE `treatment_documents` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `treatment_id` int(11) NOT NULL,
+  `original_filename` varchar(255) NOT NULL,
+  `file_path` varchar(255) NOT NULL,
+  `file_size` int(11) NOT NULL,
+  `file_type` varchar(100) NOT NULL,
+  `uploaded_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `treatment_id` (`treatment_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `active_sessions`
+CREATE TABLE `active_sessions` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `session_id` varchar(255) NOT NULL,
+  `user_email` varchar(255) NOT NULL,
+  `user_name` varchar(255) NOT NULL,
+  `user_role` varchar(50) NOT NULL,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `user_agent` text DEFAULT NULL,
+  `login_time` datetime NOT NULL,
+  `last_activity` datetime NOT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1,
+  `logout_time` datetime DEFAULT NULL,
+  `session_data` text DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `session_id` (`session_id`),
+  KEY `user_id` (`user_id`),
+  KEY `is_active` (`is_active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `account_lockouts`
+CREATE TABLE `account_lockouts` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `user_email` varchar(255) NOT NULL,
+  `failed_attempts` int(11) NOT NULL DEFAULT 0,
+  `is_locked` tinyint(1) NOT NULL DEFAULT 0,
+  `locked_at` datetime DEFAULT NULL,
+  `unlock_at` datetime DEFAULT NULL,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `user_id` (`user_id`),
+  KEY `is_locked` (`is_locked`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `security_settings`
+CREATE TABLE `security_settings` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `setting_name` varchar(100) NOT NULL,
+  `setting_value` text NOT NULL,
+  `description` text DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `setting_name` (`setting_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for table `system_audit_logs`
 CREATE TABLE `system_audit_logs` (
-  `id` int(11) NOT NULL,
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `timestamp` datetime NOT NULL DEFAULT current_timestamp(),
   `user` varchar(255) NOT NULL,
   `action` varchar(255) NOT NULL,
@@ -137,29 +299,137 @@ CREATE TABLE `system_audit_logs` (
   `user_id` int(11) DEFAULT NULL,
   `resolved` tinyint(1) DEFAULT 0,
   `resolved_at` timestamp NULL DEFAULT NULL,
-  `resolved_by` int(11) DEFAULT NULL
+  `resolved_by` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `timestamp` (`timestamp`),
+  KEY `user` (`user`),
+  KEY `action` (`action`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
---
--- Indexes for dumped tables
---
+-- Foreign Key Constraints
+ALTER TABLE `users`
+  ADD CONSTRAINT `fk_users_department` 
+  FOREIGN KEY (`department_id`) 
+  REFERENCES `departments` (`id`) 
+  ON DELETE SET NULL 
+  ON UPDATE CASCADE;
 
---
--- Indexes for table `system_audit_logs`
---
+ALTER TABLE `risk_incidents`
+  ADD CONSTRAINT `fk_risk_incidents_department` 
+  FOREIGN KEY (`department_id`) 
+  REFERENCES `departments` (`id`) 
+  ON DELETE SET NULL 
+  ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_risk_incidents_reported_by` 
+  FOREIGN KEY (`reported_by`) 
+  REFERENCES `users` (`id`) 
+  ON DELETE CASCADE 
+  ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_risk_incidents_risk_owner` 
+  FOREIGN KEY (`risk_owner_id`) 
+  REFERENCES `users` (`id`) 
+  ON DELETE CASCADE 
+  ON UPDATE CASCADE;
+
+ALTER TABLE `risk_documents`
+  ADD CONSTRAINT `fk_risk_documents_risk` 
+  FOREIGN KEY (`risk_id`) 
+  REFERENCES `risk_incidents` (`id`) 
+  ON DELETE CASCADE 
+  ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_risk_documents_uploaded_by` 
+  FOREIGN KEY (`uploaded_by`) 
+  REFERENCES `users` (`id`) 
+  ON DELETE CASCADE 
+  ON UPDATE CASCADE;
+
+ALTER TABLE `risk_treatments`
+  ADD CONSTRAINT `fk_risk_treatments_risk` 
+  FOREIGN KEY (`risk_id`) 
+  REFERENCES `risk_incidents` (`id`) 
+  ON DELETE CASCADE 
+  ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_risk_treatments_assigned_to` 
+  FOREIGN KEY (`assigned_to`) 
+  REFERENCES `users` (`id`) 
+  ON DELETE CASCADE 
+  ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_risk_treatments_created_by` 
+  FOREIGN KEY (`created_by`) 
+  REFERENCES `users` (`id`) 
+  ON DELETE CASCADE 
+  ON UPDATE CASCADE;
+
+ALTER TABLE `treatment_documents`
+  ADD CONSTRAINT `fk_treatment_documents_treatment` 
+  FOREIGN KEY (`treatment_id`) 
+  REFERENCES `risk_treatments` (`id`) 
+  ON DELETE CASCADE 
+  ON UPDATE CASCADE;
+
+ALTER TABLE `active_sessions`
+  ADD CONSTRAINT `fk_active_sessions_user` 
+  FOREIGN KEY (`user_id`) 
+  REFERENCES `users` (`id`) 
+  ON DELETE CASCADE 
+  ON UPDATE CASCADE;
+
+ALTER TABLE `account_lockouts`
+  ADD CONSTRAINT `fk_account_lockouts_user` 
+  FOREIGN KEY (`user_id`) 
+  REFERENCES `users` (`id`) 
+  ON DELETE CASCADE 
+  ON UPDATE CASCADE;
+
 ALTER TABLE `system_audit_logs`
-  ADD PRIMARY KEY (`id`),
-  ADD KEY `timestamp` (`timestamp`),
-  ADD KEY `user` (`user`),
-  ADD KEY `action` (`action`);
+  ADD CONSTRAINT `fk_system_audit_logs_resolved_by` 
+  FOREIGN KEY (`resolved_by`) 
+  REFERENCES `users` (`id`) 
+  ON DELETE SET NULL 
+  ON UPDATE CASCADE;
 
---
 -- AUTO_INCREMENT for dumped tables
---
+ALTER TABLE `departments`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
---
--- AUTO_INCREMENT for table `system_audit_logs`
---
+ALTER TABLE `users`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+ALTER TABLE `risk_incidents`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+ALTER TABLE `risk_documents`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+ALTER TABLE `risk_treatments`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+ALTER TABLE `treatment_documents`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+ALTER TABLE `active_sessions`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+ALTER TABLE `account_lockouts`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+ALTER TABLE `security_settings`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
 ALTER TABLE `system_audit_logs`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-COMMIT;
+
+
+
+-- Insert initial security settings
+INSERT INTO `security_settings` (`setting_name`, `setting_value`, `description`) VALUES
+('max_failed_attempts', '5', 'Maximum number of failed login attempts before account lockout'),
+('lockout_duration', '15', 'Account lockout duration in minutes'),
+('auto_unlock', '1', 'Enable automatic account unlocking after lockout period expires'),
+('session_timeout', '30', 'Session timeout in minutes'),
+('password_min_length', '8', 'Minimum password length'),
+('password_require_uppercase', '1', 'Require uppercase letters in password'),
+('password_require_lowercase', '1', 'Require lowercase letters in password'),
+('password_require_numbers', '1', 'Require numbers in password'),
+('password_require_special', '0', 'Require special characters in password');
+
