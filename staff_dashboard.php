@@ -12,93 +12,37 @@ if (!isset($_SESSION['user_id']) || empty($_SESSION['user_id'])) {
     header("Location: login.php");
     exit();
 }
-// Function to get department abbreviation - optimized
-function getDepartmentAbbreviation($department) {
-    // Normalize the department string by trimming and replacing multiple spaces
-    $department = trim($department);
-    $department = preg_replace('/\s+/', ' ', $department);
-    
-    // Replace ampersands with 'and' to avoid them in abbreviations
-    $department = str_replace('&', 'and', $department);
-    
-    // Check for IT department patterns - more comprehensive
-    $it_patterns = [
-        '/information\s*(and|&)?\s*technology/i',
-        '/it\s*(and|&)?\s*technology/i',
-        '/^it$/i',
-        '/i\s*&\s*t/i',
-        '/i\s*and\s*t/i',
-        '/i\s*t\s*department/i',
-        '/information\s*technology\s*department/i',
-        '/department\s*of\s*it/i',
-        '/department\s*of\s*information\s*technology/i',
-        '/i\.t\./i',
-        '/^i$/i' // This will catch single "I" but we'll override it below
-    ];
-    
-    foreach ($it_patterns as $pattern) {
-        if (preg_match($pattern, $department)) {
-            return 'IT';
+// Function to get department abbreviation from database
+function getDepartmentAbbreviation($db, $departmentName) {
+    try {
+        $query = "SELECT abbreviation FROM departments WHERE name = :department_name LIMIT 1";
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':department_name', $departmentName);
+        $stmt->execute();
+        
+        if ($stmt->rowCount() > 0) {
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            return $result['abbreviation'];
         }
-    }
-    
-    // Special handling for common IT department names
-    $it_keywords = ['information', 'technology', 'it', 'computer', 'software', 'network', 'system'];
-    $words = explode(' ', strtolower($department));
-    $it_count = 0;
-    
-    foreach ($words as $word) {
-        if (in_array($word, $it_keywords)) {
-            $it_count++;
+        
+        // If department not found, try to find a similar one
+        $query = "SELECT abbreviation FROM departments WHERE name LIKE :department_name LIMIT 1";
+        $stmt = $db->prepare($query);
+        $likeDepartment = "%" . $departmentName . "%";
+        $stmt->bindParam(':department_name', $likeDepartment);
+        $stmt->execute();
+        
+        if ($stmt->rowCount() > 0) {
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            return $result['abbreviation'];
         }
+        
+        // If still not found, create a default abbreviation
+        return 'GEN';
+    } catch (PDOException $e) {
+        error_log("Error getting department abbreviation: " . $e->getMessage());
+        return 'GEN';
     }
-    
-    // If at least 2 IT-related keywords are found, it's likely the IT department
-    if ($it_count >= 2) {
-        return 'IT';
-    }
-    
-    // If the department name contains "IT" as a standalone word
-    if (preg_match('/\bit\b/i', $department)) {
-        return 'IT';
-    }
-    
-    $abbreviations = [
-        'Risk and Compliance' => 'RC',
-        'Finance' => 'FIN',
-        'Information Technology' => 'IT',
-        'Information and Technology' => 'IT',
-        'IT and Technology' => 'IT',
-        'IT & Technology' => 'IT',
-        'Human Resources' => 'HR',
-        'Operations' => 'OPS',
-        'Marketing' => 'MKT',
-        'Sales' => 'SLS',
-        'Legal' => 'LGL',
-        'Customer Service' => 'CS',
-        'Research and Development' => 'RD',
-        'Quality Assurance' => 'QA',
-        'Procurement' => 'PRC',
-        'Administration' => 'ADM',
-        'General' => 'GEN'
-    ];
-    
-    // Check if we have a direct mapping
-    if (isset($abbreviations[$department])) {
-        return $abbreviations[$department];
-    }
-    
-    // For unknown departments, create abbreviation from first letters of each word
-    $words = explode(' ', $department);
-    $abbr = '';
-    foreach ($words as $word) {
-        if (!empty($word)) {
-            $abbr .= strtoupper(substr($word, 0, 1));
-        }
-    }
-    
-    // Limit to 4 characters max
-    return substr($abbr, 0, 4);
 }
 // Function to normalize risk categories (replace I&T with IT)
 function normalizeRiskCategories($categories) {
@@ -112,9 +56,10 @@ function normalizeRiskCategories($categories) {
 }
 // Get complete user information with department data only if not already in session
 if (!isset($_SESSION['department']) || empty($_SESSION['department']) || 
-    !isset($_SESSION['department_id']) || empty($_SESSION['department_id'])) {
+    !isset($_SESSION['department_id']) || empty($_SESSION['department_id']) ||
+    !isset($_SESSION['department_abbr']) || empty($_SESSION['department_abbr'])) {
     
-    $query = "SELECT u.id, u.email, u.full_name, u.department_id, d.name as department_name 
+    $query = "SELECT u.id, u.email, u.full_name, u.department_id, d.name as department_name, d.abbreviation as department_abbr
               FROM users u 
               LEFT JOIN departments d ON u.department_id = d.id 
               WHERE u.id = :user_id";
@@ -128,6 +73,7 @@ if (!isset($_SESSION['department']) || empty($_SESSION['department']) ||
         // Store department information in session
         $_SESSION['department'] = $userData['department_name'] ?? 'General';
         $_SESSION['department_id'] = $userData['department_id'] ?? 1;
+        $_SESSION['department_abbr'] = $userData['department_abbr'] ?? 'GEN';
     } else {
         $_SESSION['error_message'] = "User account not found. Please contact administrator.";
         header("Location: login.php");
@@ -140,7 +86,8 @@ $user = [
     'email' => $_SESSION['email'],
     'full_name' => $_SESSION['full_name'],
     'department' => $_SESSION['department'],
-    'department_id' => $_SESSION['department_id']
+    'department_id' => $_SESSION['department_id'],
+    'department_abbr' => $_SESSION['department_abbr']
 ];
 // Create risk_sequences table if it doesn't exist
 $check_table_query = "SHOW TABLES LIKE 'risk_sequences'";
@@ -194,9 +141,10 @@ if (isset($_POST['submit_risk'])) {
     
     $user_id = $_SESSION['user_id'];
     
-    // Get user's department from session (already available)
+    // Get user's department and abbreviation from session
     $department = $_SESSION['department'];
     $department_id = $_SESSION['department_id'];
+    $department_abbr = $_SESSION['department_abbr'];
     
     // Get the current date for risk entry
     $date_of_risk_entry = date('Y-m-d');
@@ -232,14 +180,11 @@ if (isset($_POST['submit_risk'])) {
         $insert_stmt->execute();
     }
     
-    // Get department abbreviation
-    $dept_abbr = getDepartmentAbbreviation($department);
-    
     // Format sequence number with leading zeros (3 digits)
     $formatted_sequence = str_pad($next_number, 3, '0', STR_PAD_LEFT);
     
     // Form the custom risk ID with abbreviation and formatted sequence number
-    $custom_risk_id = $dept_abbr . '/' . $risk_year . '/' . $risk_month . '/' . $formatted_sequence;
+    $custom_risk_id = $department_abbr . '/' . $risk_year . '/' . $risk_month . '/' . $formatted_sequence;
     
     // Handle file upload (optional)
     $uploaded_file_path = null;
@@ -323,7 +268,7 @@ if (isset($_POST['submit_risk'])) {
         $stmt->bindParam(':cause_of_risk_description', $cause_of_risk_description);
         $stmt->bindParam(':department_id', $department_id);
         $stmt->bindParam(':normalized_department', $department);
-        $stmt->bindParam(':department_abbreviation', $dept_abbr);
+        $stmt->bindParam(':department_abbreviation', $department_abbr);
         $stmt->bindParam(':reported_by', $user_id);
         $stmt->bindParam(':risk_owner_id', $user_id);
         $stmt->bindParam(':involves_money_loss', $involves_money);
@@ -382,14 +327,14 @@ if (isset($_POST['submit_risk'])) {
             // Call auto-assignment function
             $assignment_result = assignRiskAutomatically($risk_id, $_SESSION['user_id'], $db);
             if ($assignment_result['success']) {
-                // Store success message in session without ID
-                $_SESSION['toast_message'] = "Risk reported successfully.";
+                // Store success message in session with the custom risk ID
+                $_SESSION['toast_message'] = "Risk reported successfully with ID: " . $custom_risk_id;
                 $_SESSION['toast_type'] = "success";
                 header("Location: staff_dashboard.php");
                 exit();
             } else {
-                // Store success message in session without ID
-                $_SESSION['toast_message'] = "Risk reported successfully.";
+                // Store success message in session with the custom risk ID
+                $_SESSION['toast_message'] = "Risk reported successfully with ID: " . $custom_risk_id;
                 $_SESSION['toast_type'] = "success";
                 header("Location: staff_dashboard.php");
                 exit();
@@ -1755,9 +1700,7 @@ $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                                 ✅ Assigned
                                             </span>
                                         <?php else: ?>
-                                            <span style="background: #fff3cd; color: #856404; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
-                                                🔄 Assigning...
-                                            </span>
+                                           
                                         <?php endif; ?>
                                         <button class="view-btn" onclick="viewRisk(<?php echo $risk['id']; ?>, '<?php echo htmlspecialchars($risk['custom_risk_id']); ?>', '<?php echo htmlspecialchars($risk['risk_categories']); ?>', '<?php echo htmlspecialchars($risk['risk_description']); ?>', '<?php echo htmlspecialchars($risk['cause_of_risk']); ?>', '<?php echo $risk['created_at']; ?>', <?php echo $risk['risk_owner_id'] ? 'true' : 'false'; ?>, '<?php echo htmlspecialchars($risk['document_file_path'] ?? ''); ?>', '<?php echo htmlspecialchars($risk['document_filename'] ?? ''); ?>', '<?php echo htmlspecialchars($risk['mime_type'] ?? ''); ?>', '<?php echo htmlspecialchars($risk['cause_of_risk_description'] ?? ''); ?>')">
                                             View
@@ -2036,8 +1979,8 @@ $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                         <h4>Understanding Risk Status</h4>
                                         <div class="status-legend">
                                             <div class="status-item">
-                                                <span class="status-badge pending">🔄 Assigning...</span>
-                                                <p>Risk is being assigned to an appropriate owner</p>
+                                                
+                                                
                                             </div>
                                             <div class="status-item">
                                                 <span class="status-badge assigned">✅ Assigned</span>
@@ -2127,7 +2070,7 @@ $user_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                         <span class="faq-toggle">+</span>
                                     </div>
                                     <div class="faq-answer">
-                                        <p>After you report a risk, the system automatically assigns it to a qualified risk owner based on the risk category and department. The risk owner will then assess the risk, determine its severity, and develop a treatment plan. You can track the status of your risk in the "Your Recent Reports" section.</p>
+                                        <p>After you report a risk, the risk is  assigns it to a qualified risk owner based on the risk category and department. The risk owner will then assess the risk, determine its severity, and develop a treatment plan. You can track the status of your risk in the "Your Recent Reports" section.</p>
                                     </div>
                                 </div>
                                 
