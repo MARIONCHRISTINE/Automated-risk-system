@@ -64,3 +64,40 @@ INSERT INTO `departments` (`name`, `abbreviation`) VALUES
 ('Procurement', 'PRC'),
 ('Administration', 'ADM'),
 ('General', 'GEN');
+
+
+CREATE TABLE `users` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `email` varchar(255) NOT NULL,
+  `password` varchar(255) NOT NULL,
+  `full_name` varchar(255) NOT NULL,
+  `role` enum('staff','risk_owner','compliance_team','admin') NOT NULL DEFAULT 'staff',
+  `status` enum('approved','pending','suspended') NOT NULL DEFAULT 'pending',
+  `department_id` int(11) DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `email` (`email`),
+  KEY `department_id` (`department_id`),
+  KEY `role` (`role`),
+  KEY `status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Add foreign key constraint to departments table
+ALTER TABLE `users` 
+ADD CONSTRAINT `fk_users_department` 
+FOREIGN KEY (`department_id`) 
+REFERENCES `departments` (`id`) 
+ON DELETE SET NULL 
+ON UPDATE CASCADE;
+
+-- Insert sample users for testing
+INSERT INTO `users` (`email`, `password`, `full_name`, `role`, `status`, `department_id`) VALUES
+('admin@airtel.africa', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', 'System Administrator', 'admin', 'approved', 1),
+('staff.finance@airtel.africa', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', 'Finance Staff User', 'staff', 'approved', 2),
+('staff.it@airtel.africa', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', 'IT Staff User', 'staff', 'approved', 3),
+('riskowner.finance@airtel.africa', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', 'Finance Risk Owner', 'risk_owner', 'approved', 2),
+('riskowner.it@airtel.africa', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', 'IT Risk Owner', 'risk_owner', 'approved', 3),
+('compliance@airtel.africa', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', 'Compliance Team Lead', 'compliance_team', 'approved', 4),
+('pending.user@airtel.africa', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', 'Pending User', 'staff', 'pending', 1);
+
