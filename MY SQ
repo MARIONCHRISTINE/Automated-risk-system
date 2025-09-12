@@ -420,16 +420,30 @@ ALTER TABLE `system_audit_logs`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+START TRANSACTION;
+SET time_zone = "+00:00";
 
--- Insert initial security settings
-INSERT INTO `security_settings` (`setting_name`, `setting_value`, `description`) VALUES
-('max_failed_attempts', '5', 'Maximum number of failed login attempts before account lockout'),
-('lockout_duration', '15', 'Account lockout duration in minutes'),
-('auto_unlock', '1', 'Enable automatic account unlocking after lockout period expires'),
-('session_timeout', '30', 'Session timeout in minutes'),
-('password_min_length', '8', 'Minimum password length'),
-('password_require_uppercase', '1', 'Require uppercase letters in password'),
-('password_require_lowercase', '1', 'Require lowercase letters in password'),
-('password_require_numbers', '1', 'Require numbers in password'),
-('password_require_special', '0', 'Require special characters in password');
+CREATE TABLE `security_settings` (
+  `id` int(11) NOT NULL,
+  `setting_name` varchar(100) NOT NULL,
+  `setting_value` varchar(255) NOT NULL,
+  `description` text DEFAULT NULL,
+  `updated_by` int(11) DEFAULT NULL,
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
+ALTER TABLE `security_settings`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `setting_name` (`setting_name`),
+  ADD KEY `updated_by` (`updated_by`);
+
+
+ALTER TABLE `security_settings`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+
+ALTER TABLE `security_settings`
+  ADD CONSTRAINT `security_settings_ibfk_1` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+COMMIT;
