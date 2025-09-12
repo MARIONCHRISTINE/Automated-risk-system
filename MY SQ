@@ -101,3 +101,65 @@ INSERT INTO `users` (`email`, `password`, `full_name`, `role`, `status`, `depart
 ('compliance@airtel.africa', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', 'Compliance Team Lead', 'compliance_team', 'approved', 4),
 ('pending.user@airtel.africa', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', 'Pending User', 'staff', 'pending', 1);
 
+
+
+-- phpMyAdmin SQL Dump
+-- version 5.2.1
+-- https://www.phpmyadmin.net/
+--
+-- Host: 127.0.0.1
+-- Generation Time: Sep 12, 2025 at 09:40 AM
+-- Server version: 10.4.32-MariaDB
+-- PHP Version: 8.0.30
+
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+START TRANSACTION;
+SET time_zone = "+00:00";
+
+--
+-- Database: `airtel_risk_system`
+--
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `system_audit_logs`
+--
+
+CREATE TABLE `system_audit_logs` (
+  `id` int(11) NOT NULL,
+  `timestamp` datetime NOT NULL DEFAULT current_timestamp(),
+  `user` varchar(255) NOT NULL,
+  `action` varchar(255) NOT NULL,
+  `details` text DEFAULT NULL,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `severity` varchar(20) DEFAULT NULL,
+  `user_id` int(11) DEFAULT NULL,
+  `resolved` tinyint(1) DEFAULT 0,
+  `resolved_at` timestamp NULL DEFAULT NULL,
+  `resolved_by` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Indexes for dumped tables
+--
+
+--
+-- Indexes for table `system_audit_logs`
+--
+ALTER TABLE `system_audit_logs`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `timestamp` (`timestamp`),
+  ADD KEY `user` (`user`),
+  ADD KEY `action` (`action`);
+
+--
+-- AUTO_INCREMENT for dumped tables
+--
+
+--
+-- AUTO_INCREMENT for table `system_audit_logs`
+--
+ALTER TABLE `system_audit_logs`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+COMMIT;
