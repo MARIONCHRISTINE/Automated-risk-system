@@ -1,0 +1,33 @@
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+START TRANSACTION;
+SET time_zone = "+00:00";
+
+CREATE TABLE `departments` (
+  `id` int(11) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `abbreviation` varchar(10) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `departments` (`id`, `name`, `abbreviation`) VALUES
+(1, 'IT', 'IT'),
+(2, 'Marketing', 'MKT'),
+(3, 'Distribution Partnerships', 'DP'),
+(4, 'Operations', 'OPS'),
+(5, 'Enterprise', 'ENT'),
+(6, 'Risk and Compliance', 'RC'),
+(7, 'Revenue Assurance', 'RA'),
+(8, 'Finance', 'FIN'),
+(9, 'Human Resource', 'HR'),
+(10, 'Customer Experience', 'CX'),
+(11, 'Legal and Regulatory', 'LR');
+
+
+ALTER TABLE `departments`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `uk_name` (`name`),
+  ADD UNIQUE KEY `uk_abbreviation` (`abbreviation`);
+
+
+ALTER TABLE `departments`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=12;
+COMMIT;
