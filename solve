@@ -1,11 +1,37 @@
-ALTER TABLE `risk_incidents` 
-ADD COLUMN `risk_rating` DECIMAL(10,2) DEFAULT NULL COMMENT 'Calculated risk rating (likelihood × impact)' AFTER `residual_rating`;
-ALTER TABLE `risk_incidents` 
-ADD COLUMN `involves_money_loss` VARCHAR(10) NULL DEFAULT NULL COMMENT 'Whether the risk involves money loss' AFTER `treatment_documents`,
-ADD COLUMN `money_amount` DECIMAL(15,2) NULL DEFAULT NULL COMMENT 'Estimated amount of money loss' AFTER `involves_money_loss`;
-ALTER TABLE `risk_documents`
-ADD COLUMN `document_content` LONGBLOB NULL AFTER `file_size`,
-ADD COLUMN `mime_type` VARCHAR(100) NULL AFTER `document_content`;
-ALTER TABLE `risk_incidents` 
-ADD COLUMN `cause_of_risk_description` TEXT DEFAULT NULL 
-AFTER `cause_of_risk`;
+PEOPLE (Human related causes)
+Training/awareness deficiencies
+Human error (mistakes, miscalculations)
+Negligence or carelessness
+Fraud or internal misconduct
+Non-compliance with procedures/process
+Supervision or oversight deficiencies
+Fatigue or stress related errors
+Unauthorized actions/ overstepping authority
+PROCESS (Procedure/ Workflow issue)
+Inadequate or unclear procedure/process
+Unavailable/Undefined internal controls
+Deficiencies in segregation of duties
+Delays/deficiencies in the approval process
+Monitoring deficiencies
+Reconciliation deficiencies
+Change Management deficiencies
+IT SYSTEM (Technology related issue)
+System downtime/outages
+Sofware bugs or glitches
+Integration errors
+Cybersecurity breach/hacking
+Poor system design/usability
+Outdated hardware or software
+Connectivity or network failure
+Incomplete system updates/patches
+Delayed system changes
+EXTERNAL ENVIRONMENT (Outside the organization's control)
+Regulatory or legal changes
+Economic downturn or market volatility
+Natural disasters (flood, drought, earthquake)
+Political instability / Policy shifts
+Third party vendor failures
+Power outages / Infrastructure failure
+Fraud by external parties
+Pandemics or public health emergencies
+Competition pressure/Disruptive innovation
