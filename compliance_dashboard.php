@@ -2,18 +2,21 @@
 include_once 'includes/auth.php';
 requireRole('compliance_team');
 include_once 'config/database.php';
-$database = new Database();
-$db = $database->getConnection();
+ $database = new Database();
+ $db = $database->getConnection();
+
 // Set active tab from URL parameter
-$activeTab = 'overview'; // default
+ $activeTab = 'overview'; // default
 if (isset($_GET['tab']) && in_array($_GET['tab'], ['overview', 'board', 'analytics', 'notifications', 'calendar', 'departmental-rankings'])) {
     $activeTab = $_GET['tab'];
 }
+
 // Capture message and type from URL and set in session
 if (isset($_GET['message']) && isset($_GET['type'])) {
     $_SESSION['message'] = $_GET['message'];
     $_SESSION['message_type'] = $_GET['type'];
 }
+
 // Handle bulk board reporting
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_board_report'])) {
     if (!empty($_POST['selected_risks'])) {
@@ -68,6 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_board_report']))
         exit();
     }
 }
+
 // Handle individual board reporting toggle
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['risk_id']) && isset($_POST['report_to_board'])) {
     $riskId = $_POST['risk_id'];
@@ -102,94 +106,103 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['risk_id']) && isset($
         exit();
     }
 }
-// Get departments for filter dropdown
-$dept_query = "SELECT DISTINCT department FROM risk_incidents WHERE department IS NOT NULL ORDER BY department";
-$dept_stmt = $db->prepare($dept_query);
-$dept_stmt->execute();
-$departments = $dept_stmt->fetchAll(PDO::FETCH_COLUMN);
+
+// Get departments for filter dropdown - FIXED to handle duplicates
+ $dept_query = "SELECT DISTINCT TRIM(department) as department FROM risk_incidents WHERE department IS NOT NULL AND TRIM(department) != '' ORDER BY department";
+ $dept_stmt = $db->prepare($dept_query);
+ $dept_stmt->execute();
+ $departments = $dept_stmt->fetchAll(PDO::FETCH_COLUMN);
+
 // Get all risks for compliance overview - FIXED to ensure status is always fetched correctly
-$query = "SELECT r.*, u.full_name as reporter_name, ro.full_name as owner_name,
-          DATEDIFF(NOW(), r.created_at) as days_open,
-          CASE 
-            WHEN DATEDIFF(NOW(), r.created_at) > 90 THEN 'aged'
-            WHEN DATEDIFF(NOW(), r.created_at) > 60 THEN 'maturing'
-            ELSE 'new'
-          END as aging_status
-          FROM risk_incidents r 
-          LEFT JOIN users u ON r.reported_by = u.id 
-          LEFT JOIN users ro ON r.risk_owner_id = ro.id 
-          ORDER BY r.created_at DESC";
-$stmt = $db->prepare($query);
-$stmt->execute();
-$all_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+ $query = "SELECT r.*, u.full_name as reporter_name, ro.full_name as owner_name,
+         DATEDIFF(NOW(), r.created_at) as days_open,
+         CASE 
+           WHEN DATEDIFF(NOW(), r.created_at) > 90 THEN 'aged'
+           WHEN DATEDIFF(NOW(), r.created_at) > 60 THEN 'maturing'
+           ELSE 'new'
+         END as aging_status
+         FROM risk_incidents r 
+         LEFT JOIN users u ON r.reported_by = u.id 
+         LEFT JOIN users ro ON r.risk_owner_id = ro.id 
+         ORDER BY r.created_at DESC";
+ $stmt = $db->prepare($query);
+ $stmt->execute();
+ $all_risks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Get recent risks for initial display - FIXED to ensure status is always fetched correctly
-$recent_risks_query = "SELECT r.*, u.full_name as reporter_name, ro.full_name as owner_name
-                       FROM risk_incidents r 
-                       LEFT JOIN users u ON r.reported_by = u.id 
-                       LEFT JOIN users ro ON r.risk_owner_id = ro.id 
-                       ORDER BY r.created_at DESC LIMIT 10";
-$recent_stmt = $db->prepare($recent_risks_query);
-$recent_stmt->execute();
-$recent_risks = $recent_stmt->fetchAll(PDO::FETCH_ASSOC);
+ $recent_risks_query = "SELECT r.*, u.full_name as reporter_name, ro.full_name as owner_name
+                      FROM risk_incidents r 
+                      LEFT JOIN users u ON r.reported_by = u.id 
+                      LEFT JOIN users ro ON r.risk_owner_id = ro.id 
+                      ORDER BY r.created_at DESC LIMIT 10";
+ $recent_stmt = $db->prepare($recent_risks_query);
+ $recent_stmt->execute();
+ $recent_risks = $recent_stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Get board risks specifically - FIXED to ensure status is always fetched correctly
-$board_risks_query = "SELECT r.*, u.full_name as reporter_name, ro.full_name as owner_name
-                       FROM risk_incidents r 
-                       LEFT JOIN users u ON r.reported_by = u.id 
-                       LEFT JOIN users ro ON r.risk_owner_id = ro.id 
-                       WHERE r.to_be_reported_to_board = 'YES' OR r.risk_level IN ('High', 'Critical')
-                       ORDER BY r.created_at DESC";
-$board_stmt = $db->prepare($board_risks_query);
-$board_stmt->execute();
-$board_risks = $board_stmt->fetchAll(PDO::FETCH_ASSOC);
+ $board_risks_query = "SELECT r.*, u.full_name as reporter_name, ro.full_name as owner_name
+                      FROM risk_incidents r 
+                      LEFT JOIN users u ON r.reported_by = u.id 
+                      LEFT JOIN users ro ON r.risk_owner_id = ro.id 
+                      WHERE r.to_be_reported_to_board = 'YES' OR r.risk_level IN ('High', 'Critical')
+                      ORDER BY r.created_at DESC";
+ $board_stmt = $db->prepare($board_risks_query);
+ $board_stmt->execute();
+ $board_risks = $board_stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Get enhanced risk statistics - FIXED to ensure status is always fetched correctly
-$stats_query = "SELECT 
-    COUNT(*) as total_risks,
-    SUM(CASE WHEN risk_level = 'Critical' THEN 1 ELSE 0 END) as critical_risks,
-    SUM(CASE WHEN risk_level = 'High' THEN 1 ELSE 0 END) as high_risks,
-    SUM(CASE WHEN risk_level = 'Medium' THEN 1 ELSE 0 END) as medium_risks,
-    SUM(CASE WHEN risk_level = 'Low' THEN 1 ELSE 0 END) as low_risks,
-    SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_risks,
-    SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed_risks,
-    SUM(CASE WHEN to_be_reported_to_board = 'YES' THEN 1 ELSE 0 END) as board_risks,
-    SUM(CASE WHEN DATEDIFF(NOW(), created_at) > 90 THEN 1 ELSE 0 END) as aged_risks,
-    SUM(CASE WHEN planned_completion_date < NOW() AND status != 'closed' THEN 1 ELSE 0 END) as overdue_risks
-    FROM risk_incidents";
-$stats_stmt = $db->prepare($stats_query);
-$stats_stmt->execute();
-$stats = $stats_stmt->fetch(PDO::FETCH_ASSOC);
+ $stats_query = "SELECT 
+   COUNT(*) as total_risks,
+   SUM(CASE WHEN risk_level = 'Critical' THEN 1 ELSE 0 END) as critical_risks,
+   SUM(CASE WHEN risk_level = 'High' THEN 1 ELSE 0 END) as high_risks,
+   SUM(CASE WHEN risk_level = 'Medium' THEN 1 ELSE 0 END) as medium_risks,
+   SUM(CASE WHEN risk_level = 'Low' THEN 1 ELSE 0 END) as low_risks,
+   SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_risks,
+   SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed_risks,
+   SUM(CASE WHEN to_be_reported_to_board = 'YES' THEN 1 ELSE 0 END) as board_risks,
+   SUM(CASE WHEN DATEDIFF(NOW(), created_at) > 90 THEN 1 ELSE 0 END) as aged_risks,
+   SUM(CASE WHEN planned_completion_date < NOW() AND status != 'closed' THEN 1 ELSE 0 END) as overdue_risks
+   FROM risk_incidents";
+ $stats_stmt = $db->prepare($stats_query);
+ $stats_stmt->execute();
+ $stats = $stats_stmt->fetch(PDO::FETCH_ASSOC);
+
 // Get recent activity from audit_logs
-$alerts_query = "SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 10";
-$alerts_stmt = $db->prepare($alerts_query);
-$alerts_stmt->execute();
-$recent_alerts = $alerts_stmt->fetchAll(PDO::FETCH_ASSOC);
+ $alerts_query = "SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 10";
+ $alerts_stmt = $db->prepare($alerts_query);
+ $alerts_stmt->execute();
+ $recent_alerts = $alerts_stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Get upcoming deadlines from risk_incidents - FIXED to ensure status is always fetched correctly
-$reviews_query = "SELECT risk_name, department, planned_completion_date as review_date, 'Risk Review' as review_type 
-                  FROM risk_incidents 
-                  WHERE planned_completion_date BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 30 DAY)
-                  AND status != 'closed'
-                  ORDER BY planned_completion_date ASC";
-$reviews_stmt = $db->prepare($reviews_query);
-$reviews_stmt->execute();
-$upcoming_reviews = $reviews_stmt->fetchAll(PDO::FETCH_ASSOC);
+ $reviews_query = "SELECT risk_name, department, planned_completion_date as review_date, 'Risk Review' as review_type 
+                 FROM risk_incidents 
+                 WHERE planned_completion_date BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 30 DAY)
+                 AND status != 'closed'
+                 ORDER BY planned_completion_date ASC";
+ $reviews_stmt = $db->prepare($reviews_query);
+ $reviews_stmt->execute();
+ $upcoming_reviews = $reviews_stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Get events for calendar - FIXED to ensure status is always fetched correctly
-$events_query = "SELECT 
-    id,
-    custom_risk_id,
-    risk_name as title,
-    COALESCE(target_completion_date, planned_completion_date) as start,
-    'Risk Review' as type,
-    department,
-    risk_level,
-    status
-  FROM risk_incidents 
-  WHERE (target_completion_date IS NOT NULL OR planned_completion_date IS NOT NULL)
-  AND status != 'closed'
-  ORDER BY start ASC";
-$events_stmt = $db->prepare($events_query);
-$events_stmt->execute();
-$events = $events_stmt->fetchAll(PDO::FETCH_ASSOC);
+ $events_query = "SELECT 
+   id,
+   custom_risk_id,
+   risk_name as title,
+   COALESCE(target_completion_date, planned_completion_date) as start,
+   'Risk Review' as type,
+   department,
+   risk_level,
+   status
+FROM risk_incidents 
+WHERE (target_completion_date IS NOT NULL OR planned_completion_date IS NOT NULL)
+AND status != 'closed'
+ORDER BY start ASC";
+ $events_stmt = $db->prepare($events_query);
+ $events_stmt->execute();
+ $events = $events_stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Convert to FullCalendar event format
-$calendarEvents = [];
+ $calendarEvents = [];
 foreach ($events as $event) {
     $riskIdDisplay = !empty($event['custom_risk_id']) ? $event['custom_risk_id'] : $event['id'];
     $calendarEvents[] = [
@@ -207,6 +220,7 @@ foreach ($events as $event) {
         ]
     ];
 }
+
 // Helper function to get event color based on risk level
 function getEventColor($riskLevel) {
     switch($riskLevel) {
@@ -217,119 +231,57 @@ function getEventColor($riskLevel) {
         default: return '#17a2b8';
     }
 }
-// Updated detectSimilarRisks function
-function detectSimilarRisks($risks) {
-    $similarGroups = [];
-    
-    foreach ($risks as $risk) {
-        $riskCategories = [];
-        $rawCategories = $risk['risk_categories'] ?? '[]';
-        
-        if (is_string($rawCategories)) {
-            $decodedCategories = json_decode($rawCategories, true);
-            if (is_array($decodedCategories)) {
-                if (count($decodedCategories) > 0 && is_array($decodedCategories[0])) {
-                    $riskCategories = $decodedCategories[0];
-                } else {
-                    $riskCategories = $decodedCategories;
-                }
-            }
-        } else if (is_array($rawCategories)) {
-            if (count($rawCategories) > 0 && is_array($rawCategories[0])) {
-                $riskCategories = $rawCategories[0];
-            } else {
-                $riskCategories = $rawCategories;
-            }
-        }
-        
-        $riskCategories = array_map('strval', $riskCategories);
-        
-        if (empty($riskCategories)) continue;
-        
-        sort($riskCategories);
-        $categoryKey = implode('|', $riskCategories);
-        
-        $found = false;
-        foreach ($similarGroups as &$group) {
-            if ($group['category_key'] === $categoryKey) {
-                $group['risks'][] = $risk;
-                $group['report_count']++;
-                $found = true;
-                break;
-            }
-        }
-        
-        if (!$found) {
-            $currentYear = date('Y');
-            $randomNumber = rand(10000, 99999);
-            $newRiskId = "RSK-{$currentYear}-{$randomNumber}";
-            
-            $similarGroups[] = [
-                'risks' => [$risk],
-                'report_count' => 1,
-                'categories' => $riskCategories,
-                'category_key' => $categoryKey,
-                'risk_id' => $newRiskId
-            ];
-        }
-    }
-    
-    foreach ($similarGroups as &$group) {
-        if ($group['report_count'] > 1) {
-            $group['risk_id'] = 'M' . $group['risk_id'];
-        }
-    }
-    
-    return $similarGroups;
-}
-$riskGroups = detectSimilarRisks($all_risks);
+
 // Get heat map data
-$heatmap_query = "SELECT 
-    department,
-    risk_level,
-    COUNT(*) as risk_count
-    FROM risk_incidents 
-    WHERE department IS NOT NULL AND risk_level IS NOT NULL
-    GROUP BY department, risk_level
-    ORDER BY department, 
-    CASE risk_level 
-        WHEN 'Low' THEN 1 
-        WHEN 'Medium' THEN 2 
-        WHEN 'High' THEN 3 
-        WHEN 'Critical' THEN 4 
-        WHEN 'Not Assessed' THEN 5
-    END";
-$heatmap_stmt = $db->prepare($heatmap_query);
-$heatmap_stmt->execute();
-$heatmap_data = $heatmap_stmt->fetchAll(PDO::FETCH_ASSOC);
+ $heatmap_query = "SELECT 
+   TRIM(department) as department,
+   risk_level,
+   COUNT(*) as risk_count
+   FROM risk_incidents 
+   WHERE department IS NOT NULL AND TRIM(department) != '' AND risk_level IS NOT NULL
+   GROUP BY TRIM(department), risk_level
+   ORDER BY TRIM(department), 
+   CASE risk_level 
+       WHEN 'Low' THEN 1 
+       WHEN 'Medium' THEN 2 
+       WHEN 'High' THEN 3 
+       WHEN 'Critical' THEN 4 
+       WHEN 'Not Assessed' THEN 5
+   END";
+ $heatmap_stmt = $db->prepare($heatmap_query);
+ $heatmap_stmt->execute();
+ $heatmap_data = $heatmap_stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Get monthly trends data
-$trends_query = "SELECT 
-    DATE_FORMAT(created_at, '%Y-%m') as month,
-    risk_level,
-    COUNT(*) as count
-    FROM risk_incidents 
-    WHERE created_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
-    GROUP BY DATE_FORMAT(created_at, '%Y-%m'), risk_level
-    ORDER BY month";
-$trends_stmt = $db->prepare($trends_query);
-$trends_stmt->execute();
-$trends_data = $trends_stmt->fetchAll(PDO::FETCH_ASSOC);
-// Get department analysis data
-$dept_analysis_query = "SELECT 
-    department,
-    COUNT(*) as total_risks,
-    SUM(CASE WHEN risk_level = 'Critical' THEN 1 ELSE 0 END) as critical_risks,
-    SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed_risks
-    FROM risk_incidents 
-    WHERE department IS NOT NULL
-    GROUP BY department
-    ORDER BY total_risks DESC";
-$dept_analysis_stmt = $db->prepare($dept_analysis_query);
-$dept_analysis_stmt->execute();
-$dept_analysis_data = $dept_analysis_stmt->fetchAll(PDO::FETCH_ASSOC);
+ $trends_query = "SELECT 
+   DATE_FORMAT(created_at, '%Y-%m') as month,
+   risk_level,
+   COUNT(*) as count
+   FROM risk_incidents 
+   WHERE created_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+   GROUP BY DATE_FORMAT(created_at, '%Y-%m'), risk_level
+   ORDER BY month";
+ $trends_stmt = $db->prepare($trends_query);
+ $trends_stmt->execute();
+ $trends_data = $trends_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get department analysis data - FIXED to handle duplicates
+ $dept_analysis_query = "SELECT 
+   TRIM(department) as department,
+   COUNT(*) as total_risks,
+   SUM(CASE WHEN risk_level = 'Critical' THEN 1 ELSE 0 END) as critical_risks,
+   SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed_risks
+   FROM risk_incidents 
+   WHERE department IS NOT NULL AND TRIM(department) != ''
+   GROUP BY TRIM(department)
+   ORDER BY total_risks DESC";
+ $dept_analysis_stmt = $db->prepare($dept_analysis_query);
+ $dept_analysis_stmt->execute();
+ $dept_analysis_data = $dept_analysis_stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Get risk category distribution data
-$category_data = [];
-$category_counts = [];
+ $category_data = [];
+ $category_counts = [];
 foreach ($all_risks as $risk) {
     $riskCategories = [];
     $rawCategories = $risk['risk_categories'] ?? '[]';
@@ -364,34 +316,37 @@ foreach ($category_counts as $category => $count) {
         'risk_count' => $count
     ];
 }
-// Get departmental rankings data
-$dept_rankings_query = "
-    SELECT 
-        department,
-        COUNT(*) as total_risks
-    FROM risk_incidents 
-    WHERE department IS NOT NULL
-    GROUP BY department
-    ORDER BY total_risks DESC
+
+// Get departmental rankings data - FIXED to handle duplicates
+ $dept_rankings_query = "
+   SELECT 
+       TRIM(department) as department,
+       COUNT(*) as total_risks
+   FROM risk_incidents 
+   WHERE department IS NOT NULL AND TRIM(department) != ''
+   GROUP BY TRIM(department)
+   ORDER BY total_risks DESC
 ";
-$dept_rankings_stmt = $db->prepare($dept_rankings_query);
-$dept_rankings_stmt->execute();
-$dept_rankings = $dept_rankings_stmt->fetchAll(PDO::FETCH_ASSOC);
-// Get department risk trends
-$dept_trends_query = "
-    SELECT 
-        department,
-        DATE_FORMAT(created_at, '%Y-%m') as month,
-        COUNT(*) as monthly_risk_count
-    FROM risk_incidents 
-    WHERE created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)
-    AND department IS NOT NULL
-    GROUP BY department, DATE_FORMAT(created_at, '%Y-%m')
-    ORDER BY department, month
+ $dept_rankings_stmt = $db->prepare($dept_rankings_query);
+ $dept_rankings_stmt->execute();
+ $dept_rankings = $dept_rankings_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get department risk trends - FIXED to handle duplicates
+ $dept_trends_query = "
+   SELECT 
+       TRIM(department) as department,
+       DATE_FORMAT(created_at, '%Y-%m') as month,
+       COUNT(*) as monthly_risk_count
+   FROM risk_incidents 
+   WHERE created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)
+   AND department IS NOT NULL AND TRIM(department) != ''
+   GROUP BY TRIM(department), DATE_FORMAT(created_at, '%Y-%m')
+   ORDER BY department, month
 ";
-$dept_trends_stmt = $db->prepare($dept_trends_query);
-$dept_trends_stmt->execute();
-$dept_trends_data = $dept_trends_stmt->fetchAll(PDO::FETCH_ASSOC);
+ $dept_trends_stmt = $db->prepare($dept_trends_query);
+ $dept_trends_stmt->execute();
+ $dept_trends_data = $dept_trends_stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Process trends data
 foreach ($dept_rankings as &$dept) {
     $dept_trends = array_filter($dept_trends_data, function($item) use ($dept) {
@@ -411,19 +366,21 @@ foreach ($dept_rankings as &$dept) {
         }
     }
 }
-// Get Risk Category Breakdown by Department
-$dept_category_query = "
-    SELECT 
-        department,
-        risk_categories
-    FROM risk_incidents 
-    WHERE department IS NOT NULL
+
+// Get Risk Category Breakdown by Department - FIXED to handle duplicates
+ $dept_category_query = "
+   SELECT 
+       TRIM(department) as department,
+       risk_categories
+   FROM risk_incidents 
+   WHERE department IS NOT NULL AND TRIM(department) != ''
 ";
-$dept_category_stmt = $db->prepare($dept_category_query);
-$dept_category_stmt->execute();
-$dept_category_raw = $dept_category_stmt->fetchAll(PDO::FETCH_ASSOC);
+ $dept_category_stmt = $db->prepare($dept_category_query);
+ $dept_category_stmt->execute();
+ $dept_category_raw = $dept_category_stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Process department category data
-$dept_category_data = [];
+ $dept_category_data = [];
 foreach ($dept_category_raw as $item) {
     $dept = $item['department'];
     $rawCategories = $item['risk_categories'] ?? '[]';
@@ -456,6 +413,7 @@ foreach ($dept_category_raw as $item) {
         $dept_category_data[$dept][$category]++;
     }
 }
+
 // Handle report generation
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
     $reportType = $_POST['report_type'] ?? 'monthly';
@@ -473,7 +431,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
     $params = [];
     
     if ($department !== 'all') {
-        $query .= " AND r.department = ?";
+        $query .= " AND TRIM(r.department) = ?";
         $params[] = $department;
     }
     
@@ -518,6 +476,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
     
     exit();
 }
+
 // Export functions
 function exportToExcel($data, $filename) {
     header('Content-Type: text/csv; charset=utf-8');
@@ -557,6 +516,7 @@ function exportToExcel($data, $filename) {
     fclose($output);
     exit();
 }
+
 function exportToPDF($data, $filename) {
     $html = '<!DOCTYPE html>
     <html>
@@ -642,6 +602,7 @@ function exportToPDF($data, $filename) {
     echo $html;
     exit();
 }
+
 function getRiskLevelColor($level) {
     switch($level) {
         case 'Critical': return '#dc3545';
@@ -652,6 +613,7 @@ function getRiskLevelColor($level) {
         default: return '#6c757d';
     }
 }
+
 // Function to get beautiful status display
 function getBeautifulStatus($status) {
     if (!$status) $status = 'pending';
@@ -659,38 +621,38 @@ function getBeautifulStatus($status) {
     switch(strtolower($status)) {
         case 'pending':
             return [
-                'text' => '🔓 Open',
+                'text' => 'Open',
                 'color' => '#0c5460',
                 'bg' => '#d1ecf1'
             ];
         case 'in_progress':
             return [
-                'text' => '⚡ In Progress',
+                'text' => 'In Progress',
                 'color' => '#004085',
                 'bg' => '#cce5ff'
             ];
         case 'completed':
         case 'closed':
             return [
-                'text' => '✅ Completed',
+                'text' => 'Completed',
                 'color' => '#155724',
                 'bg' => '#d4edda'
             ];
         case 'cancelled':
             return [
-                'text' => '❌ Cancelled',
+                'text' => 'Cancelled',
                 'color' => '#721c24',
                 'bg' => '#f8d7da'
             ];
         case 'overdue':
             return [
-                'text' => '⏰ Overdue',
+                'text' => 'Overdue',
                 'color' => '#721c24',
                 'bg' => '#f8d7da'
             ];
         default:
             return [
-                'text' => '🔓 Open',
+                'text' => 'Open',
                 'color' => '#0c5460',
                 'bg' => '#d1ecf1'
             ];
@@ -1341,10 +1303,6 @@ function getBeautifulStatus($status) {
             page-break-inside: avoid;
         }
         
-        .table-container {
-            page-break-inside: avoid;
-        }
-        
         .stats-grid {
             grid-template-columns: repeat(2, 1fr) !important;
             gap: 15px !important;
@@ -1833,101 +1791,408 @@ function getBeautifulStatus($status) {
         font-weight: 500;
     }
     
-    .deadline-item {
-        margin-bottom: 1rem;
-        padding: 1rem;
-        border-radius: 6px;
+    /* Upcoming Deadlines - REDESIGNED */
+    .deadlines-container {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        overflow: hidden;
+        margin-bottom: 2rem;
+    }
+    
+    .deadlines-header {
+        background: linear-gradient(135deg, #E60012 0%, #B8000E 100%);
+        color: white;
+        padding: 1.25rem 1.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .deadlines-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .deadlines-filter {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    .deadlines-filter-btn {
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 20px;
+        padding: 0.4rem 0.8rem;
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .deadlines-filter-btn:hover {
+        background: rgba(255, 255, 255, 0.3);
+    }
+    
+    .deadlines-filter-btn.active {
+        background: white;
+        color: #E60012;
+    }
+    
+    .deadlines-body {
+        padding: 1.5rem;
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    
+    .deadline-card {
         background: #f8f9fa;
+        border-radius: 10px;
+        padding: 1.25rem;
+        margin-bottom: 1rem;
         border-left: 4px solid #17a2b8;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
     }
     
-    .deadline-item h5 {
-        margin: 0 0 0.5rem 0;
+    .deadline-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    .deadline-card.urgent {
+        border-left-color: #dc3545;
+        background: linear-gradient(to right, rgba(220, 53, 69, 0.05), #f8f9fa);
+    }
+    
+    .deadline-card.warning {
+        border-left-color: #ffc107;
+        background: linear-gradient(to right, rgba(255, 193, 7, 0.05), #f8f9fa);
+    }
+    
+    .deadline-card.info {
+        border-left-color: #17a2b8;
+        background: linear-gradient(to right, rgba(23, 162, 184, 0.05), #f8f9fa);
+    }
+    
+    .deadline-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 0.75rem;
+    }
+    
+    .deadline-title {
+        font-size: 1.1rem;
+        font-weight: 600;
         color: #495057;
+        margin: 0;
+        line-height: 1.3;
     }
     
-    .deadline-item p {
-        margin: 0 0 0.5rem 0;
+    .deadline-days {
+        background: #17a2b8;
+        color: white;
+        border-radius: 20px;
+        padding: 0.3rem 0.8rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+    
+    .deadline-card.urgent .deadline-days {
+        background: #dc3545;
+    }
+    
+    .deadline-card.warning .deadline-days {
+        background: #ffc107;
+        color: #212529;
+    }
+    
+    .deadline-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .deadline-meta-item {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
         color: #6c757d;
         font-size: 0.9rem;
     }
     
-    .deadline-urgent {
-        border-left-color: #dc3545;
+    .deadline-meta-icon {
+        width: 16px;
+        height: 16px;
+        opacity: 0.7;
     }
     
-    .deadline-warning {
-        border-left-color: #ffc107;
-    }
-    
-    .deadline-info {
-        border-left-color: #17a2b8;
-    }
-    
-    .reminder-settings {
-        background: #f8f9fa;
-        padding: 1.5rem;
-        border-radius: 8px;
-        margin-bottom: 1rem;
-    }
-    
-    .reminder-settings h4 {
-        margin: 0 0 1rem 0;
+    .deadline-date {
+        font-weight: 500;
         color: #495057;
+        margin-top: 0.5rem;
+        font-size: 0.9rem;
     }
     
-    .reminder-option {
-        display: flex;
-        align-items: center;
-        margin-bottom: 0.75rem;
-    }
-    
-    .reminder-option input {
-        margin-right: 0.5rem;
-    }
-    
-    /* Live Risk Data Matrix */
-    .risk-matrix-container {
-        position: relative;
-        height: 400px;
-        background: #f8f9fa;
-        border-radius: 8px;
+    .deadline-progress {
+        height: 6px;
+        background: #e9ecef;
+        border-radius: 3px;
+        margin-top: 1rem;
         overflow: hidden;
     }
     
-    #liveRiskMatrix {
-        width: 100%;
+    .deadline-progress-bar {
         height: 100%;
+        border-radius: 3px;
+        transition: width 0.3s ease;
     }
     
-    .risk-tooltip {
-        position: absolute;
-        background: rgba(0, 0, 0, 0.8);
+    .deadline-card.urgent .deadline-progress-bar {
+        background: #dc3545;
+    }
+    
+    .deadline-card.warning .deadline-progress-bar {
+        background: #ffc107;
+    }
+    
+    .deadline-card.info .deadline-progress-bar {
+        background: #17a2b8;
+    }
+    
+    .empty-deadlines {
+        text-align: center;
+        padding: 2rem;
+        color: #6c757d;
+    }
+    
+    .empty-deadlines-icon {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+    
+    /* Active Reminders Section - REDESIGNED */
+    .active-reminders-container {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        overflow: hidden;
+        margin-bottom: 2rem;
+    }
+    
+    .active-reminders-header {
+        background: linear-gradient(135deg, #28a745 0%, #218838 100%);
         color: white;
-        padding: 10px;
+        padding: 1.25rem 1.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .active-reminders-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .active-reminders-body {
+        padding: 1.5rem;
+    }
+    
+    .active-reminders-list {
+        max-height: 200px;
+        overflow-y: auto;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 0.5rem;
+    }
+    
+    .active-reminder-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem;
         border-radius: 6px;
-        font-size: 14px;
-        pointer-events: none;
-        z-index: 1000;
-        opacity: 0;
-        transition: opacity 0.3s;
-        max-width: 300px;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        margin-bottom: 0.5rem;
+        background: #f8f9fa;
+        transition: all 0.2s ease;
     }
     
-    .risk-tooltip.visible {
-        opacity: 1;
+    .active-reminder-item:hover {
+        background: #e9ecef;
     }
     
-    .risk-tooltip-title {
-        font-weight: bold;
-        margin-bottom: 5px;
-        color: #fff;
+    .active-reminder-item:last-child {
+        margin-bottom: 0;
     }
     
-    .risk-tooltip-info {
-        margin: 3px 0;
-        font-size: 13px;
+    .active-reminder-content {
+        flex: 1;
+    }
+    
+    .active-reminder-title {
+        font-weight: 500;
+        color: #495057;
+        margin-bottom: 0.25rem;
+        font-size: 0.95rem;
+    }
+    
+    .active-reminder-meta {
+        color: #6c757d;
+        font-size: 0.85rem;
+    }
+    
+    .active-reminder-days {
+        background: #28a745;
+        color: white;
+        border-radius: 20px;
+        padding: 0.25rem 0.6rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    
+    /* Reminder Settings - REDESIGNED */
+    .reminder-settings-container {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        overflow: hidden;
+        border-top: 4px solid #E60012;
+    }
+    
+    .reminder-settings-header {
+        background: linear-gradient(135deg, #E60012 0%, #B8000E 100%);
+        color: white;
+        padding: 1.25rem 1.5rem;
+    }
+    
+    .reminder-settings-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .reminder-settings-body {
+        padding: 1.5rem;
+    }
+    
+    .reminder-settings-intro {
+        color: #6c757d;
+        margin-bottom: 1.5rem;
+        font-size: 0.95rem;
+        line-height: 1.5;
+    }
+    
+    .reminder-options {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    .reminder-option-card {
+        background: #f8f9fa;
+        border-radius: 10px;
+        padding: 1.25rem;
+        border: 2px solid transparent;
+        transition: all 0.3s ease;
+        cursor: pointer;
+    }
+    
+    .reminder-option-card:hover {
+        border-color: #E60012;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    .reminder-option-card.active {
+        border-color: #E60012;
+        background: linear-gradient(to right, rgba(230, 0, 18, 0.05), #f8f9fa);
+    }
+    
+    .reminder-option-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .reminder-option-checkbox {
+        width: 20px;
+        height: 20px;
+        accent-color: #E60012;
+        cursor: pointer;
+    }
+    
+    .reminder-option-title {
+        font-weight: 600;
+        color: #495057;
+        font-size: 1rem;
+    }
+    
+    .reminder-option-description {
+        color: #6c757d;
+        font-size: 0.9rem;
+        margin-left: 2.75rem;
+    }
+    
+    .reminder-save-section {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 1.5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid #e9ecef;
+    }
+    
+    .reminder-save-btn {
+        background: #E60012;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 0.75rem 1.5rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .reminder-save-btn:hover {
+        background: #B8000E;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(230, 0, 18, 0.3);
+    }
+    
+    .reminder-status {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: #6c757d;
+        font-size: 0.9rem;
+    }
+    
+    .reminder-status-indicator {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #28a745;
     }
     
     /* Responsive */
@@ -2039,6 +2304,29 @@ function getBeautifulStatus($status) {
         
         #deptCategoryOptions {
             max-height: 200px;
+        }
+        
+        /* Mobile adjustments for deadline cards */
+        .deadline-card-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.5rem;
+        }
+        
+        .deadline-meta {
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        /* Mobile adjustments for reminder options */
+        .reminder-options {
+            grid-template-columns: 1fr;
+        }
+        
+        .reminder-save-section {
+            flex-direction: column;
+            gap: 1rem;
+            align-items: stretch;
         }
     }
     
@@ -2173,7 +2461,7 @@ function getBeautifulStatus($status) {
                 </li>
                 <li class="nav-item">
                     <a href="#" <?php echo $activeTab === 'departmental-rankings' ? 'class="active"' : ''; ?> onclick="showTab('departmental-rankings')">
-                        <span>🏆</span> Departmental Rankings
+                        <span></span> Departmental Rankings
                     </a>
                 </li>
             </ul>
@@ -2408,49 +2696,6 @@ function getBeautifulStatus($status) {
                         </table>
                         <input type="hidden" name="bulk_board_report" value="1">
                     </form>
-                </div>
-            </div>
-            
-            <!-- Enhanced Live Risk Data Matrix -->
-            <div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-top: 4px solid #E60012; margin-bottom: 2rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-                    <h3 style="margin: 0; color: #495057; font-size: 1.3rem; font-weight: 600;">📊 Live Risk Data Matrix</h3>
-                    <div style="display: flex; gap: 1rem;" class="no-print">
-                        <button onclick="refreshRiskMatrix()" class="btn btn-primary btn-sm">
-                            <span>🔄</span> Refresh Data
-                        </button>
-                        <select id="matrixDepartmentFilter" onchange="filterRiskMatrix()" class="filter-input" style="width: 180px;">
-                            <option value="all">All Departments</option>
-                            <?php foreach ($departments as $dept): ?>
-                            <option value="<?php echo htmlspecialchars($dept); ?>"><?php echo htmlspecialchars($dept); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                </div>
-                
-                <div class="risk-matrix-container">
-                    <canvas id="liveRiskMatrix"></canvas>
-                    <div id="riskTooltip" class="risk-tooltip"></div>
-                    
-                    <!-- Y-axis label -->
-                    <div style="position: absolute; left: 10px; top: 10px; font-size: 0.9rem; color: #495057; font-weight: 500;">
-                        Number of Times Reported
-                    </div>
-                    <!-- X-axis label -->
-                    <div style="position: absolute; bottom: 10px; right: 10px; font-size: 0.9rem; color: #495057; font-weight: 500;">
-                        Risk Timeline
-                    </div>
-                </div>
-                
-                <div style="display: flex; justify-content: center; gap: 2rem; margin-top: 1rem;">
-                    <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <div style="width: 16px; height: 4px; background: #dc3545; border-radius: 2px;"></div>
-                        <span style="font-size: 0.9rem; color: #495057;">Multiple Reports (M prefix)</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <div style="width: 16px; height: 4px; background: #28a745; border-radius: 2px;"></div>
-                        <span style="font-size: 0.9rem; color: #495057;">Single Report (RSK-YYYY-XXXXX)</span>
-                    </div>
                 </div>
             </div>
         </div>
@@ -2854,38 +3099,78 @@ function getBeautifulStatus($status) {
                 </div>
                 <div id="calendar-container"></div>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
-                <!-- Upcoming Deadlines -->
-                <div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-top: 4px solid #E60012;">
-                    <h3 style="margin: 0 0 1.5rem 0; color: #495057; font-size: 1.3rem; font-weight: 600;">⏰ Upcoming Deadlines</h3>
-                    <div id="upcoming-deadlines" style="max-height: 400px; overflow-y: auto;">
-                        <!-- We'll populate this with JavaScript -->
+            
+            <!-- Active Reminders Section - REDESIGNED -->
+            <div class="active-reminders-container no-print">
+                <div class="active-reminders-header">
+                    <h3 class="active-reminders-title">⏰ Active Reminders</h3>
+                    <span class="active-reminders-count" id="activeRemindersCount">0</span>
+                </div>
+                <div class="active-reminders-body">
+                    <div class="active-reminders-list" id="active-reminders">
+                        <!-- Active reminders will be populated by JavaScript -->
                     </div>
                 </div>
-                <!-- Automated Reminders Configuration -->
-                <div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-top: 4px solid #E60012;" class="no-print">
-                    <h3 style="margin: 0 0 1.5rem 0; color: #495057; font-size: 1.3rem; font-weight: 600;">⚙️ Reminder Settings</h3>
-                    <p style="margin-bottom: 1rem; color: #6c757d;">Configure when to receive reminders for upcoming deadlines.</p>
-                    <div class="reminder-settings">
-                        <div class="reminder-option">
-                            <input type="checkbox" id="reminder7days" checked>
-                            <label for="reminder7days">7 days before deadline</label>
+            </div>
+            
+            <!-- REDESIGNED: Upcoming Deadlines Section -->
+            <div class="deadlines-container no-print">
+                <div class="deadlines-header">
+                    <h3 class="deadlines-title">⏰ Upcoming Deadlines</h3>
+                    <div class="deadlines-filter">
+                        <button class="deadlines-filter-btn active" data-filter="all">All</button>
+                        <button class="deadlines-filter-btn" data-filter="urgent">Urgent</button>
+                        <button class="deadlines-filter-btn" data-filter="warning">This Week</button>
+                    </div>
+                </div>
+                <div class="deadlines-body" id="upcoming-deadlines">
+                    <!-- Deadlines will be populated by JavaScript -->
+                </div>
+            </div>
+            
+            <!-- REDESIGNED: Reminder Settings Section -->
+            <div class="reminder-settings-container no-print">
+                <div class="reminder-settings-header">
+                    <h3 class="reminder-settings-title">⚙️ Reminder Settings</h3>
+                </div>
+                <div class="reminder-settings-body">
+                    <p class="reminder-settings-intro">
+                        Configure when to receive notifications for upcoming deadlines. Select one or more reminder options below.
+                    </p>
+                    
+                    <div class="reminder-options">
+                        <div class="reminder-option-card" data-reminder="7days">
+                            <div class="reminder-option-header">
+                                <input type="checkbox" id="reminder7days" class="reminder-option-checkbox" checked>
+                                <label for="reminder7days" class="reminder-option-title">7 days before</label>
+                            </div>
+                            <p class="reminder-option-description">Get notified a week before deadline</p>
                         </div>
-                        <div class="reminder-option">
-                            <input type="checkbox" id="reminder3days" checked>
-                            <label for="reminder3days">3 days before deadline</label>
+                        
+                        <div class="reminder-option-card" data-reminder="3days">
+                            <div class="reminder-option-header">
+                                <input type="checkbox" id="reminder3days" class="reminder-option-checkbox" checked>
+                                <label for="reminder3days" class="reminder-option-title">3 days before</label>
+                            </div>
+                            <p class="reminder-option-description">Get notified three days before deadline</p>
                         </div>
-                        <div class="reminder-option">
-                            <input type="checkbox" id="reminder1day" checked>
-                            <label for="reminder1day">1 day before deadline</label>
+                        
+                        <div class="reminder-option-card" data-reminder="1day">
+                            <div class="reminder-option-header">
+                                <input type="checkbox" id="reminder1day" class="reminder-option-checkbox" checked>
+                                <label for="reminder1day" class="reminder-option-title">1 day before</label>
+                            </div>
+                            <p class="reminder-option-description">Get notified one day before deadline</p>
                         </div>
                     </div>
-                    <button onclick="saveReminderSettings()" class="btn btn-primary" style="margin-top: 1rem;">Save Settings</button>
                     
-                    <div style="margin-top: 2rem;">
-                        <h4 style="margin: 0 0 1rem 0; color: #495057;">Active Reminders</h4>
-                        <div id="active-reminders" style="max-height: 200px; overflow-y: auto;">
-                            <!-- We'll populate this with JavaScript -->
+                    <div class="reminder-save-section">
+                        <button onclick="saveReminderSettings()" class="reminder-save-btn">
+                            <span>💾</span> Save Settings
+                        </button>
+                        <div class="reminder-status">
+                            <span class="reminder-status-indicator"></span>
+                            <span>Settings saved</span>
                         </div>
                     </div>
                 </div>
@@ -2944,7 +3229,7 @@ function getBeautifulStatus($status) {
             <!-- Departmental Rankings Table -->
             <div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-top: 4px solid #E60012; margin-bottom: 2rem;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-                    <h3 style="margin: 0; color: #495057; font-size: 1.3rem; font-weight: 600;">🏆 Departmental Rankings</h3>
+                    <h3 style="margin: 0; color: #495057; font-size: 1.3rem; font-weight: 600;"> Departmental Rankings</h3>
                     <div style="display: flex; gap: 1rem;" class="no-print">
                         <select id="rankSortBy" onchange="sortDepartmentRankings()" class="filter-input" style="width: 180px;">
                             <option value="total_risks">Total Risks</option>
@@ -3070,21 +3355,6 @@ function getBeautifulStatus($status) {
                     </div>
                 </div>
             </div>
-            
-            <!-- Department Risk Heatmap -->
-            <div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-top: 4px solid #E60012; margin-bottom: 2rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-                    <h3 style="margin: 0; color: #495057; font-size: 1.3rem; font-weight: 600;">🔥 Department Risk Heatmap</h3>
-                    <div style="display: flex; gap: 1rem;" class="no-print">
-                        <button onclick="refreshDepartmentHeatmap()" class="btn btn-primary btn-sm">
-                            <span>🔄</span> Refresh Data
-                        </button>
-                    </div>
-                </div>
-                <div class="chart-container-large">
-                    <canvas id="departmentRiskHeatmap"></canvas>
-                </div>
-            </div>
         </div>
     </main>
     
@@ -3109,7 +3379,7 @@ function getBeautifulStatus($status) {
     <div id="riskPopup" class="no-print">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
             <h3 style="margin: 0; color: #495057;">Risk Details</h3>
-            <button onclick="closeRiskPopup()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6c757d;">&times;</button>
+            <button onclick="closeRiskPopup(event)" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6c757d;">&times;</button>
         </div>
         <div id="riskPopupContent">
             <!-- Risk details will be loaded here -->
@@ -3118,16 +3388,17 @@ function getBeautifulStatus($status) {
     
     <script>
         // Global variables
-        let riskGroups = <?php echo json_encode($riskGroups); ?>;
         let animationTime = 0;
         let clickableAreas = [];
         let showingAllRisks = false;
         let allRisksData = <?php echo json_encode($all_risks); ?>;
         let recentRisksData = <?php echo json_encode($recent_risks); ?>;
         let boardRisksData = <?php echo json_encode($board_risks); ?>;
-        let currentData = recentRisksData;
-        let filteredData = recentRisksData;
-        let riskMatrixChart = null;
+        
+        // Source data management
+        let sourceData = recentRisksData;   // Initially showing recent risks
+        let filteredData = [...sourceData];  // Initially all recent risks (no filters)
+        
         let categoryDistributionChart = null;
         let departmentChart = null;
         let trendsChart = null;
@@ -3141,7 +3412,6 @@ function getBeautifulStatus($status) {
         
         // Initialize dashboard
         document.addEventListener('DOMContentLoaded', function() {
-            initializeOverviewCharts();
             initializeAnalyticsCharts();
             
             // Set up filter event listeners
@@ -3154,6 +3424,24 @@ function getBeautifulStatus($status) {
             
             // Set up department category filter search
             document.getElementById('deptCategorySearch').addEventListener('input', filterDeptCategoryOptions);
+            
+            // Set up deadline filter buttons
+            document.querySelectorAll('.deadlines-filter-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.deadlines-filter-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    filterDeadlines(this.dataset.filter);
+                });
+            });
+            
+            // Set up reminder option cards
+            document.querySelectorAll('.reminder-option-card').forEach(card => {
+                card.addEventListener('click', function() {
+                    const checkbox = this.querySelector('.reminder-option-checkbox');
+                    checkbox.checked = !checkbox.checked;
+                    this.classList.toggle('active', checkbox.checked);
+                });
+            });
             
             // Show notification if set
             <?php if (isset($_SESSION['message'])): ?>
@@ -3195,126 +3483,6 @@ function getBeautifulStatus($status) {
             if (tabName === 'departmental-rankings') {
                 initializeDepartmentalRankingsCharts();
             }
-        }
-        
-        // Initialize Overview Charts
-        function initializeOverviewCharts() {
-            const canvas = document.getElementById('liveRiskMatrix');
-            if (!canvas) return;
-            
-            const ctx = canvas.getContext('2d');
-            const width = canvas.width = 800;
-            const height = canvas.height = 400;
-            
-            // Create enhanced risk matrix chart
-            riskMatrixChart = new Chart(ctx, {
-                type: 'scatter',
-                data: {
-                    datasets: [{
-                        label: 'Single Report Risks',
-                        data: riskGroups.filter(group => !group.risk_id.startsWith('M')).map(group => ({
-                            x: Math.random() * 100,
-                            y: group.report_count,
-                            group: group
-                        })),
-                        backgroundColor: '#28a745',
-                        pointRadius: 8,
-                        pointHoverRadius: 10
-                    }, {
-                        label: 'Multiple Report Risks',
-                        data: riskGroups.filter(group => group.risk_id.startsWith('M')).map(group => ({
-                            x: Math.random() * 100,
-                            y: group.report_count,
-                            group: group
-                        })),
-                        backgroundColor: '#dc3545',
-                        pointRadius: 10,
-                        pointHoverRadius: 12
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Risk Timeline',
-                                color: '#495057',
-                                font: {
-                                    size: 14,
-                                    weight: 'bold'
-                                }
-                            },
-                            grid: {
-                                color: 'rgba(0, 0, 0, 0.05)'
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: 'Number of Times Reported',
-                                color: '#495057',
-                                font: {
-                                    size: 14,
-                                    weight: 'bold'
-                                }
-                            },
-                            beginAtZero: true,
-                            max: 10,
-                            ticks: {
-                                stepSize: 1
-                            },
-                            grid: {
-                                color: 'rgba(0, 0, 0, 0.05)'
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: {
-                                boxWidth: 15,
-                                padding: 15,
-                                font: {
-                                    size: 12
-                                }
-                            }
-                        },
-                        tooltip: {
-                            callbacks: {
-                                title: function(context) {
-                                    const group = context[0].raw.group;
-                                    return `Risk ID: ${group.risk_id}`;
-                                },
-                                label: function(context) {
-                                    const group = context.raw.group;
-                                    return [
-                                        `Reported: ${group.report_count} times`,
-                                        `Categories: ${group.categories.join(', ')}`,
-                                        `Risks in group: ${group.risks.length}`
-                                    ];
-                                }
-                            },
-                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                            titleColor: '#fff',
-                            bodyColor: '#fff',
-                            borderColor: '#E60012',
-                            borderWidth: 1,
-                            cornerRadius: 6,
-                            displayColors: false
-                        }
-                    },
-                    onClick: function(event, elements) {
-                        if (elements.length > 0) {
-                            const index = elements[0].index;
-                            const datasetIndex = elements[0].datasetIndex;
-                            const group = riskMatrixChart.data.datasets[datasetIndex].data[index].group;
-                            showRiskDetails(group);
-                        }
-                    }
-                }
-            });
         }
         
         // Initialize Analytics Charts
@@ -3804,107 +3972,6 @@ function getBeautifulStatus($status) {
             
             // Initialize Department Category Breakdown Chart
             initializeDeptCategoryBreakdownChart();
-            
-            // Department Risk Heatmap
-            const heatmapCanvas = document.getElementById('departmentRiskHeatmap');
-            if (heatmapCanvas) {
-                const ctx = heatmapCanvas.getContext('2d');
-                
-                if (deptRankings.length > 0) {
-                    // Prepare data for heatmap
-                    const departments = deptRankings.map(d => d.department);
-                    const totalRisks = deptRankings.map(d => d.total_risks);
-                    
-                    // Create a matrix for the heatmap
-                    const heatmapData = [];
-                    
-                    // Add total risks data
-                    for (let i = 0; i < departments.length; i++) {
-                        heatmapData.push({
-                            x: departments[i],
-                            y: 'Total Risks',
-                            v: totalRisks[i]
-                        });
-                    }
-                    
-                    new Chart(ctx, {
-                        type: 'matrix',
-                        data: {
-                            datasets: [{
-                                label: 'Department Risk Levels',
-                                data: heatmapData,
-                                backgroundColor(context) {
-                                    const value = context.dataset.data[context.dataIndex].v;
-                                    const alpha = 0.7;
-                                    
-                                    // Different colors for different risk levels
-                                    return `rgba(230, 0, 18, ${alpha})`;
-                                },
-                                borderColor: 'rgba(255, 255, 255, 0.5)',
-                                borderWidth: 1,
-                                width: ({ chart }) => (chart.chartArea || {}).width / departments.length - 1,
-                                height: ({ chart }) => (chart.chartArea || {}).height / 1 - 1
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                                legend: false,
-                                tooltip: {
-                                    callbacks: {
-                                        title() {
-                                            return '';
-                                        },
-                                        label(context) {
-                                            const v = context.dataset.data[context.dataIndex];
-                                            return [
-                                                `Department: ${v.x}`,
-                                                `Risk Level: ${v.y}`,
-                                                `Count: ${v.v}`
-                                            ];
-                                        }
-                                    }
-                                }
-                            },
-                            scales: {
-                                x: {
-                                    type: 'category',
-                                    labels: departments,
-                                    title: {
-                                        display: true,
-                                        text: 'Departments',
-                                        color: '#495057',
-                                        font: {
-                                            size: 14,
-                                            weight: 'bold'
-                                        }
-                                    },
-                                    ticks: {
-                                        autoSkip: false,
-                                        maxRotation: 45,
-                                        minRotation: 45
-                                    }
-                                },
-                                y: {
-                                    type: 'category',
-                                    labels: ['Total Risks'],
-                                    offset: true,
-                                    title: {
-                                        display: true,
-                                        text: 'Risk Levels',
-                                        color: '#495057',
-                                        font: {
-                                            size: 14,
-                                            weight: 'bold'
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    });
-                }
-            }
         }
         
         // Initialize Department Category Breakdown Chart
@@ -4011,6 +4078,8 @@ function getBeautifulStatus($status) {
         // Department Category Filter Functions
         function toggleDeptCategoryDropdown() {
             const dropdown = document.getElementById('deptCategoryFilterDropdown');
+            const deptCategoryInput = document.getElementById('deptCategoryFilterInput');
+            
             dropdown.classList.toggle('show');
         }
         
@@ -4097,10 +4166,11 @@ function getBeautifulStatus($status) {
             populateActiveReminders();
         }
         
-        // Populate upcoming deadlines
+        // REDESIGNED: Populate upcoming deadlines
         function populateUpcomingDeadlines() {
             const container = document.getElementById('upcoming-deadlines');
             container.innerHTML = '';
+            
             // Get events that are in the next 30 days
             const today = new Date();
             const thirtyDaysLater = new Date();
@@ -4109,37 +4179,85 @@ function getBeautifulStatus($status) {
                 const eventDate = new Date(event.start);
                 return eventDate >= today && eventDate <= thirtyDaysLater;
             });
+            
             // Sort by date
             upcomingEvents.sort((a, b) => new Date(a.start) - new Date(b.start));
+            
             if (upcomingEvents.length === 0) {
-                container.innerHTML = '<p style="text-align: center; color: #6c757d;">No upcoming deadlines in the next 30 days.</p>';
+                container.innerHTML = `
+                    <div class="empty-deadlines">
+                        <div class="empty-deadlines-icon"></div>
+                        <p>No upcoming deadlines in the next 30 days.</p>
+                    </div>
+                `;
                 return;
             }
+            
             upcomingEvents.forEach(event => {
                 const eventDate = new Date(event.start);
                 const daysUntil = Math.ceil((eventDate - today) / (1000 * 60 * 60 * 24));
-                let urgencyClass = 'deadline-info';
                 
+                // Determine urgency class
+                let urgencyClass = 'info';
                 if (daysUntil <= 1) {
-                    urgencyClass = 'deadline-urgent';
-                } else if (daysUntil <= 3) {
-                    urgencyClass = 'deadline-warning';
+                    urgencyClass = 'urgent';
+                } else if (daysUntil <= 7) {
+                    urgencyClass = 'warning';
                 }
+                
+                // Calculate progress percentage
+                const progressPercentage = Math.max(0, Math.min(100, 100 - (daysUntil / 30) * 100));
+                
                 const eventEl = document.createElement('div');
-                eventEl.className = `deadline-item ${urgencyClass}`;
+                eventEl.className = `deadline-card ${urgencyClass}`;
                 eventEl.innerHTML = `
-                    <h5 style="margin: 0 0 0.5rem 0; color: #495057;">${event.title}</h5>
-                    <p style="margin: 0 0 0.5rem 0; color: #6c757d;">${event.extendedProps.department} - ${event.extendedProps.type}</p>
-                    <p style="margin: 0; font-weight: 500;">Due in ${daysUntil} day(s) (${eventDate.toLocaleDateString()})</p>
+                    <div class="deadline-card-header">
+                        <h4 class="deadline-title">${event.title}</h4>
+                        <span class="deadline-days">${daysUntil} day${daysUntil !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div class="deadline-meta">
+                        <div class="deadline-meta-item">
+                            <span class="deadline-meta-icon">🏢</span>
+                            <span>${event.extendedProps.department}</span>
+                        </div>
+                        <div class="deadline-meta-item">
+                            <span class="deadline-meta-icon">📋</span>
+                            <span>${event.extendedProps.type}</span>
+                        </div>
+                    </div>
+                    <div class="deadline-date">
+                        Due: ${eventDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                    </div>
+                    <div class="deadline-progress">
+                        <div class="deadline-progress-bar" style="width: ${progressPercentage}%"></div>
+                    </div>
                 `;
                 container.appendChild(eventEl);
+            });
+        }
+        
+        // REDESIGNED: Filter deadlines by urgency
+        function filterDeadlines(filter) {
+            const container = document.getElementById('upcoming-deadlines');
+            const deadlineCards = container.querySelectorAll('.deadline-card');
+            
+            deadlineCards.forEach(card => {
+                if (filter === 'all') {
+                    card.style.display = 'block';
+                } else if (filter === 'urgent') {
+                    card.style.display = card.classList.contains('urgent') ? 'block' : 'none';
+                } else if (filter === 'warning') {
+                    card.style.display = card.classList.contains('warning') ? 'block' : 'none';
+                }
             });
         }
         
         // Populate active reminders
         function populateActiveReminders() {
             const container = document.getElementById('active-reminders');
+            const countElement = document.getElementById('activeRemindersCount');
             container.innerHTML = '';
+            
             // Get events that are in the next 7 days
             const today = new Date();
             const sevenDaysLater = new Date();
@@ -4148,27 +4266,27 @@ function getBeautifulStatus($status) {
                 const eventDate = new Date(event.start);
                 return eventDate >= today && eventDate <= sevenDaysLater;
             });
+            
+            // Update count
+            countElement.textContent = reminderEvents.length;
+            
             if (reminderEvents.length === 0) {
-                container.innerHTML = '<p style="text-align: center; color: #6c757d;">No active reminders.</p>';
+                container.innerHTML = '<p style="text-align: center; padding: 1rem; color: #6c757d;">No active reminders.</p>';
                 return;
             }
+            
             reminderEvents.forEach(event => {
                 const eventDate = new Date(event.start);
                 const daysUntil = Math.ceil((eventDate - today) / (1000 * 60 * 60 * 24));
                 
                 const reminderEl = document.createElement('div');
-                reminderEl.className = 'deadline-item';
-                reminderEl.style.marginBottom = '0.75rem';
+                reminderEl.className = 'active-reminder-item';
                 reminderEl.innerHTML = `
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <h6 style="margin: 0 0 0.25rem 0; color: #495057;">${event.title}</h6>
-                            <p style="margin: 0; color: #6c757d; font-size: 0.85rem;">${event.extendedProps.department}</p>
-                        </div>
-                        <span style="padding: 0.25rem 0.5rem; background: #17a2b8; color: white; border-radius: 10px; font-size: 0.75rem;">
-                            ${daysUntil} day(s)
-                        </span>
+                    <div class="active-reminder-content">
+                        <div class="active-reminder-title">${event.title}</div>
+                        <div class="active-reminder-meta">${event.extendedProps.department}</div>
                     </div>
+                    <span class="active-reminder-days">${daysUntil}d</span>
                 `;
                 container.appendChild(reminderEl);
             });
@@ -4221,17 +4339,25 @@ function getBeautifulStatus($status) {
             showNotification('Calendar refreshed successfully', 'success');
         }
         
-        // Save reminder settings
+        // REDESIGNED: Save reminder settings
         function saveReminderSettings() {
             const reminder7days = document.getElementById('reminder7days').checked;
             const reminder3days = document.getElementById('reminder3days').checked;
             const reminder1day = document.getElementById('reminder1day').checked;
+            
             // In a real application, we would save these settings to the user's profile
             // For now, we'll just show a notification
             showNotification('Reminder settings saved successfully', 'success');
             
             // Update active reminders
             populateActiveReminders();
+            
+            // Update status indicator
+            const statusIndicator = document.querySelector('.reminder-status-indicator');
+            statusIndicator.style.background = '#28a745';
+            setTimeout(() => {
+                statusIndicator.style.background = '#6c757d';
+            }, 3000);
         }
         
         // FILTER FUNCTION - CORRECTED TO HANDLE NEW RISK ID FORMAT
@@ -4243,49 +4369,18 @@ function getBeautifulStatus($status) {
             const dateFrom = document.getElementById('dateFrom').value;
             const dateTo = document.getElementById('dateTo').value;
             
-            // Apply filters to current data
-            filteredData = currentData.filter(risk => {
-                // Filter by Risk ID - CORRECTED to handle new format like RC/2025/09/01
+            filteredData = sourceData.filter(risk => {
+                // Filter by Risk ID - Simplified and corrected logic
                 if (searchRiskId) {
-                    // Check if search term matches any part of the risk ID
-                    const numericId = risk.id.toString();
+                    const numericId = risk.id.toString().toLowerCase();
                     const customRiskId = risk.custom_risk_id ? risk.custom_risk_id.toLowerCase() : '';
-                    const searchLower = searchRiskId.toLowerCase();
+                    const searchLower = searchRiskId.toLowerCase().trim();
                     
-                    // Check for direct match with numeric ID
-                    const idMatch = numericId.includes(searchLower);
+                    // Simple includes check covers all cases
+                    const matchesNumericId = numericId.includes(searchLower);
+                    const matchesCustomId = customRiskId.includes(searchLower);
                     
-                    // Check for match with custom risk ID (any format)
-                    const customIdMatch = customRiskId.includes(searchLower);
-                    
-                    // Check for RC format match (e.g., RC/2025/09/01)
-                    const rcFormatMatch = searchLower.includes('rc/') && 
-                                      customRiskId.includes(searchLower);
-                    
-                    // Check for RSK format match (e.g., user types "RSK" or "2023" or "12345")
-                    const rskFormatMatch = searchLower.startsWith('rsk') && 
-                                        customRiskId.includes(searchLower.substring(3));
-                    
-                    // Check for M-prefixed format match
-                    const mFormatMatch = searchLower.startsWith('m') && 
-                                      customRiskId.includes(searchLower.substring(1));
-                    
-                    // Check for year match (e.g., user types "2025")
-                    const yearMatch = searchLower.length === 4 && 
-                                     !isNaN(searchLower) && 
-                                     customRiskId.includes(searchLower);
-                    
-                    // Check for month/day match (e.g., user types "09/01")
-                    const monthDayMatch = searchLower.includes('/') && 
-                                        customRiskId.includes(searchLower);
-                    
-                    // Check for random number match (last 5 digits)
-                    const randomNumMatch = searchLower.length === 5 && 
-                                         !isNaN(searchLower) && 
-                                         customRiskId.substring(customRiskId.length - 5) === searchLower;
-                    
-                    if (!idMatch && !customIdMatch && !rcFormatMatch && !rskFormatMatch && 
-                        !mFormatMatch && !yearMatch && !monthDayMatch && !randomNumMatch) {
+                    if (!matchesNumericId && !matchesCustomId) {
                         return false;
                     }
                 }
@@ -4300,24 +4395,33 @@ function getBeautifulStatus($status) {
                     return false;
                 }
                 
-                // Filter by Board Reporting
-                const boardReportStatus = risk.to_be_reported_to_board || 'NO';
+                // Filter by Board Reporting - Fixed to handle null/undefined values
+                const boardReportStatus = risk.to_be_reported_to_board === 'YES' ? 'YES' : 'NO';
                 if (boardFilter !== 'all' && boardReportStatus !== boardFilter) {
                     return false;
                 }
                 
-                // Filter by Date Range
-                const riskDate = new Date(risk.created_at);
-                if (dateFrom && riskDate < new Date(dateFrom)) {
-                    return false;
-                }
-                
-                if (dateTo) {
-                    // Add one day to the "to" date to include the entire day
-                    const toDate = new Date(dateTo);
-                    toDate.setDate(toDate.getDate() + 1);
-                    if (riskDate > toDate) {
-                        return false;
+                // Filter by Date Range - Fixed date comparison logic
+                if (dateFrom || dateTo) {
+                    const riskDate = new Date(risk.created_at);
+                    // Reset time to start of day for accurate comparison
+                    riskDate.setHours(0, 0, 0, 0);
+                    
+                    if (dateFrom) {
+                        const fromDate = new Date(dateFrom);
+                        fromDate.setHours(0, 0, 0, 0);
+                        if (riskDate < fromDate) {
+                            return false;
+                        }
+                    }
+                    
+                    if (dateTo) {
+                        const toDate = new Date(dateTo);
+                        // Set to end of day to include the entire day
+                        toDate.setHours(23, 59, 59, 999);
+                        if (riskDate > toDate) {
+                            return false;
+                        }
                     }
                 }
                 
@@ -4330,9 +4434,9 @@ function getBeautifulStatus($status) {
             // Update table title
             const tableTitle = document.getElementById('tableTitle');
             if (showingAllRisks) {
-                tableTitle.textContent = `All Risks (${filteredData.length} of ${allRisksData.length})`;
+                tableTitle.textContent = `All Risks (${filteredData.length} of ${sourceData.length})`;
             } else {
-                tableTitle.textContent = `Recent Risks (${filteredData.length} of ${recentRisksData.length})`;
+                tableTitle.textContent = `Recent Risks (${filteredData.length} of ${sourceData.length})`;
             }
         }
         
@@ -4411,19 +4515,19 @@ function getBeautifulStatus($status) {
             
             if (!showingAllRisks) {
                 // Show all risks
-                currentData = allRisksData;
+                sourceData = allRisksData;
                 tableTitle.textContent = `All Risks (${allRisksData.length})`;
                 viewAllBtn.textContent = 'Show Recent Only';
                 showingAllRisks = true;
             } else {
                 // Show recent risks only
-                currentData = recentRisksData;
+                sourceData = recentRisksData;
                 tableTitle.textContent = 'Recent Risks (Last 10)';
                 viewAllBtn.textContent = 'View All Risks';
                 showingAllRisks = false;
             }
             
-            // Apply current filters to the new data set
+            // Apply the current filters to the new source data
             applyFilters();
         }
         
@@ -4435,70 +4539,19 @@ function getBeautifulStatus($status) {
             document.getElementById('dateFrom').value = '';
             document.getElementById('dateTo').value = '';
             
-            // Reset filtered data to current data
-            filteredData = [...currentData];
+            // Reset filteredData to the entire sourceData
+            filteredData = [...sourceData];
+            
+            // Update the table
             updateRisksTable(filteredData);
             
             // Update table title
             const tableTitle = document.getElementById('tableTitle');
             if (showingAllRisks) {
-                tableTitle.textContent = `All Risks (${allRisksData.length})`;
+                tableTitle.textContent = `All Risks (${sourceData.length})`;
             } else {
                 tableTitle.textContent = 'Recent Risks (Last 10)';
             }
-        }
-        
-        function filterRiskMatrix() {
-            const department = document.getElementById('matrixDepartmentFilter').value;
-            
-            // Filter risk groups based on selected department
-            let filteredGroups = riskGroups;
-            
-            if (department !== 'all') {
-                filteredGroups = riskGroups.filter(group => {
-                    return group.risks.some(risk => risk.department === department);
-                });
-            }
-            
-            // Update the chart with filtered data
-            if (riskMatrixChart) {
-                riskMatrixChart.data.datasets[0].data = filteredGroups.filter(group => !group.risk_id.startsWith('M')).map(group => ({
-                    x: Math.random() * 100,
-                    y: group.report_count,
-                    group: group
-                }));
-                
-                riskMatrixChart.data.datasets[1].data = filteredGroups.filter(group => group.risk_id.startsWith('M')).map(group => ({
-                    x: Math.random() * 100,
-                    y: group.report_count,
-                    group: group
-                }));
-                
-                riskMatrixChart.update();
-            }
-        }
-        
-        function refreshRiskMatrix() {
-            // Show loading indicator
-            const refreshBtn = event.target;
-            const originalText = refreshBtn.innerHTML;
-            refreshBtn.innerHTML = '<span class="spinner"></span> Loading...';
-            refreshBtn.disabled = true;
-            
-            // Simulate data refresh
-            setTimeout(() => {
-                // Re-initialize the chart with updated data
-                if (riskMatrixChart) {
-                    riskMatrixChart.update();
-                }
-                
-                // Reset button
-                refreshBtn.innerHTML = originalText;
-                refreshBtn.disabled = false;
-                
-                // Show success message
-                showNotification('Risk data refreshed successfully', 'success');
-            }, 1000);
         }
         
         function showNotification(message, type = 'info') {
@@ -4552,77 +4605,6 @@ function getBeautifulStatus($status) {
         }
         
         // Risk details functions
-        function showRiskDetails(group) {
-            const popup = document.getElementById('riskPopup');
-            const overlay = document.getElementById('riskPopupOverlay');
-            
-            // Fixed: Ensure categories is an array before using map
-            const categories = Array.isArray(group.categories) ? group.categories : [];
-            
-            let content = `
-                <div style="margin-bottom: 1rem;">
-                    <h4 style="color: #E60012; margin: 0 0 0.5rem 0;">Risk Group ID: ${group.risk_id}</h4>
-                    <p style="margin: 0; color: #6c757d; font-weight: 500;">Reported ${group.report_count} time(s)</p>
-                </div>
-                
-                <div style="margin-bottom: 1.5rem;">
-                    <h5 style="margin: 0 0 0.5rem 0; color: #495057;">Risk Categories:</h5>
-                    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                        ${categories.map(cat => `<span style="background: #E60012; color: white; padding: 0.25rem 0.75rem; border-radius: 15px; font-size: 0.8rem;">${cat}</span>`).join('')}
-                    </div>
-                </div>
-                
-                <div>
-                    <h5 style="margin: 0 0 1rem 0; color: #495057;">Individual Risk Reports:</h5>
-                    <div style="max-height: 300px; overflow-y: auto; padding-right: 10px;">
-            `;
-            
-            group.risks.forEach(risk => {
-                // Format risk ID display
-                let riskIdDisplay = '';
-                if (risk.custom_risk_id) {
-                    riskIdDisplay = `<span class="risk-id-badge">${risk.custom_risk_id}</span>`;
-                } else {
-                    riskIdDisplay = risk.id;
-                }
-                
-                // Get beautiful status display
-                const statusInfo = getBeautifulStatus(risk.status);
-                
-                content += `
-                    <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; margin-bottom: 0.75rem; border-left: 4px solid #E60012;">
-                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
-                            <h6 style="margin: 0; color: #495057; font-weight: 600;">Risk ID: ${riskIdDisplay}</h6>
-                            <span style="background: ${getRiskLevelColor(risk.risk_level)}; color: white; padding: 0.2rem 0.5rem; border-radius: 10px; font-size: 0.7rem;">${risk.risk_level}</span>
-                        </div>
-                        <p style="margin: 0 0 0.5rem 0; font-weight: 500; color: #333;">${risk.risk_name}</p>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.85rem; color: #6c757d;">
-                            <p style="margin: 0;"><strong>Department:</strong> ${risk.department}</p>
-                            <p style="margin: 0;"><strong>Status:</strong> ${statusInfo['text']}</p>
-                            <p style="margin: 0;"><strong>Reporter:</strong> ${risk.reporter_name || 'N/A'}</p>
-                            <p style="margin: 0;"><strong>Date:</strong> ${new Date(risk.created_at).toLocaleDateString()}</p>
-                            <p style="margin: 0;"><strong>Board Report:</strong> ${risk.to_be_reported_to_board || 'NO'}</p>
-                        </div>
-                        ${risk.risk_description ? `<p style="margin: 0.5rem 0 0 0; font-size: 0.85rem; color: #495057; font-style: italic;">${risk.risk_description}</p>` : ''}
-                    </div>
-                `;
-            });
-            
-            content += `
-                    </div>
-                </div>
-            `;
-            
-            document.getElementById('riskPopupContent').innerHTML = content;
-            popup.style.display = 'block';
-            overlay.style.display = 'block';
-        }
-        
-        function closeRiskPopup() {
-            document.getElementById('riskPopup').style.display = 'none';
-            document.getElementById('riskPopupOverlay').style.display = 'none';
-        }
-        
         function getRiskLevelColor(level) {
             switch(level?.toLowerCase()) {
                 case 'critical': return '#dc3545';
@@ -5117,27 +5099,6 @@ function getBeautifulStatus($status) {
             });
         }
         
-        function refreshDepartmentHeatmap() {
-            // Show loading indicator
-            const refreshBtn = event.target;
-            const originalText = refreshBtn.innerHTML;
-            refreshBtn.innerHTML = '<span class="spinner"></span> Loading...';
-            refreshBtn.disabled = true;
-            
-            // Simulate data refresh
-            setTimeout(() => {
-                // Re-initialize the heatmap with updated data
-                initializeDepartmentalRankingsCharts();
-                
-                // Reset button
-                refreshBtn.innerHTML = originalText;
-                refreshBtn.disabled = false;
-                
-                // Show success message
-                showNotification('Department heatmap refreshed successfully', 'success');
-            }, 1000);
-        }
-        
         function viewDepartmentDetails(department) {
             // Redirect to a filtered view of risks for this department
             window.location.href = `risk_register.php?department=${encodeURIComponent(department)}`;
@@ -5172,6 +5133,15 @@ function getBeautifulStatus($status) {
                 deptCategoryDropdown.classList.remove('show');
             }
         });
+        
+        // CloseRiskPopup function to properly close the popup
+        function closeRiskPopup(event) {
+            if (event) {
+                event.stopPropagation();
+            }
+            document.getElementById('riskPopup').style.display = 'none';
+            document.getElementById('riskPopupOverlay').style.display = 'none';
+        }
     </script>
 </body>
 </html>
