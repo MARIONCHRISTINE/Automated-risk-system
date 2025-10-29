@@ -7,7 +7,7 @@ include_once 'config/database.php';
 
 // Set active tab from URL parameter
  $activeTab = 'overview'; // default
-if (isset($_GET['tab']) && in_array($_GET['tab'], ['overview', 'board', 'analytics', 'notifications', 'calendar', 'departmental-rankings'])) {
+if (isset($_GET['tab']) && in_array($_GET['tab'], ['overview', 'board', 'analytics', 'calendar', 'departmental-rankings'])) {
     $activeTab = $_GET['tab'];
 }
 
@@ -58,16 +58,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_board_report']))
             }
             
             $message = count($selectedRisks) . " risks successfully reported to board.";
-            header("Location: " . $_SERVER['PHP_SELF'] . "?tab=notifications&message=" . urlencode($message) . "&type=success");
+            header("Location: " . $_SERVER['PHP_SELF'] . "?tab=overview&message=" . urlencode($message) . "&type=success");
             exit();
         } else {
             $message = "Error reporting risks to board.";
-            header("Location: " . $_SERVER['PHP_SELF'] . "?tab=notifications&message=" . urlencode($message) . "&type=error");
+            header("Location: " . $_SERVER['PHP_SELF'] . "?tab=overview&message=" . urlencode($message) . "&type=error");
             exit();
         }
     } else {
         $message = "No risks selected for board reporting.";
-        header("Location: " . $_SERVER['PHP_SELF'] . "?tab=notifications&message=" . urlencode($message) . "&type=warning");
+        header("Location: " . $_SERVER['PHP_SELF'] . "?tab=overview&message=" . urlencode($message) . "&type=warning");
         exit();
     }
 }
@@ -98,11 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['risk_id']) && isset($
         }
         
         $message = "Risk status updated successfully.";
-        if ($reportToBoard === 'YES' && ($riskDetails['risk_level'] === 'High' || $riskDetails['risk_level'] === 'Critical')) {
-            header("Location: " . $_SERVER['PHP_SELF'] . "?tab=notifications&message=" . urlencode($message) . "&type=success");
-        } else {
-            header("Location: " . $_SERVER['PHP_SELF']);
-        }
+        header("Location: " . $_SERVER['PHP_SELF'] . "?tab=overview&message=" . urlencode($message) . "&type=success");
         exit();
     }
 }
@@ -167,12 +163,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['risk_id']) && isset($
  $stats_stmt->execute();
  $stats = $stats_stmt->fetch(PDO::FETCH_ASSOC);
 
-// Get recent activity from audit_logs
- $alerts_query = "SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 10";
- $alerts_stmt = $db->prepare($alerts_query);
- $alerts_stmt->execute();
- $recent_alerts = $alerts_stmt->fetchAll(PDO::FETCH_ASSOC);
-
 // Get upcoming deadlines from risk_incidents - FIXED to ensure status is always fetched correctly
  $reviews_query = "SELECT risk_name, department, planned_completion_date as review_date, 'Risk Review' as review_type 
                  FROM risk_incidents 
@@ -205,9 +195,13 @@ ORDER BY start ASC";
  $calendarEvents = [];
 foreach ($events as $event) {
     $riskIdDisplay = !empty($event['custom_risk_id']) ? $event['custom_risk_id'] : $event['id'];
+    
+    // Get day of week name
+    $dayOfWeek = date('l', strtotime($event['start']));
+    
     $calendarEvents[] = [
         'id' => $event['id'],
-        'title' => $riskIdDisplay . ' - ' . $event['title'] . ' (' . $event['type'] . ')',
+        'title' => $riskIdDisplay . ' - ' . $event['title'] . ' (' . $dayOfWeek . ')',
         'start' => $event['start'],
         'backgroundColor' => getEventColor($event['risk_level']),
         'borderColor' => getEventColor($event['risk_level']),
@@ -216,7 +210,8 @@ foreach ($events as $event) {
             'risk_level' => $event['risk_level'],
             'status' => $event['status'],
             'type' => $event['type'],
-            'custom_risk_id' => $event['custom_risk_id']
+            'custom_risk_id' => $event['custom_risk_id'],
+            'day_of_week' => $dayOfWeek
         ]
     ];
 }
@@ -812,6 +807,34 @@ function getBeautifulStatus($status) {
         color: rgba(255, 255, 255, 0.9);
         margin: 0;
         line-height: 1.2;
+    }
+    
+    .notification-icon {
+        position: relative;
+        cursor: pointer;
+        margin-right: 1rem;
+        color: white;
+    }
+    
+    .notification-badge {
+        position: absolute;
+        top: -8px;
+        right: -8px;
+        background: #ffc107;
+        color: #212529;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        font-weight: bold;
+    }
+    
+    .notification-icon svg {
+        width: 24px;
+        height: 24px;
     }
     
     .logout-btn {
@@ -1530,12 +1553,35 @@ function getBeautifulStatus($status) {
         position: relative;
         height: 300px;
         width: 100%;
+        background: white;
+        border-radius: 8px;
+        padding: 1rem;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
     }
     
     .chart-container-large {
         position: relative;
         height: 400px;
         width: 100%;
+        background: white;
+        border-radius: 8px;
+        padding: 1rem;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+    
+    .chart-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: 0.5rem;
+        text-align: center;
+    }
+    
+    .chart-subtitle {
+        font-size: 0.9rem;
+        color: #6c757d;
+        margin-bottom: 1rem;
+        text-align: center;
     }
     
     /* Custom date range fields */
@@ -1776,6 +1822,7 @@ function getBeautifulStatus($status) {
         margin-bottom: 2rem;
     }
     
+    /* Custom FullCalendar Styles */
     .fc-theme-standard .fc-scrollgrid {
         border-radius: 8px;
         overflow: hidden;
@@ -1788,7 +1835,44 @@ function getBeautifulStatus($status) {
     }
     
     .fc-event-title {
+        font-weight: 600;
+    }
+    
+    /* Enhanced event display with day names */
+    .fc-daygrid-event {
+        white-space: normal;
+        word-wrap: break-word;
+    }
+    
+    .fc-daygrid-event .fc-event-title {
+        font-weight: 600;
+        line-height: 1.2;
+    }
+    
+    .fc-daygrid-event .fc-event-time {
         font-weight: 500;
+        font-size: 0.75rem;
+        opacity: 0.8;
+    }
+    
+    /* Custom event styling for day names */
+    .fc-event-day-name {
+        display: block;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        margin-bottom: 2px;
+        opacity: 0.9;
+        background: rgba(0,0,0,0.05);
+        padding: 1px 3px;
+        border-radius: 2px;
+    }
+    
+    /* Day header styling */
+    .fc-col-header-cell-cushion {
+        font-weight: 600;
+        color: #495057;
+        padding: 8px 4px;
     }
     
     /* Upcoming Deadlines - REDESIGNED */
@@ -1980,17 +2064,18 @@ function getBeautifulStatus($status) {
         opacity: 0.5;
     }
     
-    /* Active Reminders Section - REDESIGNED */
+    /* Active Reminders Section - REDESIGNED WITH RED COLOR */
     .active-reminders-container {
         background: white;
         border-radius: 12px;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
         overflow: hidden;
         margin-bottom: 2rem;
+        border-left: 5px solid #dc3545; /* Red accent */
     }
     
     .active-reminders-header {
-        background: linear-gradient(135deg, #28a745 0%, #218838 100%);
+        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); /* Red gradient */
         color: white;
         padding: 1.25rem 1.5rem;
         display: flex;
@@ -2028,14 +2113,12 @@ function getBeautifulStatus($status) {
         margin-bottom: 0.5rem;
         background: #f8f9fa;
         transition: all 0.2s ease;
+        border-left: 3px solid #dc3545; /* Red accent */
     }
     
     .active-reminder-item:hover {
-        background: #e9ecef;
-    }
-    
-    .active-reminder-item:last-child {
-        margin-bottom: 0;
+        background: #fff5f5; /* Light red on hover */
+        transform: translateX(5px);
     }
     
     .active-reminder-content {
@@ -2055,7 +2138,7 @@ function getBeautifulStatus($status) {
     }
     
     .active-reminder-days {
-        background: #28a745;
+        background: #dc3545; /* Red background */
         color: white;
         border-radius: 20px;
         padding: 0.25rem 0.6rem;
@@ -2425,6 +2508,13 @@ function getBeautifulStatus($status) {
                     <div class="user-email"><?php echo isset($_SESSION['email']) ? $_SESSION['email'] : '232000@airtel.africa'; ?></div>
                     <div class="user-role"><?php echo isset($_SESSION['department']) ? $_SESSION['department'] . ' • Airtel Money' : 'Compliance • Airtel Money'; ?></div>
                 </div>
+                <div class="notification-icon">
+                    <span class="notification-badge">3</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                    </svg>
+                </div>
                 <a href="logout.php" class="logout-btn no-print">Logout</a>
             </div>
         </div>
@@ -2435,33 +2525,28 @@ function getBeautifulStatus($status) {
         <div class="nav-content">
             <ul class="nav-menu">
                 <li class="nav-item">
-                    <a href="#" <?php echo $activeTab === 'overview' ? 'class="active"' : ''; ?> onclick="showTab('overview')">
+                    <a href="#" <?php echo $activeTab === 'overview' ? 'class="active"' : ''; ?> onclick="showTab('overview', event)">
                         <span>📊</span> Overview
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a href="#" <?php echo $activeTab === 'board' ? 'class="active"' : ''; ?> onclick="showTab('board')">
+                    <a href="#" <?php echo $activeTab === 'board' ? 'class="active"' : ''; ?> onclick="showTab('board', event)">
                         <span>📋</span> Board Risks
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a href="#" <?php echo $activeTab === 'analytics' ? 'class="active"' : ''; ?> onclick="showTab('analytics')">
+                    <a href="#" <?php echo $activeTab === 'analytics' ? 'class="active"' : ''; ?> onclick="showTab('analytics', event)">
                         <span>📈</span> Analytics
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a href="#" <?php echo $activeTab === 'notifications' ? 'class="active"' : ''; ?> onclick="showTab('notifications')">
-                        <span>🔔</span> Notifications
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="#" <?php echo $activeTab === 'calendar' ? 'class="active"' : ''; ?> onclick="showTab('calendar')">
+                    <a href="#" <?php echo $activeTab === 'calendar' ? 'class="active"' : ''; ?> onclick="showTab('calendar', event)">
                         <span>📅</span> Calendar
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a href="#" <?php echo $activeTab === 'departmental-rankings' ? 'class="active"' : ''; ?> onclick="showTab('departmental-rankings')">
-                        <span></span> Departmental Rankings
+                    <a href="#" <?php echo $activeTab === 'departmental-rankings' ? 'class="active"' : ''; ?> onclick="showTab('departmental-rankings', event)">
+                        <span>🏢</span> Departmental Rankings
                     </a>
                 </li>
             </ul>
@@ -3012,68 +3097,6 @@ function getBeautifulStatus($status) {
             </div>
         </div>
         
-        <!-- Notifications Tab -->
-        <div id="notifications" class="tab-content <?php echo $activeTab === 'notifications' ? 'active' : ''; ?>">
-            <div class="report-header print-only">
-                <div class="report-title">Notifications Report</div>
-                <div class="report-subtitle">Recent Alerts and Upcoming Reviews</div>
-                <div class="report-date">Generated on: <?php echo date('F j, Y'); ?></div>
-            </div>
-            
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
-                <!-- Recent Alerts -->
-                <div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-top: 4px solid #E60012;">
-                    <h3 style="margin: 0 0 1.5rem 0; color: #495057; font-size: 1.3rem; font-weight: 600;">🚨 Recent Alerts</h3>
-                    <div style="max-height: 400px; overflow-y: auto;">
-                        <?php if (empty($recent_alerts)): ?>
-                        <div style="text-align: center; padding: 2rem; color: #6c757d;">
-                            <p>No recent alerts</p>
-                        </div>
-                        <?php else: ?>
-                        <?php foreach ($recent_alerts as $alert): 
-                            // Add special styling for high/critical risk alerts
-                            $alertClass = '';
-                            if (strpos($alert['title'], 'High/Critical Risk') !== false) {
-                                if (strpos($alert['message'], 'Critical') !== false) {
-                                    $alertClass = 'alert-critical';
-                                } else {
-                                    $alertClass = 'alert-highlight';
-                                }
-                            }
-                        ?>
-                        <div style="margin-bottom: 1rem; padding: 1rem; border-left: 4px solid #dc3545; background: #fff5f5; border-radius: 6px; <?php echo $alertClass; ?>">
-                            <h4 style="margin: 0 0 0.5rem 0; color: #dc3545; font-size: 1rem;"><?php echo htmlspecialchars($alert['title']); ?></h4>
-                            <p style="margin: 0 0 0.5rem 0; color: #495057; font-size: 0.9rem;"><?php echo htmlspecialchars($alert['message']); ?></p>
-                            <small style="color: #6c757d;"><?php echo date('M j, Y g:i A', strtotime($alert['timestamp'])); ?></small>
-                        </div>
-                        <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
-                </div>
-                
-                <!-- Upcoming Reviews -->
-                <div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-top: 4px solid #E60012;">
-                    <h3 style="margin: 0 0 1.5rem 0; color: #495057; font-size: 1.3rem; font-weight: 600;">📅 Upcoming Reviews</h3>
-                    <div style="max-height: 400px; overflow-y: auto;">
-                        <?php if (empty($upcoming_reviews)): ?>
-                        <div style="text-align: center; padding: 2rem; color: #6c757d;">
-                            <p>No upcoming reviews scheduled</p>
-                        </div>
-                        <?php else: ?>
-                        <?php foreach ($upcoming_reviews as $review): ?>
-                        <div style="margin-bottom: 1rem; padding: 1rem; border-left: 4px solid #17a2b8; background: #f0f9ff; border-radius: 6px;">
-                            <h4 style="margin: 0 0 0.5rem 0; color: #17a2b8; font-size: 1rem;"><?php echo htmlspecialchars($review['risk_name']); ?></h4>
-                            <p style="margin: 0 0 0.5rem 0; color: #495057; font-size: 0.9rem;">Department: <?php echo htmlspecialchars($review['department']); ?></p>
-                            <p style="margin: 0 0 0.5rem 0; color: #495057; font-size: 0.9rem;">Review Type: <?php echo htmlspecialchars($review['review_type']); ?></p>
-                            <small style="color: #6c757d;">Due: <?php echo date('M j, Y', strtotime($review['review_date'])); ?></small>
-                        </div>
-                        <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
         <!-- Calendar Tab -->
         <div id="calendar" class="tab-content <?php echo $activeTab === 'calendar' ? 'active' : ''; ?>">
             <div class="report-header print-only">
@@ -3100,7 +3123,7 @@ function getBeautifulStatus($status) {
                 <div id="calendar-container"></div>
             </div>
             
-            <!-- Active Reminders Section - REDESIGNED -->
+            <!-- Active Reminders Section - REDESIGNED WITH RED COLOR -->
             <div class="active-reminders-container no-print">
                 <div class="active-reminders-header">
                     <h3 class="active-reminders-title">⏰ Active Reminders</h3>
@@ -3229,7 +3252,7 @@ function getBeautifulStatus($status) {
             <!-- Departmental Rankings Table -->
             <div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-top: 4px solid #E60012; margin-bottom: 2rem;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-                    <h3 style="margin: 0; color: #495057; font-size: 1.3rem; font-weight: 600;"> Departmental Rankings</h3>
+                    <h3 style="margin: 0; color: #495057; font-size: 1.3rem; font-weight: 600;">🏢 Departmental Rankings</h3>
                     <div style="display: flex; gap: 1rem;" class="no-print">
                         <select id="rankSortBy" onchange="sortDepartmentRankings()" class="filter-input" style="width: 180px;">
                             <option value="total_risks">Total Risks</option>
@@ -3450,8 +3473,13 @@ function getBeautifulStatus($status) {
             <?php endif; ?>
         });
         
-        // Tab navigation
-        function showTab(tabName) {
+        // Tab navigation - FIXED
+        function showTab(tabName, event) {
+            // Prevent default link behavior
+            if (event) {
+                event.preventDefault();
+            }
+            
             // Hide all tab contents
             const tabContents = document.querySelectorAll('.tab-content');
             tabContents.forEach(content => {
@@ -3471,7 +3499,10 @@ function getBeautifulStatus($status) {
             }
             
             // Add active class to the clicked nav item
-            event.target.classList.add('active');
+            if (event) {
+                const clickedLink = event.currentTarget;
+                clickedLink.classList.add('active');
+            }
             
             // Initialize calendar if calendar tab is selected and not already initialized
             if (tabName === 'calendar' && !calendarInitialized) {
@@ -3485,7 +3516,7 @@ function getBeautifulStatus($status) {
             }
         }
         
-        // Initialize Analytics Charts
+        // Initialize Analytics Charts with Professional Styling
         function initializeAnalyticsCharts() {
             // Risk Category Distribution Chart
             const categoryCanvas = document.getElementById('categoryDistributionChart');
@@ -3511,7 +3542,8 @@ function getBeautifulStatus($status) {
                             data: data,
                             backgroundColor: backgroundColors.slice(0, labels.length),
                             borderColor: '#fff',
-                            borderWidth: 2
+                            borderWidth: 2,
+                            hoverOffset: 10
                         }]
                     },
                     options: {
@@ -3524,11 +3556,21 @@ function getBeautifulStatus($status) {
                                     boxWidth: 15,
                                     padding: 15,
                                     font: {
-                                        size: 12
-                                    }
+                                        size: 12,
+                                        weight: 'bold'
+                                    },
+                                    color: '#495057'
                                 }
                             },
                             tooltip: {
+                                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                                titleColor: '#fff',
+                                bodyColor: '#fff',
+                                borderColor: '#E60012',
+                                borderWidth: 1,
+                                cornerRadius: 6,
+                                padding: 12,
+                                displayColors: true,
                                 callbacks: {
                                     label: function(context) {
                                         const label = context.label || '';
@@ -3538,13 +3580,31 @@ function getBeautifulStatus($status) {
                                         return `${label}: ${value} (${percentage}%)`;
                                     }
                                 }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Risk Category Distribution',
+                                font: {
+                                    size: 16,
+                                    weight: 'bold'
+                                },
+                                color: '#495057',
+                                padding: {
+                                    top: 10,
+                                    bottom: 20
+                                }
                             }
+                        },
+                        cutout: '60%',
+                        animation: {
+                            animateRotate: true,
+                            animateScale: true
                         }
                     }
                 });
             }
             
-            // Risk Trends Chart - Enhanced
+            // Risk Trends Chart - Enhanced with Professional Styling
             const trendsCanvas = document.getElementById('riskTrendsChart');
             if (trendsCanvas) {
                 const ctx = trendsCanvas.getContext('2d');
@@ -3586,6 +3646,18 @@ function getBeautifulStatus($status) {
                 
                 // Update statistics
                 updateTrendsStatistics(criticalTrend, highTrend, mediumTrend, lowTrend, notAssessedTrend);
+                
+                // Calculate max value for scale adjustment
+                const maxValue = Math.max(
+                    ...criticalTrend, 
+                    ...highTrend, 
+                    ...mediumTrend, 
+                    ...lowTrend, 
+                    ...notAssessedTrend
+                );
+                
+                // Add padding for large values
+                const scalePadding = maxValue > 50 ? Math.ceil(maxValue * 0.1) : 5;
                 
                 trendsChart = new Chart(ctx, {
                     type: 'line',
@@ -3674,6 +3746,7 @@ function getBeautifulStatus($status) {
                         scales: {
                             y: {
                                 beginAtZero: true,
+                                max: maxValue + scalePadding, // Adjust scale for large values
                                 title: {
                                     display: true,
                                     text: 'Number of Risks',
@@ -3684,7 +3757,15 @@ function getBeautifulStatus($status) {
                                     }
                                 },
                                 grid: {
-                                    color: 'rgba(0, 0, 0, 0.05)'
+                                    color: 'rgba(0, 0, 0, 0.05)',
+                                    drawBorder: false
+                                },
+                                ticks: {
+                                    precision: 0,
+                                    font: {
+                                        weight: 'bold'
+                                    },
+                                    color: '#495057'
                                 }
                             },
                             x: {
@@ -3698,7 +3779,14 @@ function getBeautifulStatus($status) {
                                     }
                                 },
                                 grid: {
-                                    color: 'rgba(0, 0, 0, 0.05)'
+                                    color: 'rgba(0, 0, 0, 0.05)',
+                                    drawBorder: false
+                                },
+                                ticks: {
+                                    font: {
+                                        weight: 'bold'
+                                    },
+                                    color: '#495057'
                                 }
                             }
                         },
@@ -3724,6 +3812,19 @@ function getBeautifulStatus($status) {
                                         const value = context.raw || 0;
                                         return `${label}: ${value} risks`;
                                     }
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Risk Trends Over Time',
+                                font: {
+                                    size: 16,
+                                    weight: 'bold'
+                                },
+                                color: '#495057',
+                                padding: {
+                                    top: 10,
+                                    bottom: 20
                                 }
                             }
                         },
@@ -3868,7 +3969,6 @@ function getBeautifulStatus($status) {
                             ]
                         },
                         options: {
-                            indexAxis: 'y',
                             responsive: true,
                             maintainAspectRatio: false,
                             scales: {
@@ -4136,7 +4236,7 @@ function getBeautifulStatus($status) {
             initializeDeptCategoryBreakdownChart();
         }
         
-        // Initialize Calendar
+        // Initialize Calendar with Day Names
         function initializeCalendar() {
             const calendarEl = document.getElementById('calendar-container');
             calendar = new FullCalendar.Calendar(calendarEl, {
@@ -4146,6 +4246,8 @@ function getBeautifulStatus($status) {
                     center: 'title',
                     right: 'dayGridMonth,timeGridWeek,timeGridDay'
                 },
+                // Configure day headers to show full day names
+                dayHeaderFormat: { weekday: 'long' }, // This shows "Monday", "Tuesday", etc.
                 events: calendarEvents,
                 eventClick: function(info) {
                     // Show event details in a popup
@@ -4157,6 +4259,33 @@ function getBeautifulStatus($status) {
                     hour: '2-digit',
                     minute: '2-digit',
                     hour12: false
+                },
+                // Custom event rendering to show day names prominently
+                eventContent: function(arg) {
+                    const dayOfWeek = arg.event.extendedProps.day_of_week;
+                    return {
+                        html: `
+                            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 2px; color: #495057;">
+                                ${dayOfWeek}
+                            </div>
+                            <div style="font-weight: 600; color: #333;">
+                                ${arg.event.title}
+                            </div>
+                        `
+                    };
+                },
+                // Improve day cell rendering
+                dayCellContent: function(arg) {
+                    return {
+                        html: `
+                            <div style="text-align: center; padding: 4px;">
+                                <div style="font-weight: bold; color: #495057;">${arg.dayNumberText}</div>
+                                <div style="font-size: 0.75rem; color: #6c757d; text-transform: uppercase;">
+                                    ${arg.date.toLocaleDateString('en-US', { weekday: 'short' })}
+                                </div>
+                            </div>
+                        `
+                    };
                 }
             });
             calendar.render();
@@ -4226,7 +4355,7 @@ function getBeautifulStatus($status) {
                         </div>
                     </div>
                     <div class="deadline-date">
-                        Due: ${eventDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                        Due: ${eventDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                     </div>
                     <div class="deadline-progress">
                         <div class="deadline-progress-bar" style="width: ${progressPercentage}%"></div>
@@ -4297,7 +4426,7 @@ function getBeautifulStatus($status) {
             const props = event.extendedProps;
             const content = `
                 <h4>${event.title}</h4>
-                <p><strong>Date:</strong> ${event.start.toLocaleDateString()}</p>
+                <p><strong>Date:</strong> ${event.start.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
                 <p><strong>Type:</strong> ${props.type}</p>
                 <p><strong>Department:</strong> ${props.department}</p>
                 <p><strong>Risk Level:</strong> ${props.risk_level}</p>
@@ -4532,6 +4661,7 @@ function getBeautifulStatus($status) {
         }
         
         function clearAllFilters() {
+            // Clear all filter inputs
             document.getElementById('searchRiskId').value = '';
             document.getElementById('departmentFilter').value = 'all';
             document.getElementById('riskLevelFilter').value = 'all';
@@ -4539,10 +4669,17 @@ function getBeautifulStatus($status) {
             document.getElementById('dateFrom').value = '';
             document.getElementById('dateTo').value = '';
             
-            // Reset filteredData to the entire sourceData
+            // Reset source data based on current view state
+            if (showingAllRisks) {
+                sourceData = allRisksData;
+            } else {
+                sourceData = recentRisksData;
+            }
+            
+            // Reset filtered data to match source data
             filteredData = [...sourceData];
             
-            // Update the table
+            // Update the table with unfiltered data
             updateRisksTable(filteredData);
             
             // Update table title
@@ -4953,7 +5090,7 @@ function getBeautifulStatus($status) {
             trendsChart.update();
         }
         
-        // Updated viewFullRiskDetails function to use AJAX
+        // CORRECTED: View Full Risk Details Function
         function viewFullRiskDetails(riskId) {
             // Show the modal with a loading indicator
             const modal = document.getElementById('riskDetailsModal');
@@ -4978,16 +5115,34 @@ function getBeautifulStatus($status) {
                                 content.innerHTML = response.html;
                             } else {
                                 // Display error message
-                                content.innerHTML = `<div class="alert alert-danger">${response.message || 'Error loading risk details'}</div>`;
+                                content.innerHTML = `
+                                    <div class="alert alert-danger">
+                                        <h4>Error Loading Risk Details</h4>
+                                        <p>${response.message || 'An error occurred while loading risk details.'}</p>
+                                        <button onclick="viewFullRiskDetails(${riskId})" class="btn btn-primary mt-2">Retry</button>
+                                    </div>
+                                `;
                             }
                         } catch (e) {
                             // Handle JSON parsing error
-                            content.innerHTML = '<div class="alert alert-danger">Error parsing response from server</div>';
+                            content.innerHTML = `
+                                <div class="alert alert-danger">
+                                    <h4>Response Error</h4>
+                                    <p>Error parsing response from server. Please try again.</p>
+                                    <button onclick="viewFullRiskDetails(${riskId})" class="btn btn-primary mt-2">Retry</button>
+                                </div>
+                            `;
                             console.error('Error parsing response:', e);
                         }
                     } else {
                         // Handle HTTP error
-                        content.innerHTML = `<div class="alert alert-danger">Error ${xhr.status}: ${xhr.statusText}</div>`;
+                        content.innerHTML = `
+                            <div class="alert alert-danger">
+                                <h4>HTTP Error ${xhr.status}</h4>
+                                <p>${xhr.statusText || 'An error occurred while communicating with the server.'}</p>
+                                <button onclick="viewFullRiskDetails(${riskId})" class="btn btn-primary mt-2">Retry</button>
+                            </div>
+                        `;
                     }
                 }
             };
@@ -4998,6 +5153,18 @@ function getBeautifulStatus($status) {
             if (csrfToken) {
                 params += `&csrf_token=${encodeURIComponent(csrfToken.getAttribute('content'))}`;
             }
+            
+            // Add error handling for network issues
+            xhr.onerror = function() {
+                content.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h4>Network Error</h4>
+                        <p>Unable to connect to the server. Please check your network connection and try again.</p>
+                        <button onclick="viewFullRiskDetails(${riskId})" class="btn btn-primary mt-2">Retry</button>
+                    </div>
+                `;
+            };
+            
             xhr.send(params);
         }
         
